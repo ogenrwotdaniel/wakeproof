@@ -10,8 +10,10 @@ import android.content.Intent
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.CountDownTimer
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 
 class PomodoroService : Service() {
     
@@ -85,7 +87,7 @@ class PomodoroService : Service() {
         isPaused = true
         countDownTimer?.cancel()
         stopNatureSounds()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
     private fun stopTimer() {
@@ -94,7 +96,7 @@ class PomodoroService : Service() {
         stopNatureSounds()
         resetToWorkPeriod()
         broadcastUpdate()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
     
@@ -165,7 +167,11 @@ class PomodoroService : Service() {
     
     private fun startForegroundService() {
         val notification = createNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
     
     private fun createNotificationChannel() {
@@ -214,6 +220,7 @@ class PomodoroService : Service() {
 
     private fun broadcastUpdate() {
         val intent = Intent("POMODORO_TIMER_UPDATE").apply {
+            setPackage(packageName)
             putExtra("time_left", remainingTime)
             putExtra("isWorkPeriod", isWorkPeriod)
             putExtra("sessionCount", sessionCount)

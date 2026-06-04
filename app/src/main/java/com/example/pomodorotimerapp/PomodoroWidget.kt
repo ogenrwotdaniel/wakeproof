@@ -76,7 +76,7 @@ class PomodoroWidget : AppWidgetProvider() {
             } else {
                 context.resources.getColor(R.color.break_color, null)
             }
-            views.setInt(R.id.widget_time, "setBackgroundColor", backgroundColor)
+            views.setInt(R.id.widget_root, "setBackgroundColor", backgroundColor)
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }

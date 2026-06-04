@@ -85,16 +85,16 @@ class PomodoroService : Service() {
         isPaused = true
         countDownTimer?.cancel()
         stopNatureSounds()
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
-    
+
     private fun stopTimer() {
         isPaused = false
         countDownTimer?.cancel()
         stopNatureSounds()
         resetToWorkPeriod()
         broadcastUpdate()
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
     

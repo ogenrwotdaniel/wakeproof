@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Focussanity</string>
+    <string name="timer_notification_channel">Pomodoro Timer</string>
+    <string name="timer_notification_title">Pomodoro Timer</string>
+    <string name="timer_notification_work">Work session in progress</string>
+    <string name="timer_notification_break">Break time!</string>
+</resources>

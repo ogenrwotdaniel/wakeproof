@@ -1,0 +1,7 @@
+<resources>
+    <!-- Dark window background before Compose draws: this app is used at 5 AM,
+         a white launch frame is unacceptable. -->
+    <style name="Theme.WakeProof" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

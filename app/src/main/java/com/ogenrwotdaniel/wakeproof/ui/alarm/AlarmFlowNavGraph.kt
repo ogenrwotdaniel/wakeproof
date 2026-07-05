@@ -21,7 +21,8 @@ import com.ogenrwotdaniel.wakeproof.ui.verify.WaterVerifyScreen
 @Composable
 fun AlarmFlowNavGraph(
     viewModel: AlarmRingingViewModel,
-    onVerified: () -> Unit
+    onVerified: () -> Unit,
+    onEmergencyDismiss: () -> Unit
 ) {
     val navController = rememberNavController()
     val alarm by viewModel.alarm.collectAsStateWithLifecycle()
@@ -39,7 +40,10 @@ fun AlarmFlowNavGraph(
             )
         }
         composable<PushupVerifyRoute> {
-            PushupVerifyScreen(onVerified = onVerified)
+            PushupVerifyScreen(
+                onVerified = onVerified,
+                onEmergencyDismiss = onEmergencyDismiss
+            )
         }
         composable<WaterVerifyRoute> {
             WaterVerifyScreen(onVerified = onVerified)

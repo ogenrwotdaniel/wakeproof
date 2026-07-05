@@ -40,6 +40,11 @@ class AlarmRingingActivity : ComponentActivity() {
                             AlarmRingingService.stop(this)
                             finishAndRemoveTask()
                         }
+                    },
+                    // Skipped day: silence the alarm but do NOT mark the goal done.
+                    onEmergencyDismiss = {
+                        AlarmRingingService.stop(this)
+                        finishAndRemoveTask()
                     }
                 )
             }

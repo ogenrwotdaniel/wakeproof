@@ -25,6 +25,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -45,12 +46,24 @@ class AlarmRingingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var player: MediaPlayer? = null
     private var vibrator: Vibrator? = null
+    private var rampJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_SET_VOLUME) {
+            if (player == null) {
+                // Not ringing (e.g. control intent raced the stop): nothing to duck.
+                stopSelf()
+            } else {
+                rampJob?.cancel()
+                val volume = intent.getFloatExtra(EXTRA_VOLUME, 1f).coerceIn(0f, 1f)
+                player?.setVolume(volume, volume)
+            }
             return START_NOT_STICKY
         }
         val alarmId = intent?.getLongExtra(EXTRA_ALARM_ID, -1L) ?: -1L
@@ -109,7 +122,7 @@ class AlarmRingingService : Service() {
         mediaPlayer.setOnPreparedListener { prepared ->
             prepared.setVolume(RAMP_START_VOLUME, RAMP_START_VOLUME)
             prepared.start()
-            scope.launch { rampVolume(prepared) }
+            rampJob = scope.launch { rampVolume(prepared) }
         }
         mediaPlayer.prepareAsync()
     }
@@ -174,6 +187,8 @@ class AlarmRingingService : Service() {
 
     companion object {
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.STOP_RINGING"
+        private const val ACTION_SET_VOLUME = "com.ogenrwotdaniel.wakeproof.action.SET_VOLUME"
+        private const val EXTRA_VOLUME = "com.ogenrwotdaniel.wakeproof.extra.VOLUME"
         private const val CHANNEL_ID = "wakeproof_alarm"
         private const val NOTIFICATION_ID = 1
         private const val RAMP_START_VOLUME = 0.3f
@@ -189,6 +204,15 @@ class AlarmRingingService : Service() {
         fun stop(context: Context) {
             context.startService(
                 Intent(context, AlarmRingingService::class.java).setAction(ACTION_STOP)
+            )
+        }
+
+        /** Ducks/restores the ringtone (cancels the ramp) — used by the water wizard. */
+        fun setVolume(context: Context, volume: Float) {
+            context.startService(
+                Intent(context, AlarmRingingService::class.java)
+                    .setAction(ACTION_SET_VOLUME)
+                    .putExtra(EXTRA_VOLUME, volume)
             )
         }
     }

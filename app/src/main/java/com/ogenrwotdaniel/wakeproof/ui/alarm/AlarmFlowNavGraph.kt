@@ -46,7 +46,10 @@ fun AlarmFlowNavGraph(
             )
         }
         composable<WaterVerifyRoute> {
-            WaterVerifyScreen(onVerified = onVerified)
+            WaterVerifyScreen(
+                onVerified = onVerified,
+                onEmergencyDismiss = onEmergencyDismiss
+            )
         }
     }
 }

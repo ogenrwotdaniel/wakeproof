@@ -5,8 +5,6 @@ import androidx.room.Room
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionLogDao
 import com.ogenrwotdaniel.wakeproof.data.db.WakeProofDatabase
-import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
-import com.ogenrwotdaniel.wakeproof.verify.StubMotivationSource
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,9 +31,4 @@ object AppModule {
     @Provides
     fun provideCompletionLogDao(database: WakeProofDatabase): CompletionLogDao =
         database.completionLogDao()
-
-    // Replaced by the Kimi-backed implementation once the API phase lands.
-    @Provides
-    @Singleton
-    fun provideMotivationSource(): MotivationSource = StubMotivationSource()
 }

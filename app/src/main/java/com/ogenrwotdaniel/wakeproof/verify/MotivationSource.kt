@@ -2,14 +2,9 @@ package com.ogenrwotdaniel.wakeproof.verify
 
 /**
  * Supplies the short motivational line shown after a completed verification.
- * Stubbed until the Kimi API phase binds a real implementation; null means
- * "show nothing extra".
+ * Implemented by KimiRepository; null (no key, offline, error) means "show
+ * nothing extra" — motivation must never block a dismissal.
  */
 interface MotivationSource {
     suspend fun motivationalMessage(context: String): String?
-}
-
-/** No-op implementation used before/without a configured Kimi API key. */
-class StubMotivationSource : MotivationSource {
-    override suspend fun motivationalMessage(context: String): String? = null
 }

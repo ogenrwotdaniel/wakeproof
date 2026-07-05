@@ -4,24 +4,48 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
+import com.ogenrwotdaniel.wakeproof.data.StatsRepository
+import com.ogenrwotdaniel.wakeproof.data.StreakInfo
+import com.ogenrwotdaniel.wakeproof.data.DayStat
+import com.ogenrwotdaniel.wakeproof.data.TodayStatus
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** Home dashboard state: the alarm list plus developer test-fire actions. */
+/** Home dashboard state: alarms, today's goals, streak, 7-day history. */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: AlarmRepository,
-    private val scheduler: AlarmScheduler
+    private val scheduler: AlarmScheduler,
+    statsRepository: StatsRepository
 ) : ViewModel() {
 
     val alarms: StateFlow<List<Alarm>> = repository.observeAlarms()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val today: StateFlow<TodayStatus> = statsRepository.observeToday()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TodayStatus())
+
+    val week: StateFlow<List<DayStat>> = statsRepository.observeWeek()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val streak: StateFlow<StreakInfo> = statsRepository.observeStreak()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StreakInfo())
+
+    /** Next enabled pushup alarm as "HH:MM", or null when none. */
+    val nextPushupAlarm: StateFlow<String?> = repository.observeAlarms()
+        .map { list ->
+            list.filter { it.type == AlarmType.PUSHUP && it.enabled }
+                .minByOrNull { it.hour * 60 + it.minute }
+                ?.let { "%02d:%02d".format(it.hour, it.minute) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * Fires the first alarm of [type] in [TEST_FIRE_DELAY_SECONDS] seconds through

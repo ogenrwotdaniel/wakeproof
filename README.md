@@ -1,99 +1,76 @@
-# Pomodoro Timer App
+# WakeProof
 
-A complete Android application implementing the Pomodoro Technique with nature sounds and home screen widget support.
+An Android alarm app that makes you **prove you're awake** before the alarm stops.
+Dismissing an alarm requires camera-verified pushups or drinking a glass of water —
+no more half-asleep snoozing.
+
+Built for Samsung Galaxy S25 Edge, Android 15+.
 
 ## Features
 
-### ✅ 1. Pomodoro Technique Implementation
-- **Work Sessions**: 25-minute focused work periods
-- **Short Breaks**: 5-minute breaks after each work session
-- **Long Breaks**: 15-minute breaks after completing 4 work sessions
-- **Session Tracking**: Displays current session progress (1/4, 2/4, etc.)
-- **Auto-progression**: Automatically transitions between work and break periods
+### ⏰ Reliable alarm engine
+- `AlarmManager.setAlarmClock()` for exact, Doze-proof firing
+- Full-screen intent notification that takes over the lock screen
+- Foreground service (media playback) keeps the ringtone alive
+- Survives reboots, time/timezone changes, and app updates (Direct Boot–aware
+  alarm mirror + rescheduling receivers)
+- Built-in reliability check that flags Samsung battery-optimization traps
 
-### ✅ 2. Nature Sounds During Activity
-- **Work Period Audio**: Plays soothing nature sounds during work sessions
-- **Sound Toggle**: Users can enable/disable nature sounds via in-app switch
-- **Silent Breaks**: No audio during break periods (as requested)
-- **Looping Audio**: Continuous nature sound playback during work sessions
-- **Volume Control**: Optimized volume levels for focus
+### 💪 Pushup verification
+- Front camera (CameraX) + ML Kit Pose Detection, fully on-device — no network
+- Elbow-angle state machine counts real reps; configurable rep goal
 
-### ✅ 3. Silent During Break Time
-- **Break Silence**: Audio automatically stops during all break periods
-- **Smart Audio Management**: Distinguishes between work and break periods
-- **Notification Only**: Only visual notifications during breaks
+### 💧 Water verification
+- Take two photos: a full glass, then an empty one
+- Photos are judged by the Kimi (Moonshot) vision model, which returns a JSON verdict
+- Honor-mode fallback when no API key or network is available (marked with an
+  asterisk in your stats)
 
-### ✅ 4. Home Screen Widget
-- **Live Countdown**: Real-time display of remaining time
-- **Session Indicator**: Shows current session type (Work/Break)
-- **Session Progress**: Displays session count (1/4, 2/4, etc.)
-- **Visual Feedback**: Different colors for work vs break periods
-- **Auto-update**: Refreshes every second during active timer
+### 🚨 Emergency dismiss
+Every alarm screen has an escape hatch: press and hold for 60 seconds. It only
+unlocks after 3 failed verifications or when the camera/network is unavailable,
+so it can't be used to cheat.
 
-## Technical Implementation
+### 🍅 Pomodoro study mode
+- Work/break timer running in a foreground service
+- Optional AI study chat (Kimi) during breaks
 
-### Architecture
-- **Service-based Timer**: Uses Android foreground service for reliable timing
-- **Broadcast Communication**: Real-time updates between service and UI
-- **Widget Integration**: Home screen widget receives live timer updates
-- **MediaPlayer Integration**: Handles nature sound playback
+### 📊 Dashboard & stats
+- Wake-up streak with a 7-day history chart
+- A day counts only when pushups are verified and all waters are logged;
+  skipping breaks the streak
 
-### Key Components
-1. **MainActivity**: Main user interface with controls
-2. **PomodoroService**: Background service managing timer logic
-3. **PomodoroWidget**: Home screen widget implementation
-4. **PomodoroUpdateReceiver**: Handles widget updates
+## Tech stack
 
-### Audio Features
-- **MediaPlayer**: Manages nature sound playback
-- **Sound State Management**: Tracks audio enable/disable state
-- **Work Period Detection**: Only plays audio during work sessions
-- **Resource Management**: Proper cleanup to prevent memory leaks
-
-## Usage
-
-1. **Start Timer**: Tap "Start Timer" to begin a 25-minute work session
-2. **Toggle Sounds**: Use the switch to enable/disable nature sounds
-3. **Control Timer**: Pause or stop the timer as needed
-4. **Add Widget**: Long-press home screen → Widgets → Pomodoro Timer
-5. **Monitor Progress**: Widget shows countdown and session progress
-
-## Installation
-
-1. Build the project in Android Studio
-2. Install on device (API 24+)
-3. Add widget to home screen for quick access
-4. For nature sounds, add audio files to `res/raw/` directory
-
-## Customization
-
-### Adding Nature Sounds
-1. Place MP3/OGG files in `app/src/main/res/raw/`
-2. Update `PomodoroService.initializeMediaPlayer()` method
-3. Uncomment MediaPlayer initialization code
-4. See `NATURE_SOUNDS_GUIDE.md` for detailed instructions
-
-### Timing Adjustments
-Modify timing constants in `PomodoroService`:
-- `WORK_DURATION`: Work session length
-- `SHORT_BREAK_DURATION`: Short break length  
-- `LONG_BREAK_DURATION`: Long break length
+- Kotlin, Jetpack Compose, Material 3, single-activity Compose Navigation
+- MVVM + Repository pattern, Hilt DI, Room, DataStore
+- CameraX + ML Kit Pose Detection (on-device)
+- Retrofit/OkHttp client for the Kimi API (OpenAI-compatible,
+  `https://api.moonshot.ai/v1`, model `kimi-k2.5`)
+- API key entered in Settings, stored in `EncryptedSharedPreferences`
+- Coroutines + Flow throughout; no RxJava, no XML layouts
 
 ## Requirements
 
-- **Android API 24+** (Android 7.0)
-- **Permissions**: Foreground service, wake lock, notifications
-- **Storage**: ~5MB (plus audio files if added)
+- Android 15+ (minSdk 35, targetSdk 35), compileSdk 37
+- Gradle 9.4.1 wrapper, AGP 9.2.1 with built-in Kotlin
+  (do **not** apply `org.jetbrains.kotlin.android`)
+- A Moonshot (Kimi) API key for water verification and study chat — optional;
+  the app falls back to honor mode without one
 
-## Features Summary
+## Building
 
-✅ **Pomodoro Technique**: Complete implementation with 4 work sessions and breaks  
-✅ **Nature Sounds**: Audio during work periods only  
-✅ **Silent Breaks**: No audio during break time  
-✅ **Home Widget**: Live countdown display with session progress  
-✅ **Background Service**: Reliable timing even when app is closed  
-✅ **Notification System**: Persistent notification during active timer  
-✅ **Session Tracking**: Visual progress indicator (1/4, 2/4, etc.)  
-✅ **Auto-progression**: Seamless transition between work and break periods  
+```bash
+./gradlew assembleDebug        # build
+./gradlew testDebugUnitTest    # unit tests (pushup counter, Kimi client)
+./gradlew lintDebug            # lint
+```
 
-The app successfully implements all requested features with a clean, intuitive interface and robust background functionality.
+## Setup on device
+
+1. Install the debug APK and walk through onboarding (notification permission,
+   full-screen intent, battery optimization exemption).
+2. Optionally add your Kimi API key in **Settings → API key** to enable water
+   verification and study chat.
+3. Run the reliability check from onboarding to confirm alarms can fire on
+   your device.

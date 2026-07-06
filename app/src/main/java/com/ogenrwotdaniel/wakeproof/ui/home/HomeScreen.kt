@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.data.DayStat
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import java.time.DayOfWeek
@@ -109,31 +110,33 @@ fun HomeScreen(
                 Text("Onboarding")
             }
 
-            Text(
-                text = "Developer testing",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedButton(
-                onClick = {
-                    viewModel.testFire(AlarmType.PUSHUP)
-                    testArmed = true
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Test-fire pushup alarm (10 s)") }
-            OutlinedButton(
-                onClick = {
-                    viewModel.testFire(AlarmType.WATER)
-                    testArmed = true
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Test-fire water alarm (10 s)") }
-            if (testArmed) {
+            if (BuildConfig.DEBUG) {
                 Text(
-                    text = "Armed — lock your phone now to test the lock-screen wake.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.tertiary
+                    text = "Developer testing",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                OutlinedButton(
+                    onClick = {
+                        viewModel.testFire(AlarmType.PUSHUP)
+                        testArmed = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Test-fire pushup alarm (10 s)") }
+                OutlinedButton(
+                    onClick = {
+                        viewModel.testFire(AlarmType.WATER)
+                        testArmed = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Test-fire water alarm (10 s)") }
+                if (testArmed) {
+                    Text(
+                        text = "Armed — lock your phone now to test the lock-screen wake.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
             }
         }
     }

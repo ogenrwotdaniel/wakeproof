@@ -3,6 +3,8 @@ package com.ogenrwotdaniel.wakeproof.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
+import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityChecker
+import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiResult
@@ -29,7 +31,8 @@ class SettingsViewModel @Inject constructor(
     private val kimiRepository: KimiRepository,
     private val alarmRepository: AlarmRepository,
     private val alarmScheduler: AlarmScheduler,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val reliabilityChecker: ReliabilityChecker
 ) : ViewModel() {
 
     data class KeyUiState(
@@ -46,6 +49,13 @@ class SettingsViewModel @Inject constructor(
 
     private val _keyState = MutableStateFlow(KeyUiState(hasKey = keyStore.hasKey()))
     val keyState: StateFlow<KeyUiState> = _keyState
+
+    private val _reliability = MutableStateFlow(reliabilityChecker.check())
+    val reliability: StateFlow<ReliabilityStatus> = _reliability
+
+    fun refreshReliability() {
+        _reliability.value = reliabilityChecker.check()
+    }
 
     /** Changing a time reschedules the alarm immediately. */
     fun setAlarmTime(alarm: Alarm, hour: Int, minute: Int) {

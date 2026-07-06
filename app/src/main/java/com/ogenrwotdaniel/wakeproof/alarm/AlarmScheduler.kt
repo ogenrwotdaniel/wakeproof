@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.alarm
 
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
@@ -16,7 +17,11 @@ import javax.inject.Singleton
  * Schedules alarms with [AlarmManager.setAlarmClock], the API reserved for
  * user-visible alarm clocks: exempt from Doze, shows the alarm icon in the
  * status bar, and needs no runtime grant thanks to USE_EXACT_ALARM.
+ *
+ * Lint's MissingPermission check only credits SCHEDULE_EXACT_ALARM; the
+ * declared USE_EXACT_ALARM covers setAlarmClock for genuine alarm apps.
  */
+@SuppressLint("MissingPermission")
 @Singleton
 class AlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context,

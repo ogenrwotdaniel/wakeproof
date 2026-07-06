@@ -29,7 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 
 /**
@@ -45,7 +47,13 @@ fun SettingsScreen(
     val alarms by viewModel.alarms.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val keyState by viewModel.keyState.collectAsStateWithLifecycle()
+    val reliability by viewModel.reliability.collectAsStateWithLifecycle()
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
+
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshReliability()
+        onPauseOrDispose { }
+    }
 
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -124,6 +132,13 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            ReliabilitySection(
+                status = reliability,
+                onRecheck = viewModel::refreshReliability
+            )
+
+            HorizontalDivider()
+
             Text(text = "About", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "WakeProof 0.1.0 — alarms you can only dismiss by proving it. " +
@@ -149,6 +164,40 @@ fun SettingsScreen(
             onDismiss = { editingAlarm = null }
         )
     }
+}
+
+@Composable
+private fun ReliabilitySection(
+    status: ReliabilityStatus,
+    onRecheck: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(text = "Reliability check", style = MaterialTheme.typography.titleMedium)
+        CheckRow("Notifications", status.notifications)
+        CheckRow("Camera", status.camera)
+        CheckRow("Full-screen alarms", status.fullScreenIntent)
+        CheckRow("Exact alarms", status.exactAlarm)
+        CheckRow("Battery unrestricted", status.batteryUnrestricted)
+        if (!status.allOk) {
+            Text(
+                text = "Something regressed — the 5 AM alarm may not fire. Re-grant the " +
+                    "items above (Onboarding on the home screen walks you through it).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+        TextButton(onClick = onRecheck) { Text("Re-check now") }
+    }
+}
+
+@Composable
+private fun CheckRow(label: String, ok: Boolean, modifier: Modifier = Modifier) {
+    Text(
+        text = (if (ok) "✅ " else "❌ ") + label,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = modifier
+    )
 }
 
 @Composable

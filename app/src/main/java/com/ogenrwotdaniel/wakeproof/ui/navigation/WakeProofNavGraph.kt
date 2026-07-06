@@ -15,8 +15,11 @@ import com.ogenrwotdaniel.wakeproof.ui.settings.SettingsScreen
  * verification) lives in AlarmRingingActivity's own graph, not here.
  */
 @Composable
-fun WakeProofNavGraph(navController: NavHostController = rememberNavController()) {
-    NavHost(navController = navController, startDestination = HomeRoute) {
+fun WakeProofNavGraph(
+    startDestination: Any = HomeRoute,
+    navController: NavHostController = rememberNavController()
+) {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable<HomeRoute> {
             HomeScreen(
                 onOpenOnboarding = { navController.navigate(OnboardingRoute) },
@@ -25,7 +28,11 @@ fun WakeProofNavGraph(navController: NavHostController = rememberNavController()
             )
         }
         composable<OnboardingRoute> {
-            OnboardingScreen(onDone = { navController.popBackStack() })
+            OnboardingScreen(
+                onDone = {
+                    navController.navigate(HomeRoute) { popUpTo(0) { inclusive = true } }
+                }
+            )
         }
         composable<PomodoroRoute> {
             PomodoroScreen(onBack = { navController.popBackStack() })

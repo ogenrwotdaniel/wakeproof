@@ -1,7 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.verify
 
 import android.graphics.BitmapFactory
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -26,7 +25,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -227,31 +228,38 @@ private fun CameraDeniedHint(modifier: Modifier = Modifier) {
     }
 }
 
-/** Rear-camera preview with a capture button; emits JPEG bytes. */
+/** Camera preview (rear by default, flippable) with a capture button; emits JPEG bytes. */
 @Composable
 private fun PhotoCaptureView(onCaptured: (ByteArray) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val imageCapture = remember { ImageCapture.Builder().build() }
+    var useFrontCamera by remember { mutableStateOf(false) }
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
+
+    LaunchedEffect(previewView, useFrontCamera) {
+        val view = previewView ?: return@LaunchedEffect
+        val providerFuture = ProcessCameraProvider.getInstance(context)
+        providerFuture.addListener({
+            val provider = providerFuture.get()
+            val preview = Preview.Builder().build().also {
+                it.surfaceProvider = view.surfaceProvider
+            }
+            provider.unbindAll()
+            provider.bindCamera(lifecycleOwner, useFrontCamera, preview, imageCapture)
+        }, ContextCompat.getMainExecutor(context))
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val providerFuture = ProcessCameraProvider.getInstance(ctx)
-                providerFuture.addListener({
-                    val provider = providerFuture.get()
-                    val preview = Preview.Builder().build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
-                    provider.unbindAll()
-                    provider.bindToLifecycle(
-                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture
-                    )
-                }, ContextCompat.getMainExecutor(ctx))
-                previewView
-            }
+            factory = { ctx -> PreviewView(ctx).also { previewView = it } }
+        )
+        FlipCameraButton(
+            onFlip = { useFrontCamera = !useFrontCamera },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
         )
         Button(
             onClick = {

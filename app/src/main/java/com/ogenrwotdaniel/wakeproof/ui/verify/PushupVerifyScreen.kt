@@ -1,6 +1,5 @@
 package com.ogenrwotdaniel.wakeproof.ui.verify
 
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -23,7 +22,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -132,6 +133,8 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val analyzer = remember { PoseAnalyzer(viewModel::onPoseFrame) }
+    var useFrontCamera by remember { mutableStateOf(true) }
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -141,31 +144,30 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
         }
     }
 
+    LaunchedEffect(previewView, useFrontCamera) {
+        val view = previewView ?: return@LaunchedEffect
+        val providerFuture = ProcessCameraProvider.getInstance(context)
+        providerFuture.addListener({
+            val provider = providerFuture.get()
+            val preview = Preview.Builder().build().also {
+                it.surfaceProvider = view.surfaceProvider
+            }
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also { it.setAnalyzer(analysisExecutor, analyzer) }
+            provider.unbindAll()
+            provider.bindCamera(lifecycleOwner, useFrontCamera, preview, analysis)
+        }, ContextCompat.getMainExecutor(context))
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val providerFuture = ProcessCameraProvider.getInstance(ctx)
-                providerFuture.addListener({
-                    val provider = providerFuture.get()
-                    val preview = Preview.Builder().build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
-                    val analysis = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-                        .also { it.setAnalyzer(analysisExecutor, analyzer) }
-                    provider.unbindAll()
-                    provider.bindToLifecycle(
-                        lifecycleOwner, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis
-                    )
-                }, ContextCompat.getMainExecutor(ctx))
-                previewView
-            }
+            factory = { ctx -> PreviewView(ctx).also { previewView = it } }
         )
         // Skeleton overlay: map image coords to a FILL_CENTER preview, mirrored
-        // horizontally to match the front camera.
+        // horizontally only for the front camera's selfie view.
         Canvas(modifier = Modifier.fillMaxSize()) {
             if (state.skeleton.isEmpty()) return@Canvas
             val scale = maxOf(
@@ -174,11 +176,18 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
             val dx = (size.width - state.imageWidth * scale) / 2f
             val dy = (size.height - state.imageHeight * scale) / 2f
             state.skeleton.forEach { p ->
-                val x = size.width - (p.x * scale + dx)
+                val mapped = p.x * scale + dx
+                val x = if (useFrontCamera) size.width - mapped else mapped
                 val y = p.y * scale + dy
                 drawCircle(Color(0xFF4FD1C5), radius = 8f, center = Offset(x, y))
             }
         }
+        FlipCameraButton(
+            onFlip = { useFrontCamera = !useFrontCamera },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+        )
     }
 }
 

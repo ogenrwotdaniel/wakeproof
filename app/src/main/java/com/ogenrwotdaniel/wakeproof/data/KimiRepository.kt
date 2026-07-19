@@ -94,7 +94,7 @@ class KimiRepository @Inject constructor(
         val request = KimiChatRequest(
             model = keyStore.getProvider().model,
             temperature = 0.7,
-            maxTokens = 100,
+            maxTokens = 2048,
             messages = listOf(
                 KimiMessage(
                     "system",
@@ -117,7 +117,7 @@ class KimiRepository @Inject constructor(
         val request = KimiChatRequest(
             model = keyStore.getProvider().model,
             temperature = 0.6,
-            maxTokens = 400,
+            maxTokens = 4096,
             messages = listOf(
                 KimiMessage(
                     "system",
@@ -153,7 +153,7 @@ class KimiRepository @Inject constructor(
         val request = KimiChatRequest(
             model = keyStore.getProvider().model,
             temperature = 0.4,
-            maxTokens = 3000,
+            maxTokens = 8192,
             messages = listOf(
                 KimiMessage("system", textContent(FLASHCARD_SYSTEM_PROMPT)),
                 KimiMessage("user", userContent)
@@ -171,7 +171,7 @@ class KimiRepository @Inject constructor(
         val request = KimiChatRequest(
             model = keyStore.getProvider().model,
             temperature = 0.7,
-            maxTokens = 500,
+            maxTokens = 2048,
             messages = listOf(
                 KimiMessage(
                     "system",
@@ -189,14 +189,18 @@ class KimiRepository @Inject constructor(
         return call(request) { it.trim() }
     }
 
-    /** Cheapest possible round trip to validate the stored key. */
+    /**
+     * Cheapest possible round trip to validate the stored key. Thinking models
+     * (Gemini 3.x, Kimi K2.x) spend the whole 1-token budget on reasoning and
+     * return no content — an HTTP 200 alone proves the key and model are valid.
+     */
     suspend fun testConnection(): KimiResult<Unit> {
         val request = KimiChatRequest(
             model = keyStore.getProvider().model,
             maxTokens = 1,
             messages = listOf(KimiMessage("user", textContent("ping")))
         )
-        return when (val result = call(request) { }) {
+        return when (val result = call(request, allowEmpty = true) { }) {
             is KimiResult.Success -> KimiResult.Success(Unit)
             is KimiResult.ApiError -> result
             KimiResult.NetworkError -> KimiResult.NetworkError
@@ -204,7 +208,11 @@ class KimiRepository @Inject constructor(
         }
     }
 
-    private suspend fun <T> call(request: KimiChatRequest, transform: (String) -> T): KimiResult<T> {
+    private suspend fun <T> call(
+        request: KimiChatRequest,
+        allowEmpty: Boolean = false,
+        transform: (String) -> T
+    ): KimiResult<T> {
         if (!keyStore.hasKey()) return KimiResult.NoKey
         var lastFailure: KimiResult<Nothing> = KimiResult.NetworkError
         repeat(MAX_ATTEMPTS) { attempt ->
@@ -212,7 +220,7 @@ class KimiRepository @Inject constructor(
                 val response = api.chatCompletions(request)
                 if (response.isSuccessful) {
                     val content = response.body()?.choices?.firstOrNull()?.message?.content
-                        ?: return KimiResult.ApiError(null, "Empty response from model")
+                        ?: if (allowEmpty) "" else return KimiResult.ApiError(null, "Empty response from model")
                     return try {
                         KimiResult.Success(transform(content))
                     } catch (e: Exception) {

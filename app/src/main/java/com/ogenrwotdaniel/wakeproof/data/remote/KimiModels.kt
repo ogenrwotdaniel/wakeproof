@@ -27,7 +27,7 @@ enum class AiProvider(
         id = "gemini",
         label = "Gemini (free)",
         baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/",
-        model = "gemini-2.5-flash",
+        model = "gemini-3.5-flash",
         keyHint = "AIza…",
         keySource = "aistudio.google.com/apikey (free, no card needed)"
     ),

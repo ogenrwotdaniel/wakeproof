@@ -68,7 +68,7 @@ water verification falls back to an on-device honor mode.
 | Camera | Counting pushups (on-device) and photographing your water container |
 | Notifications, exact alarms, full-screen alarms | Making the alarm ring reliably, including on the lock screen |
 | Usage access (special) | Showing you your own screen-time stats and enforcing your app limits |
-| Display over other apps (special) | The floating Pomodoro timer bubble |
+| Display over other apps (special) | The floating Pomodoro timer bubble and opening the alarm screen while you use other apps |
 | Calendar (read) | Showing your agenda so you can tick events off |
 | Internet | Only for the optional AI features above |
 

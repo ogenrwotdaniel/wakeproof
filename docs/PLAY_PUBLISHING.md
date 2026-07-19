@@ -43,15 +43,11 @@ slower to obtain, not worth it here.)
 
 ## Step 2 — Host the privacy policy (Day 1)
 
-Play **requires** a privacy policy URL for this app (camera, calendar, usage
-data). Do ONE of:
-
-- **GitHub Pages (recommended, free):** push this repo (or just the policy) to
-  GitHub, enable Pages, and use
-  `https://<your-username>.github.io/<repo>/PRIVACY_POLICY` — or convert
-  `docs/PRIVACY_POLICY.md` to HTML and serve that.
-- **Google Sites (no repo needed):** sites.google.com → new site → paste the
-  policy text → publish → use that URL.
+**DONE (2026-07-20):** the policy is live at
+**https://ogenrwotdaniel.github.io/wakeproof/privacy/** (HTML version of
+`docs/PRIVACY_POLICY.md`, served from the `ogenrwotdaniel.github.io` repo,
+`wakeproof/privacy/index.html`). Use this URL everywhere Play asks for a
+privacy policy. Keep the two copies in sync when the policy changes.
 
 Keep the URL stable forever; it goes into the Play listing and the app can't
 ship without it.

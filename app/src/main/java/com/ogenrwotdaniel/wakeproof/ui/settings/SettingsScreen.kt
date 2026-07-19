@@ -121,6 +121,23 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text(text = "Focus sessions", style = MaterialTheme.typography.titleMedium)
+            SwitchSetting(
+                label = "Study music",
+                description = "Ambient music plays automatically during focus phases.",
+                checked = settings.focusMusicEnabled,
+                onCheckedChange = viewModel::setFocusMusicEnabled
+            )
+            SwitchSetting(
+                label = "Lock phone during focus",
+                description = "Pins the phone to WakeProof while a focus timer runs; " +
+                    "unlocks on breaks.",
+                checked = settings.focusLockPhone,
+                onCheckedChange = viewModel::setFocusLockPhone
+            )
+
+            HorizontalDivider()
+
             ApiKeySection(
                 hasKey = keyState.hasKey,
                 testing = keyState.testing,
@@ -198,6 +215,31 @@ private fun CheckRow(label: String, ok: Boolean, modifier: Modifier = Modifier) 
         style = MaterialTheme.typography.bodyMedium,
         modifier = modifier
     )
+}
+
+@Composable
+private fun SwitchSetting(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(text = label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
 }
 
 @Composable

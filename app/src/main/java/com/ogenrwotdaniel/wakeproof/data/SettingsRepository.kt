@@ -23,6 +23,8 @@ data class WakeProofSettings(
     val focusMinutes: Int = 25,
     val shortBreakMinutes: Int = 5,
     val longBreakMinutes: Int = 15,
+    val focusMusicEnabled: Boolean = true,
+    val focusLockPhone: Boolean = true,
     val onboardingComplete: Boolean = false
 )
 
@@ -40,6 +42,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             focusMinutes = prefs[FOCUS_MINUTES] ?: 25,
             shortBreakMinutes = prefs[SHORT_BREAK_MINUTES] ?: 5,
             longBreakMinutes = prefs[LONG_BREAK_MINUTES] ?: 15,
+            focusMusicEnabled = prefs[FOCUS_MUSIC_ENABLED] ?: true,
+            focusLockPhone = prefs[FOCUS_LOCK_PHONE] ?: true,
             onboardingComplete = prefs[ONBOARDING_COMPLETE] ?: false
         )
     }
@@ -50,6 +54,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun setFocusMinutes(value: Int) = dataStore.edit { it[FOCUS_MINUTES] = value }
     suspend fun setShortBreakMinutes(value: Int) = dataStore.edit { it[SHORT_BREAK_MINUTES] = value }
     suspend fun setLongBreakMinutes(value: Int) = dataStore.edit { it[LONG_BREAK_MINUTES] = value }
+    suspend fun setFocusMusicEnabled(value: Boolean) = dataStore.edit { it[FOCUS_MUSIC_ENABLED] = value }
+    suspend fun setFocusLockPhone(value: Boolean) = dataStore.edit { it[FOCUS_LOCK_PHONE] = value }
     suspend fun setOnboardingComplete(value: Boolean) = dataStore.edit { it[ONBOARDING_COMPLETE] = value }
 
     private companion object {
@@ -59,6 +65,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val FOCUS_MINUTES = intPreferencesKey("focus_minutes")
         val SHORT_BREAK_MINUTES = intPreferencesKey("short_break_minutes")
         val LONG_BREAK_MINUTES = intPreferencesKey("long_break_minutes")
+        val FOCUS_MUSIC_ENABLED = booleanPreferencesKey("focus_music_enabled")
+        val FOCUS_LOCK_PHONE = booleanPreferencesKey("focus_lock_phone")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
     }
 }

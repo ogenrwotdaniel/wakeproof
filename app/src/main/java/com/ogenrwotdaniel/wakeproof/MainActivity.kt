@@ -1,12 +1,17 @@
 package com.ogenrwotdaniel.wakeproof
 
+import android.app.ActivityManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import com.ogenrwotdaniel.wakeproof.ui.MainViewModel
 import com.ogenrwotdaniel.wakeproof.ui.navigation.HomeRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.OnboardingRoute
@@ -27,6 +32,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // "Can't use the phone during focus": pin the app (lock task / screen
+        // pinning) while a focus countdown runs, release it on break/pause/stop.
+        // Only while RESUMED — startLockTask() is a no-op for background tasks.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                viewModel.focusLockActive.collect { lock ->
+                    val pinned = getSystemService(ActivityManager::class.java)
+                        .lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+                    runCatching {
+                        if (lock && !pinned) startLockTask()
+                        else if (!lock && pinned) stopLockTask()
+                    }
+                }
+            }
+        }
         setContent {
             WakeProofTheme {
                 val onboardingComplete by viewModel.onboardingComplete.collectAsStateWithLifecycle()

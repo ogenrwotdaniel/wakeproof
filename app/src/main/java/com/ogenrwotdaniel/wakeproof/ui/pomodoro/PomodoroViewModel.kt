@@ -4,13 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.KimiRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiResult
+import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
+import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -21,11 +25,19 @@ data class ChatMessage(val role: String, val text: String)
 @HiltViewModel
 class PomodoroViewModel @Inject constructor(
     private val kimiRepository: KimiRepository,
+    private val settingsRepository: SettingsRepository,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
     val timer: StateFlow<PomodoroState> = PomodoroTimerService.state
     val hasKimiKey: Boolean = keyStore.hasKey()
+
+    val settings: StateFlow<WakeProofSettings> = settingsRepository.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WakeProofSettings())
+
+    fun setMusicEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setFocusMusicEnabled(enabled) }
+    }
 
     data class ChatState(
         val messages: List<ChatMessage> = emptyList(),

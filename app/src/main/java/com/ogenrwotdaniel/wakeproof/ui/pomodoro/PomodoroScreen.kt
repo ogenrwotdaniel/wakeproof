@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,6 +51,7 @@ fun PomodoroScreen(
 ) {
     val timer by viewModel.timer.collectAsStateWithLifecycle()
     val chat by viewModel.chat.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val chatAllowed = viewModel.hasKimiKey && (!timer.active || !timer.running ||
@@ -131,6 +133,33 @@ fun PomodoroScreen(
                     onClick = { PomodoroTimerService.stop(context) },
                     enabled = timer.active
                 ) { Text("Stop") }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Study music",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Switch(
+                    checked = settings.focusMusicEnabled,
+                    onCheckedChange = viewModel::setMusicEnabled
+                )
+            }
+            if (settings.focusLockPhone) {
+                Text(
+                    text = if (timer.active && timer.running && timer.phase == PomodoroPhase.FOCUS) {
+                        "🔒 Phone is pinned to WakeProof until the break"
+                    } else {
+                        "🔒 Phone locks to WakeProof while focusing (Settings)"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(Modifier.height(16.dp))

@@ -86,6 +86,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setEmergencyHoldSeconds(value.coerceIn(30, 120)) }
     }
 
+    fun setFocusMusicEnabled(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setFocusMusicEnabled(value) }
+    }
+
+    fun setFocusLockPhone(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setFocusLockPhone(value) }
+    }
+
     fun saveKey(key: String) {
         if (key.isBlank()) return
         keyStore.setKey(key)

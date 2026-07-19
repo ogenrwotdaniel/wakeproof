@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.IBinder
 import android.os.VibrationAttributes
@@ -29,6 +31,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -66,6 +70,20 @@ class PomodoroTimerService : Service() {
     private var focusSeconds = 25 * 60
     private var shortBreakSeconds = 5 * 60
     private var longBreakSeconds = 15 * 60
+    private var musicPlayer: MediaPlayer? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        // Study music rides the focus phase: plays while a focus countdown is
+        // running (and the setting is on), pauses on breaks/pause/stop.
+        scope.launch {
+            combine(state, settingsRepository.settings) { s, cfg ->
+                cfg.focusMusicEnabled && s.active && s.running && s.phase == PomodoroPhase.FOCUS
+            }.distinctUntilChanged().collect { shouldPlay ->
+                if (shouldPlay) startMusic() else pauseMusic()
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -124,8 +142,31 @@ class PomodoroTimerService : Service() {
     override fun onDestroy() {
         tickerJob?.cancel()
         scope.cancel()
+        musicPlayer?.release()
+        musicPlayer = null
         _state.value = PomodoroState()
         super.onDestroy()
+    }
+
+    private fun startMusic() {
+        runCatching {
+            val player = musicPlayer ?: MediaPlayer.create(
+                this, R.raw.focus_ambient, // seamless ambient loop, generated asset
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build(),
+                0
+            )?.apply {
+                isLooping = true
+                setVolume(MUSIC_VOLUME, MUSIC_VOLUME)
+            }.also { musicPlayer = it }
+            if (player?.isPlaying == false) player.start()
+        }
+    }
+
+    private fun pauseMusic() {
+        runCatching { if (musicPlayer?.isPlaying == true) musicPlayer?.pause() }
     }
 
     private fun startTicker() {
@@ -258,6 +299,7 @@ class PomodoroTimerService : Service() {
         private const val CHANNEL_ID = "wakeproof_pomodoro"
         private const val NOTIFICATION_ID = 2
         private const val SESSIONS_PER_LONG_BREAK = 4
+        private const val MUSIC_VOLUME = 0.55f
 
         fun start(context: Context) = context.startForegroundService(intent(context, ACTION_START))
         fun pause(context: Context) = context.startService(intent(context, ACTION_PAUSE))

@@ -6,6 +6,9 @@ no more half-asleep snoozing.
 
 Built for Samsung Galaxy S25 Edge, Android 15+.
 
+**Project page:** https://ogenrwotdaniel.github.io/wakeproof/ ·
+**Privacy policy:** https://ogenrwotdaniel.github.io/wakeproof/privacy/
+
 ## Features
 
 ### ⏰ Reliable alarm engine

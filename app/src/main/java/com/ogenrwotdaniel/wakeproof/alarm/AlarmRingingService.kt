@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.alarm
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.UserManager
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -80,6 +82,7 @@ class AlarmRingingService : Service() {
         stopRinging()
         startRingtone()
         startVibration()
+        launchRingingScreenIfDeviceInUse(alarmId)
         scope.launch {
             // Room is unreadable before the first unlock; keep the generic text then.
             if (!getSystemService(UserManager::class.java).isUserUnlocked) return@launch
@@ -96,6 +99,27 @@ class AlarmRingingService : Service() {
         scope.cancel()
         stopRinging()
         super.onDestroy()
+    }
+
+    /**
+     * When the device is unlocked and in active use, the system downgrades the
+     * full-screen intent to a heads-up banner, so the alarm would only sound in
+     * the background. Launching directly is permitted here because the app holds
+     * SYSTEM_ALERT_WINDOW (granted for the floating Pomodoro bubble).
+     */
+    private fun launchRingingScreenIfDeviceInUse(alarmId: Long) {
+        val interactive = getSystemService(PowerManager::class.java).isInteractive
+        val locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        if (!interactive || locked) return // full-screen intent handles these itself
+        try {
+            startActivity(
+                Intent(this, AlarmRingingActivity::class.java)
+                    .putExtra(EXTRA_ALARM_ID, alarmId)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+            // Overlay permission revoked or launch blocked: heads-up notification remains.
+        }
     }
 
     private fun stopRinging() {

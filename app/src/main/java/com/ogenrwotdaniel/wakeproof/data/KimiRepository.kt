@@ -2,7 +2,6 @@ package com.ogenrwotdaniel.wakeproof.data
 
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.remote.ImageCompressor
-import com.ogenrwotdaniel.wakeproof.data.remote.KIMI_MODEL
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiChatRequest
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiMessage
@@ -25,6 +24,10 @@ sealed interface KimiResult<out T> {
     data object NetworkError : KimiResult<Nothing>
     data object NoKey : KimiResult<Nothing>
 }
+
+/** One AI-drafted flashcard, reviewed by the user before saving. */
+@Serializable
+data class FlashcardDraft(val front: String = "", val back: String = "")
 
 /** The strict-JSON verdict for the two-photo water check. */
 @Serializable
@@ -61,7 +64,7 @@ class KimiRepository @Inject constructor(
             encoder.encodeToString(imageCompressor.compressToJpeg(it, MAX_IMAGE_DIMENSION, JPEG_QUALITY))
         }
         val request = KimiChatRequest(
-            model = KIMI_MODEL,
+            model = keyStore.getProvider().model,
             temperature = 0.2,
             messages = listOf(
                 KimiMessage("system", textContent(WATER_SYSTEM_PROMPT)),
@@ -89,7 +92,7 @@ class KimiRepository @Inject constructor(
     /** 1–2 encouraging sentences; null on any failure (callers show nothing). */
     override suspend fun motivationalMessage(context: String): String? {
         val request = KimiChatRequest(
-            model = KIMI_MODEL,
+            model = keyStore.getProvider().model,
             temperature = 0.7,
             maxTokens = 100,
             messages = listOf(
@@ -112,7 +115,7 @@ class KimiRepository @Inject constructor(
     /** Multi-turn study chat for the Pomodoro assistant. Roles: "user"/"assistant". */
     suspend fun studyChat(history: List<Pair<String, String>>): KimiResult<String> {
         val request = KimiChatRequest(
-            model = KIMI_MODEL,
+            model = keyStore.getProvider().model,
             temperature = 0.6,
             maxTokens = 400,
             messages = listOf(
@@ -128,10 +131,68 @@ class KimiRepository @Inject constructor(
         return call(request) { it.trim() }
     }
 
+    /**
+     * Drafts flashcards from pasted [sourceText] and/or a [notesPhoto] of
+     * handwritten/printed notes. Returns 5–20 front/back pairs the UI lets the
+     * user prune before saving.
+     */
+    suspend fun generateFlashcards(
+        sourceText: String?,
+        notesPhoto: ByteArray?
+    ): KimiResult<List<FlashcardDraft>> {
+        val instruction = "Create study flashcards from these notes." +
+            (sourceText?.takeIf { it.isNotBlank() }?.let { "\n\nNOTES:\n$it" } ?: "")
+        val userContent = if (notesPhoto != null) {
+            val encoded = Base64.getEncoder().encodeToString(
+                imageCompressor.compressToJpeg(notesPhoto, MAX_IMAGE_DIMENSION, JPEG_QUALITY)
+            )
+            imagesWithTextContent(instruction, listOf(encoded))
+        } else {
+            textContent(instruction)
+        }
+        val request = KimiChatRequest(
+            model = keyStore.getProvider().model,
+            temperature = 0.4,
+            maxTokens = 3000,
+            messages = listOf(
+                KimiMessage("system", textContent(FLASHCARD_SYSTEM_PROMPT)),
+                KimiMessage("user", userContent)
+            )
+        )
+        return call(request) { content ->
+            json.decodeFromString<List<FlashcardDraft>>(stripMarkdownFences(content))
+                .filter { it.front.isNotBlank() && it.back.isNotBlank() }
+                .take(30)
+        }
+    }
+
+    /** A short coaching write-up of the week from an aggregate stats summary. */
+    suspend fun weeklyReport(statsSummary: String): KimiResult<String> {
+        val request = KimiChatRequest(
+            model = keyStore.getProvider().model,
+            temperature = 0.7,
+            maxTokens = 500,
+            messages = listOf(
+                KimiMessage(
+                    "system",
+                    textContent(
+                        "You are a supportive but honest study coach reviewing a STEM " +
+                            "student's week. From the stats given, write a report of at " +
+                            "most 130 words with exactly three short sections: " +
+                            "'Wins:', 'Watch out:' and 'Next week:' (one concrete, " +
+                            "specific suggestion). Plain text, no markdown headers."
+                    )
+                ),
+                KimiMessage("user", textContent(statsSummary))
+            )
+        )
+        return call(request) { it.trim() }
+    }
+
     /** Cheapest possible round trip to validate the stored key. */
     suspend fun testConnection(): KimiResult<Unit> {
         val request = KimiChatRequest(
-            model = KIMI_MODEL,
+            model = keyStore.getProvider().model,
             maxTokens = 1,
             messages = listOf(KimiMessage("user", textContent("ping")))
         )
@@ -188,6 +249,18 @@ class KimiRepository @Inject constructor(
         const val RETRY_BACKOFF_MS = 1_500L
         const val MAX_IMAGE_DIMENSION = 1024
         const val JPEG_QUALITY = 80
+
+        val FLASHCARD_SYSTEM_PROMPT = """
+            You turn study notes (text or a photo of notes) into concise flashcards for
+            spaced repetition. Rules:
+            - Each card tests ONE fact, definition, formula or concept.
+            - front: a clear question or prompt. back: the short answer (1-3 lines).
+            - Prefer "why/how" and formula cards over trivia for STEM material.
+            - Produce between 5 and 20 cards depending on how much material there is.
+            - Write math in plain text (e.g. "integral of x^2 dx = x^3/3 + C").
+            Respond with ONLY a JSON array, no markdown, no extra text:
+            [{"front": "string", "back": "string"}, ...]
+        """.trimIndent()
 
         val WATER_SYSTEM_PROMPT = """
             You are a strict hydration verifier. You receive two photos: photo 1 (before)

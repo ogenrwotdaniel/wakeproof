@@ -17,7 +17,8 @@ class CompletionRepository @Inject constructor(private val dao: CompletionLogDao
         kind: GoalKind,
         status: CompletionStatus,
         amount: Int = 0,
-        alarmId: Long? = null
+        alarmId: Long? = null,
+        subject: String? = null
     ) {
         dao.insert(
             CompletionLog(
@@ -25,10 +26,14 @@ class CompletionRepository @Inject constructor(private val dao: CompletionLogDao
                 kind = kind,
                 status = status,
                 amount = amount,
-                alarmId = alarmId
+                alarmId = alarmId,
+                subject = subject
             )
         )
     }
+
+    /** Focus minutes per subject since [fromEpochDay] (null subject = untagged). */
+    fun observeFocusBySubject(fromEpochDay: Long) = dao.observeFocusBySubject(fromEpochDay)
 
     fun observeSince(fromEpochDay: Long): Flow<List<CompletionLog>> = dao.observeSince(fromEpochDay)
 

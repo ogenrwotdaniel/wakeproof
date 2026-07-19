@@ -1,0 +1,213 @@
+# WakeProof — Google Play publishing guide
+
+Developer: **Ogenrwot Daniel** · Contact: **ogenrwotdaniel@gmail.com**
+App: WakeProof (`com.ogenrwotdaniel.wakeproof`) · Category: Productivity
+
+This is the complete, ordered directive for getting WakeProof onto Google Play.
+Follow it top to bottom. Companion files:
+
+- `docs/PRIVACY_POLICY.md` — the privacy policy (must be hosted at a public URL).
+- `docs/STORE_LISTING.md` — copy-paste store texts, Data safety answers, and
+  permission-declaration texts.
+
+---
+
+## ⚠️ Read this first: the realistic timeline
+
+Google requires **new personal developer accounts** (created after Nov 2023) to
+run a **closed test with at least 12 testers continuously opted-in for 14 days**
+before the app can go to production. That means:
+
+| When | What you can do |
+|---|---|
+| Next week | Create the account, upload the app to **Closed testing**, recruit 12+ testers |
+| ~2–3 weeks later | Apply for production access, then publish publicly |
+
+So "published next week" realistically means **live for your testers next
+week** and **public on Play about three weeks out**. Plan around that.
+(Organization accounts skip the 12-tester rule, but need a D-U-N-S number —
+slower to obtain, not worth it here.)
+
+---
+
+## Step 1 — Developer account (Day 1)
+
+1. Go to https://play.google.com/console/signup
+2. Sign in with **ogenrwotdaniel@gmail.com**, choose **Personal** account.
+3. Pay the **one-time $25 USD** registration fee (card required).
+4. Complete identity verification (government ID + address; can take 1–3 days —
+   start this immediately, everything else can proceed in parallel).
+5. Developer name shown on Play: **Ogenrwot Daniel** (or a brand name if you
+   prefer — it's public). Contact email: ogenrwotdaniel@gmail.com (Google
+   verifies it and it is shown publicly on the listing).
+
+## Step 2 — Host the privacy policy (Day 1)
+
+Play **requires** a privacy policy URL for this app (camera, calendar, usage
+data). Do ONE of:
+
+- **GitHub Pages (recommended, free):** push this repo (or just the policy) to
+  GitHub, enable Pages, and use
+  `https://<your-username>.github.io/<repo>/PRIVACY_POLICY` — or convert
+  `docs/PRIVACY_POLICY.md` to HTML and serve that.
+- **Google Sites (no repo needed):** sites.google.com → new site → paste the
+  policy text → publish → use that URL.
+
+Keep the URL stable forever; it goes into the Play listing and the app can't
+ship without it.
+
+## Step 3 — Prepare the release build (Day 1–2)
+
+Already done in the repo:
+- Signing: `keystore.properties` + `wakeproof-release.keystore` (repo root,
+  untracked). **Back both up somewhere safe (password manager + offline copy).
+  If the keystore is lost, the app can never be updated again.** Never commit
+  them.
+- `targetSdk 35` — meets Play's 2026 target-API requirement.
+- Debug-only test buttons are stripped from release (`BuildConfig.DEBUG`).
+- R8 minification is OFF for the first release (larger download, zero
+  obfuscation risk). Revisit later.
+
+To produce the upload artifact:
+
+```bash
+./gradlew bundleRelease
+# → app/build/outputs/bundle/release/app-release.aab   (this is what you upload)
+```
+
+Before every upload, bump in `app/build.gradle.kts`:
+- `versionCode` — must increase by at least 1 every upload (integer, e.g. 2, 3, 4…)
+- `versionName` — human-readable (suggest `1.0.0` for the first Play upload)
+
+Known audience constraints (deliberate, document but don't change):
+- `minSdk 35` → the app only installs on **Android 15+** devices. Fine for a
+  focused launch; lowering it later is a real project.
+- arm64-only native libs → excludes a handful of old 32-bit devices; all
+  current phones are arm64.
+
+## Step 4 — Create the app in Play Console (Day 2)
+
+Play Console → **Create app**:
+- App name: **WakeProof**
+- Default language: English (or en-GB)
+- App or game: App · Free or paid: **Free**
+  (⚠️ a free app can never be switched to paid later)
+- Declarations: accept Developer Program Policies + US export laws.
+
+Then work through the **Dashboard → "Set up your app"** checklist. Every form
+answer you need is below and in `docs/STORE_LISTING.md`.
+
+### 4a. App content forms (all under Policy → App content)
+
+| Form | Answer |
+|---|---|
+| Privacy policy | URL from Step 2 |
+| App access | "All functionality is available without special access" is **wrong** — choose "All or some functionality is restricted" and provide a note: AI features (water verification, flashcard drafting, study coach, weekly report) need the reviewer to enter a free Gemini API key in Settings → AI provider. Provide a temporary key for review if asked, or state features degrade gracefully (honor mode) without one. |
+| Ads | **No**, the app contains no ads |
+| Content rating (IARC questionnaire) | Category: Utility/Productivity. Answer **No** to all violence/sex/drugs/gambling questions; no user-generated public content; no location sharing. Expected rating: **Everyone / PEGI 3** |
+| Target audience | 18+ (simplest; avoids all child-policy obligations). Do **not** tick "appeals to children". |
+| News app | No |
+| COVID-19 tracing | No |
+| Data safety | Copy the table from `docs/STORE_LISTING.md` §Data safety |
+| Government app | No |
+| Financial features | None |
+| Health | Declare "Health & wellness features: sleep/wake habits" only if the form asks; WakeProof is not a medical app and makes no medical claims. |
+
+### 4b. Sensitive-permission declarations (critical — rejection risk lives here)
+
+Play Console will detect these in the manifest and demand justification. Use
+the exact texts in `docs/STORE_LISTING.md` §Permission declarations:
+
+1. **`USE_EXACT_ALARM`** — allowed ONLY for alarm-clock apps. WakeProof *is*
+   an alarm clock; declare "Alarm clock app" as the core use case. ✅ Low risk.
+2. **`USE_FULL_SCREEN_INTENT`** — same justification: lock-screen alarm. ✅
+3. **`PACKAGE_USAGE_STATS`** (Usage access) — the strictest one. Declare core
+   use case **"Digital wellbeing: shows the user their own screen-time and
+   lets them set app limits"**. You must show it's user-facing core
+   functionality (it is: the Phone usage screen + distraction limits). Provide
+   the demo video (see below). ⚠️ Medium risk — if rejected, appeal with the
+   video, or worst case ship v1 without the usage feature and re-add later.
+4. **Foreground service types** (`mediaPlayback`, `specialUse`) — declare:
+   mediaPlayback = alarm ringtone/focus sounds; specialUse = "user-visible
+   Pomodoro countdown timer that must survive backgrounding".
+5. `SYSTEM_ALERT_WINDOW`, `READ_CALENDAR`, `CAMERA` — no dedicated form, but
+   they must be reflected in Data safety + privacy policy (done).
+
+**Demo video (needed for the usage-stats declaration):** 30–60 s screen
+recording showing: open app → Phone usage → grant usage access → stats screen →
+set an app limit. Record with:
+```bash
+adb shell screenrecord /sdcard/wakeproof-demo.mp4   # Ctrl+C to stop
+adb pull /sdcard/wakeproof-demo.mp4
+```
+Upload to YouTube (unlisted) and paste the link in the declaration form.
+
+### 4c. Store listing (Main store listing)
+
+All texts are pre-written in `docs/STORE_LISTING.md`. Assets you must create:
+
+| Asset | Spec | How |
+|---|---|---|
+| App icon | 512×512 PNG, <1 MB | Export the launcher icon at 512px |
+| Feature graphic | 1024×500 PNG/JPG | Simple: dark background, app name + "The alarm you can't cheat." |
+| Phone screenshots | 2–8, PNG/JPG, 9:16-ish | `adb exec-out screencap -p > shot1.png` on each key screen: Home dashboard, alarm ringing, pushup verify, Pomodoro with subject chips, Flashcards review, Phone usage, Agenda |
+
+## Step 5 — Closed testing release (Day 2–3)
+
+1. Play Console → **Testing → Closed testing → Create track** (use the default
+   "Alpha" track).
+2. Create an **email list** of testers (12+ Gmail addresses — classmates,
+   family; they must opt in via the link and keep the app installed 14 days).
+3. Upload `app-release.aab`, write release notes (see STORE_LISTING.md).
+4. Fix any pre-launch report warnings Play shows (it runs the app on real
+   devices automatically — crashes there block nothing but look bad in review).
+5. Roll out. Send testers the opt-in link (Play generates it), then the Play
+   Store link.
+
+**Tester instructions to send out:** open opt-in link → accept → install from
+Play → keep installed and open it a few times over the 14 days.
+
+## Step 6 — Production (after the 14-day test)
+
+1. Play Console shows "Apply for production access" once you meet the
+   requirement (12 testers, 14 days). Fill the short questionnaire honestly
+   (what you tested, what feedback you got, who the app is for).
+2. Approval usually takes a few days.
+3. **Production → Create release** → upload the (version-bumped) AAB → roll out
+   to 100 %. First production review can take up to ~7 days; updates are
+   usually faster.
+
+## Step 7 — Before you press publish (final checklist)
+
+- [ ] Keystore + passwords backed up in two places
+- [ ] `versionCode` bumped, `versionName = 1.0.0`
+- [ ] `./gradlew testDebugUnitTest lintDebug bundleRelease` all green
+- [ ] Release build installed and smoke-tested on the S25 Edge
+      (`adb install -r` the universal APK from bundletool, or a quick
+      `./gradlew installRelease`): alarm fires from lock screen, Pomodoro runs,
+      flashcards review works, no crash on each screen
+- [ ] Overnight test done: alarm survives Samsung battery optimization
+      (Settings → Battery → WakeProof → Unrestricted on the test device;
+      onboarding walks users through this)
+- [ ] Privacy policy URL live and correct
+- [ ] All App content forms submitted (green ticks on the dashboard)
+- [ ] Screenshots + icon + feature graphic uploaded
+- [ ] Emergency-dismiss works with no API key (reviewers won't have one)
+
+## Ongoing obligations
+
+- Keep the contact email monitored — Google sends policy notices there;
+  ignoring them gets apps removed.
+- Every future upload: bump `versionCode`.
+- Target-API policy: bump `targetSdk` each year when Play announces the new
+  minimum (usually by 31 Aug).
+- If you ever add accounts/login, you must add an account-deletion flow and
+  update Data safety.
+- Crash monitoring: watch Play Console → Quality → Android vitals.
+
+## Costs
+
+| Item | Cost |
+|---|---|
+| Play developer registration | $25 one-time |
+| Everything else (hosting policy on GitHub Pages, Gemini free tier) | $0 |

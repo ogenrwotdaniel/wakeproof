@@ -1,6 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.di
 
 import com.ogenrwotdaniel.wakeproof.data.KimiRepository
+import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.AndroidImageCompressor
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.remote.ImageCompressor
@@ -15,6 +16,7 @@ import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -41,13 +43,16 @@ object NetworkModule {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
-                val key = keyStore.getKey()
-                val request = if (key != null) {
-                    chain.request().newBuilder().header("Authorization", "Bearer $key").build()
-                } else {
-                    chain.request()
+                // Retrofit is built against the Kimi base URL; other providers are
+                // OpenAI-compatible too, so we just swap host+path per request.
+                // chat/completions is the API's only endpoint.
+                val provider = keyStore.getProvider()
+                val builder = chain.request().newBuilder()
+                if (provider != AiProvider.KIMI) {
+                    builder.url((provider.baseUrl + "chat/completions").toHttpUrl())
                 }
-                chain.proceed(request)
+                keyStore.getKey()?.let { builder.header("Authorization", "Bearer $it") }
+                chain.proceed(builder.build())
             }
             .build()
 

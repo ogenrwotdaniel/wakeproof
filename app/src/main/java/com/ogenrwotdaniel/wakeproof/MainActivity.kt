@@ -11,8 +11,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.launch
 import com.ogenrwotdaniel.wakeproof.ui.MainViewModel
+import com.ogenrwotdaniel.wakeproof.widget.WakeProofWidget
 import com.ogenrwotdaniel.wakeproof.ui.navigation.HomeRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.OnboardingRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.WakeProofNavGraph
@@ -28,6 +30,20 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+
+    override fun onStart() {
+        super.onStart()
+        AppForeground.set(true)
+    }
+
+    override fun onStop() {
+        AppForeground.set(false)
+        // Refresh the home-screen widget with whatever changed this session.
+        lifecycleScope.launch {
+            runCatching { WakeProofWidget().updateAll(applicationContext) }
+        }
+        super.onStop()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

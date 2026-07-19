@@ -1,5 +1,8 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,7 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,6 +53,7 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val keyState by viewModel.keyState.collectAsStateWithLifecycle()
     val reliability by viewModel.reliability.collectAsStateWithLifecycle()
+    val exportMessage by viewModel.exportMessage.collectAsStateWithLifecycle()
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
 
     LifecycleResumeEffect(Unit) {
@@ -122,11 +128,26 @@ fun SettingsScreen(
             HorizontalDivider()
 
             Text(text = "Focus sessions", style = MaterialTheme.typography.titleMedium)
+            SliderSetting(
+                label = "Daily focus goal",
+                value = settings.dailyFocusGoalMinutes,
+                range = 30f..480f,
+                unit = "min",
+                onCommit = viewModel::setDailyFocusGoalMinutes
+            )
             SwitchSetting(
-                label = "Study music",
-                description = "Ambient music plays automatically during focus phases.",
+                label = "Study sound",
+                description = "Ambient sound plays automatically during focus phases. Pick the " +
+                    "sound (rain, fireplace…) on the Pomodoro screen. Turn off to listen to " +
+                    "Spotify or another app instead.",
                 checked = settings.focusMusicEnabled,
                 onCheckedChange = viewModel::setFocusMusicEnabled
+            )
+            SwitchSetting(
+                label = "Keep screen awake in focus",
+                description = "The screen won't time out while a focus countdown is on screen.",
+                checked = settings.focusKeepScreenOn,
+                onCheckedChange = viewModel::setFocusKeepScreenOn
             )
             SwitchSetting(
                 label = "Lock phone during focus",
@@ -135,13 +156,45 @@ fun SettingsScreen(
                 checked = settings.focusLockPhone,
                 onCheckedChange = viewModel::setFocusLockPhone
             )
+            SwitchSetting(
+                label = "Floating timer",
+                description = "Shows a draggable countdown bubble over other apps " +
+                    "while a Pomodoro timer runs.",
+                checked = settings.focusFloatingTimer,
+                onCheckedChange = viewModel::setFocusFloatingTimer
+            )
+            if (settings.focusFloatingTimer) {
+                val context = LocalContext.current
+                var overlayAllowed by remember {
+                    mutableStateOf(android.provider.Settings.canDrawOverlays(context))
+                }
+                LifecycleResumeEffect(Unit) {
+                    overlayAllowed = android.provider.Settings.canDrawOverlays(context)
+                    onPauseOrDispose { }
+                }
+                if (!overlayAllowed) {
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(
+                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    "package:${context.packageName}".toUri()
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Allow display over other apps") }
+                }
+            }
 
             HorizontalDivider()
 
             ApiKeySection(
+                provider = keyState.provider,
                 hasKey = keyState.hasKey,
                 testing = keyState.testing,
                 testResult = keyState.testResult,
+                onProviderChange = viewModel::setProvider,
                 onSave = viewModel::saveKey,
                 onClear = viewModel::clearKey,
                 onTest = viewModel::testConnection
@@ -156,10 +209,30 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text(text = "Data", style = MaterialTheme.typography.titleMedium)
+            val csvLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("text/csv")
+            ) { uri -> uri?.let(viewModel::exportCsv) }
+            OutlinedButton(
+                onClick = { csvLauncher.launch("wakeproof-history.csv") },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Export history as CSV") }
+            exportMessage?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (it.startsWith("Exported")) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                )
+            }
+
+            HorizontalDivider()
+
             Text(text = "About", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "WakeProof 0.1.0 — alarms you can only dismiss by proving it. " +
-                    "Pushups are verified on-device; water via the Kimi vision API.",
+                    "Pushups are verified on-device; water via the selected vision AI " +
+                    "(Kimi or Gemini).",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

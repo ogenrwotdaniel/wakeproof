@@ -24,3 +24,12 @@ data object PomodoroRoute
 
 @Serializable
 data object SettingsRoute
+
+@Serializable
+data object UsageRoute
+
+@Serializable
+data object AgendaRoute
+
+@Serializable
+data object FlashcardsRoute

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Alarm engine -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
@@ -17,9 +18,26 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Study tools: floating timer bubble, screen-time stats, calendar agenda.
+         PACKAGE_USAGE_STATS and SYSTEM_ALERT_WINDOW are special-access grants
+         the user enables via Settings deep links (no runtime dialog exists). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+
+    <!-- Visibility of launcher apps, needed to label screen-time entries. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <!-- allowBackup=false: restoring EncryptedSharedPreferences from a backup of another
          device install crashes on first key access, and alarm state must not survive
@@ -91,6 +109,17 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".widget.WakeProofWidgetReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wakeproof_widget_info" />
         </receiver>
     </application>
 

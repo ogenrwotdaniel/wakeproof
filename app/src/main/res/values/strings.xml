@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">WakeProof</string>
+    <string name="widget_description">Streak and today\'s focus progress at a glance.</string>
 </resources>

@@ -5,10 +5,13 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.ogenrwotdaniel.wakeproof.ui.agenda.AgendaScreen
+import com.ogenrwotdaniel.wakeproof.ui.flashcards.FlashcardsScreen
 import com.ogenrwotdaniel.wakeproof.ui.home.HomeScreen
 import com.ogenrwotdaniel.wakeproof.ui.onboarding.OnboardingScreen
 import com.ogenrwotdaniel.wakeproof.ui.pomodoro.PomodoroScreen
 import com.ogenrwotdaniel.wakeproof.ui.settings.SettingsScreen
+import com.ogenrwotdaniel.wakeproof.ui.usage.UsageScreen
 
 /**
  * Main in-app navigation graph. The lock-screen alarm flow (ringing +
@@ -24,7 +27,10 @@ fun WakeProofNavGraph(
             HomeScreen(
                 onOpenOnboarding = { navController.navigate(OnboardingRoute) },
                 onOpenPomodoro = { navController.navigate(PomodoroRoute) },
-                onOpenSettings = { navController.navigate(SettingsRoute) }
+                onOpenSettings = { navController.navigate(SettingsRoute) },
+                onOpenUsage = { navController.navigate(UsageRoute) },
+                onOpenAgenda = { navController.navigate(AgendaRoute) },
+                onOpenFlashcards = { navController.navigate(FlashcardsRoute) }
             )
         }
         composable<OnboardingRoute> {
@@ -39,6 +45,15 @@ fun WakeProofNavGraph(
         }
         composable<SettingsRoute> {
             SettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable<UsageRoute> {
+            UsageScreen(onBack = { navController.popBackStack() })
+        }
+        composable<AgendaRoute> {
+            AgendaScreen(onBack = { navController.popBackStack() })
+        }
+        composable<FlashcardsRoute> {
+            FlashcardsScreen(onBack = { navController.popBackStack() })
         }
     }
 }

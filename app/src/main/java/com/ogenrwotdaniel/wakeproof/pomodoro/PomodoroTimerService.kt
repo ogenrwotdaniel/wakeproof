@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.VibratorManager
+import com.ogenrwotdaniel.wakeproof.AppForeground
 import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
@@ -51,7 +52,9 @@ data class PomodoroState(
     val phase: PomodoroPhase = PomodoroPhase.FOCUS,
     val remainingSeconds: Int = 25 * 60,
     val totalSeconds: Int = 25 * 60,
-    val completedFocusSessions: Int = 0
+    val completedFocusSessions: Int = 0,
+    /** Focus blocks in this session; 0 = keep looping until stopped. */
+    val targetFocusBlocks: Int = 0
 )
 
 /**
@@ -71,16 +74,40 @@ class PomodoroTimerService : Service() {
     private var shortBreakSeconds = 5 * 60
     private var longBreakSeconds = 15 * 60
     private var musicPlayer: MediaPlayer? = null
+    private var currentSound: FocusSound? = null
+    private val overlay by lazy { FloatingTimerOverlay(this) }
 
     override fun onCreate() {
         super.onCreate()
-        // Study music rides the focus phase: plays while a focus countdown is
-        // running (and the setting is on), pauses on breaks/pause/stop.
+        // Ambient sound rides the timer: focus and break phases each have their
+        // own toggle, and switching the selected sound swaps the loop live.
         scope.launch {
             combine(state, settingsRepository.settings) { s, cfg ->
-                cfg.focusMusicEnabled && s.active && s.running && s.phase == PomodoroPhase.FOCUS
-            }.distinctUntilChanged().collect { shouldPlay ->
-                if (shouldPlay) startMusic() else pauseMusic()
+                val wanted = s.active && s.running &&
+                    if (s.phase == PomodoroPhase.FOCUS) cfg.focusMusicEnabled
+                    else cfg.breakMusicEnabled
+                wanted to FocusSound.fromId(cfg.focusSoundId)
+            }.distinctUntilChanged().collect { (shouldPlay, sound) ->
+                if (sound != currentSound) {
+                    musicPlayer?.release()
+                    musicPlayer = null
+                    currentSound = sound
+                }
+                if (shouldPlay) startMusic(sound) else pauseMusic()
+            }
+        }
+        // Floating countdown bubble: visible whenever a timer is active but the
+        // app UI isn't. Runs on Main (scope's dispatcher), as WindowManager requires.
+        scope.launch {
+            combine(state, settingsRepository.settings, AppForeground.visible) { s, cfg, appVisible ->
+                s to (cfg.focusFloatingTimer && s.active && !appVisible)
+            }.collect { (s, show) ->
+                if (show) {
+                    overlay.show()
+                    overlay.update(s)
+                } else {
+                    overlay.hide()
+                }
             }
         }
     }
@@ -96,17 +123,24 @@ class PomodoroTimerService : Service() {
                     buildNotification("Starting…"),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
+                val sessionMinutes = intent.getIntExtra(EXTRA_SESSION_MINUTES, 0)
                 scope.launch {
                     val settings = settingsRepository.settings.first()
                     focusSeconds = settings.focusMinutes * 60
                     shortBreakSeconds = settings.shortBreakMinutes * 60
                     longBreakSeconds = settings.longBreakMinutes * 60
+                    // A "1 h" session with 25+5 settings = 2 focus blocks; "2 h" = 4.
+                    val cycleMinutes = settings.focusMinutes + settings.shortBreakMinutes
+                    val target =
+                        if (sessionMinutes <= 0) 0
+                        else (sessionMinutes / cycleMinutes).coerceAtLeast(1)
                     _state.value = PomodoroState(
                         active = true,
                         running = true,
                         phase = PomodoroPhase.FOCUS,
                         remainingSeconds = focusSeconds,
-                        totalSeconds = focusSeconds
+                        totalSeconds = focusSeconds,
+                        targetFocusBlocks = target
                     )
                     startTicker()
                     updateNotification()
@@ -142,16 +176,17 @@ class PomodoroTimerService : Service() {
     override fun onDestroy() {
         tickerJob?.cancel()
         scope.cancel()
+        overlay.hide()
         musicPlayer?.release()
         musicPlayer = null
         _state.value = PomodoroState()
         super.onDestroy()
     }
 
-    private fun startMusic() {
+    private fun startMusic(sound: FocusSound) {
         runCatching {
             val player = musicPlayer ?: MediaPlayer.create(
-                this, R.raw.focus_ambient, // seamless ambient loop, generated asset
+                this, sound.res, // seamless ambient loop, generated asset
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -159,7 +194,8 @@ class PomodoroTimerService : Service() {
                 0
             )?.apply {
                 isLooping = true
-                setVolume(MUSIC_VOLUME, MUSIC_VOLUME)
+                val volume = (MUSIC_VOLUME * sound.gain).coerceAtMost(1f)
+                setVolume(volume, volume)
             }.also { musicPlayer = it }
             if (player?.isPlaying == false) player.start()
         }
@@ -192,10 +228,25 @@ class PomodoroTimerService : Service() {
         if (current.phase == PomodoroPhase.FOCUS) {
             runCatching {
                 completionRepository.log(
-                    GoalKind.FOCUS, CompletionStatus.VERIFIED, amount = focusSeconds / 60
+                    GoalKind.FOCUS, CompletionStatus.VERIFIED, amount = focusSeconds / 60,
+                    subject = settingsRepository.settings.first().activeSubject
                 )
             }
             val done = current.completedFocusSessions + 1
+            // Timed session finished: skip the trailing break and stop cleanly.
+            if (current.targetFocusBlocks in 1..done) {
+                getSystemService(NotificationManager::class.java).notify(
+                    SESSION_DONE_NOTIFICATION_ID,
+                    Notification.Builder(this, CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_launcher_foreground)
+                        .setContentTitle("Session complete 🎉")
+                        .setContentText("$done pomodoros done — great work.")
+                        .setAutoCancel(true)
+                        .build()
+                )
+                stopSelf()
+                return
+            }
             val next = if (done % SESSIONS_PER_LONG_BREAK == 0) PomodoroPhase.LONG_BREAK
             else PomodoroPhase.SHORT_BREAK
             val duration = durationOf(next)
@@ -298,10 +349,15 @@ class PomodoroTimerService : Service() {
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.POMODORO_STOP"
         private const val CHANNEL_ID = "wakeproof_pomodoro"
         private const val NOTIFICATION_ID = 2
+        private const val SESSION_DONE_NOTIFICATION_ID = 3
         private const val SESSIONS_PER_LONG_BREAK = 4
         private const val MUSIC_VOLUME = 0.55f
+        private const val EXTRA_SESSION_MINUTES = "session_minutes"
 
-        fun start(context: Context) = context.startForegroundService(intent(context, ACTION_START))
+        /** [sessionMinutes] > 0 runs a timed session (e.g. 60 or 120); 0 loops forever. */
+        fun start(context: Context, sessionMinutes: Int = 0) = context.startForegroundService(
+            intent(context, ACTION_START).putExtra(EXTRA_SESSION_MINUTES, sessionMinutes)
+        )
         fun pause(context: Context) = context.startService(intent(context, ACTION_PAUSE))
         fun resume(context: Context) = context.startService(intent(context, ACTION_RESUME))
         fun reset(context: Context) = context.startService(intent(context, ACTION_RESET))

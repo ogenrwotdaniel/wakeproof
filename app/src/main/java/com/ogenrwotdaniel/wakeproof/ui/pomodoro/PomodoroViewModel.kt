@@ -6,6 +6,8 @@ import com.ogenrwotdaniel.wakeproof.data.KimiRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiResult
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
+import com.ogenrwotdaniel.wakeproof.data.db.ParkedThought
+import com.ogenrwotdaniel.wakeproof.data.db.ParkedThoughtDao
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
@@ -26,8 +28,30 @@ data class ChatMessage(val role: String, val text: String)
 class PomodoroViewModel @Inject constructor(
     private val kimiRepository: KimiRepository,
     private val settingsRepository: SettingsRepository,
+    private val parkedThoughtDao: ParkedThoughtDao,
     keyStore: ApiKeyStore
 ) : ViewModel() {
+
+    /** Distracting thoughts captured mid-focus, oldest done last. */
+    val thoughts: StateFlow<List<ParkedThought>> = parkedThoughtDao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun parkThought(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            parkedThoughtDao.insert(
+                ParkedThought(text = text.trim(), createdAtMillis = System.currentTimeMillis())
+            )
+        }
+    }
+
+    fun setThoughtDone(thought: ParkedThought, done: Boolean) {
+        viewModelScope.launch { parkedThoughtDao.update(thought.copy(done = done)) }
+    }
+
+    fun clearDoneThoughts() {
+        viewModelScope.launch { parkedThoughtDao.clearDone() }
+    }
 
     val timer: StateFlow<PomodoroState> = PomodoroTimerService.state
     val hasKimiKey: Boolean = keyStore.hasKey()
@@ -37,6 +61,26 @@ class PomodoroViewModel @Inject constructor(
 
     fun setMusicEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setFocusMusicEnabled(enabled) }
+    }
+
+    fun setBreakMusicEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setBreakMusicEnabled(enabled) }
+    }
+
+    fun setFocusSound(id: String) {
+        viewModelScope.launch { settingsRepository.setFocusSoundId(id) }
+    }
+
+    fun setActiveSubject(name: String) {
+        viewModelScope.launch { settingsRepository.setActiveSubject(name) }
+    }
+
+    fun addSubject(name: String) {
+        viewModelScope.launch { settingsRepository.addStudySubject(name) }
+    }
+
+    fun removeSubject(name: String) {
+        viewModelScope.launch { settingsRepository.removeStudySubject(name) }
     }
 
     data class ChatState(

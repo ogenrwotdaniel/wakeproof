@@ -3,6 +3,7 @@ package com.ogenrwotdaniel.wakeproof
 import android.app.Application
 import android.os.UserManager
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer
+import com.ogenrwotdaniel.wakeproof.distraction.DistractionLimitWorker
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,7 @@ class WakeProofApp : Application() {
         // covers that window from the device-protected mirror instead.
         if (getSystemService(UserManager::class.java).isUserUnlocked) {
             applicationScope.launch { alarmInitializer.initialize() }
+            DistractionLimitWorker.schedule(this)
         }
     }
 }

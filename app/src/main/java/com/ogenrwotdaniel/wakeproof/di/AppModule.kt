@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.room.Room
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionLogDao
+import com.ogenrwotdaniel.wakeproof.data.db.ExamDao
+import com.ogenrwotdaniel.wakeproof.data.db.FlashcardDao
+import com.ogenrwotdaniel.wakeproof.data.db.ParkedThoughtDao
 import com.ogenrwotdaniel.wakeproof.data.db.WakeProofDatabase
 import dagger.Module
 import dagger.Provides
@@ -21,7 +24,8 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): WakeProofDatabase =
         Room.databaseBuilder(context, WakeProofDatabase::class.java, "wakeproof.db")
-            // Pre-release only: schema is still evolving phase by phase.
+            .addMigrations(WakeProofDatabase.MIGRATION_2_3)
+            // Pre-release safety net for version jumps with no migration path.
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
@@ -31,4 +35,14 @@ object AppModule {
     @Provides
     fun provideCompletionLogDao(database: WakeProofDatabase): CompletionLogDao =
         database.completionLogDao()
+
+    @Provides
+    fun provideFlashcardDao(database: WakeProofDatabase): FlashcardDao = database.flashcardDao()
+
+    @Provides
+    fun provideExamDao(database: WakeProofDatabase): ExamDao = database.examDao()
+
+    @Provides
+    fun provideParkedThoughtDao(database: WakeProofDatabase): ParkedThoughtDao =
+        database.parkedThoughtDao()
 }

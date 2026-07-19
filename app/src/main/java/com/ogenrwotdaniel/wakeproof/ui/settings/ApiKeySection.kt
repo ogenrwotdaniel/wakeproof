@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -17,16 +18,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 
 /**
- * Kimi API key management: paste, save into EncryptedSharedPreferences, test
- * with a 1-token ping, clear.
+ * AI provider + API key management: pick Kimi (paid) or Gemini (free tier),
+ * paste the matching key (stored encrypted, per provider), test with a
+ * 1-token ping, clear.
  */
 @Composable
 fun ApiKeySection(
+    provider: AiProvider,
     hasKey: Boolean,
     testing: Boolean,
     testResult: String?,
+    onProviderChange: (AiProvider) -> Unit,
     onSave: (String) -> Unit,
     onClear: () -> Unit,
     onTest: () -> Unit,
@@ -35,11 +40,23 @@ fun ApiKeySection(
     var keyInput by rememberSaveable { mutableStateOf("") }
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = "Kimi API key", style = MaterialTheme.typography.titleMedium)
+        Text(text = "AI provider", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AiProvider.entries.forEach { candidate ->
+                FilterChip(
+                    selected = candidate == provider,
+                    onClick = { onProviderChange(candidate) },
+                    label = { Text(candidate.label) }
+                )
+            }
+        }
         Text(
-            text = if (hasKey) "A key is saved (stored encrypted on-device)."
-            else "Paste your key from platform.moonshot.ai. Water verification and the " +
-                "AI coach stay disabled without it.",
+            text = if (hasKey) {
+                "A ${provider.label} key is saved (stored encrypted on-device)."
+            } else {
+                "Paste your key from ${provider.keySource}. Water verification and the " +
+                    "AI coach stay disabled without it."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -47,7 +64,7 @@ fun ApiKeySection(
             value = keyInput,
             onValueChange = { keyInput = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("sk-…") },
+            label = { Text(provider.keyHint) },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true
         )

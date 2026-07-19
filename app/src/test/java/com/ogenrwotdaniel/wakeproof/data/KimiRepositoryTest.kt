@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.data
 
+import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.remote.ImageCompressor
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
@@ -25,9 +26,12 @@ class KimiRepositoryTest {
 
     private val fakeKeyStore = object : ApiKeyStore {
         var stored: String? = "test-key"
+        var storedProvider: AiProvider = AiProvider.KIMI
         override fun getKey(): String? = stored
         override fun setKey(value: String) { stored = value }
         override fun clear() { stored = null }
+        override fun getProvider(): AiProvider = storedProvider
+        override fun setProvider(provider: AiProvider) { storedProvider = provider }
     }
 
     private val passthroughCompressor = object : ImageCompressor {

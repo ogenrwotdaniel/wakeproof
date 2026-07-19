@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,9 @@ fun HomeScreen(
     onOpenOnboarding: () -> Unit,
     onOpenPomodoro: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenUsage: () -> Unit,
+    onOpenAgenda: () -> Unit,
+    onOpenFlashcards: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -53,7 +57,10 @@ fun HomeScreen(
     val week by viewModel.week.collectAsStateWithLifecycle()
     val streak by viewModel.streak.collectAsStateWithLifecycle()
     val nextPushup by viewModel.nextPushupAlarm.collectAsStateWithLifecycle()
+    val focusGoal by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
+    val exams by viewModel.exams.collectAsStateWithLifecycle()
     var testArmed by remember { mutableStateOf(false) }
+    var addingExam by remember { mutableStateOf(false) }
 
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -88,9 +95,16 @@ fun HomeScreen(
             )
             StatusCard(
                 title = "Focus",
-                value = "${today.focusMinutes} min",
-                detail = "Pomodoro sessions today",
-                highlight = today.focusMinutes > 0
+                value = "${today.focusMinutes}/$focusGoal min",
+                detail = if (today.focusMinutes >= focusGoal) "Daily goal reached 🎉"
+                else "Daily focus goal",
+                highlight = today.focusMinutes >= focusGoal
+            )
+
+            ExamSection(
+                exams = exams,
+                onAdd = { addingExam = true },
+                onDelete = viewModel::deleteExam
             )
 
             Text(
@@ -102,6 +116,15 @@ fun HomeScreen(
 
             Button(onClick = onOpenPomodoro, modifier = Modifier.fillMaxWidth()) {
                 Text("Pomodoro study mode")
+            }
+            Button(onClick = onOpenFlashcards, modifier = Modifier.fillMaxWidth()) {
+                Text("Flashcards")
+            }
+            Button(onClick = onOpenAgenda, modifier = Modifier.fillMaxWidth()) {
+                Text("Agenda — calendar events")
+            }
+            Button(onClick = onOpenUsage, modifier = Modifier.fillMaxWidth()) {
+                Text("Phone usage")
             }
             Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
                 Text("Settings")
@@ -140,6 +163,109 @@ fun HomeScreen(
             }
         }
     }
+
+    if (addingExam) {
+        AddExamDialog(
+            onConfirm = { name, epochDay ->
+                viewModel.addExam(name, epochDay)
+                addingExam = false
+            },
+            onDismiss = { addingExam = false }
+        )
+    }
+}
+
+/** Countdown chips for upcoming exams; the closest one gets error color. */
+@Composable
+private fun ExamSection(
+    exams: List<com.ogenrwotdaniel.wakeproof.data.db.Exam>,
+    onAdd: () -> Unit,
+    onDelete: (com.ogenrwotdaniel.wakeproof.data.db.Exam) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Exams",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = onAdd) { Text("+ Add") }
+        }
+        val today = LocalDate.now().toEpochDay()
+        exams.forEachIndexed { index, exam ->
+            val daysLeft = (exam.epochDay - today).toInt()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = exam.name, style = MaterialTheme.typography.bodyLarge)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = when (daysLeft) {
+                            0 -> "TODAY"
+                            1 -> "tomorrow"
+                            else -> "in $daysLeft days"
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (index == 0 || daysLeft <= 3) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = { onDelete(exam) }) { Text("×") }
+                }
+            }
+        }
+        if (exams.isEmpty()) {
+            Text(
+                text = "No exams tracked — add one to start the countdown.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** Name + date entry for a new exam. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AddExamDialog(
+    onConfirm: (String, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    val dateState = androidx.compose.material3.rememberDatePickerState(
+        initialSelectedDateMillis = System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
+    )
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add exam") },
+        text = {
+            Column {
+                androidx.compose.material3.OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Exam name") },
+                    singleLine = true
+                )
+                androidx.compose.material3.DatePicker(state = dateState, showModeToggle = false)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val millis = dateState.selectedDateMillis ?: return@TextButton
+                    onConfirm(name, millis / (24L * 60 * 60 * 1000))
+                },
+                enabled = name.isNotBlank() && dateState.selectedDateMillis != null
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable

@@ -152,7 +152,7 @@ fun WaterVerifyScreen(
                     ) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(16.dp))
-                        Text("Sending both photos to Kimi…")
+                        Text("Sending both photos to the vision AI…")
                     }
 
                     WaterVerifyViewModel.Step.SUCCESS -> Column(

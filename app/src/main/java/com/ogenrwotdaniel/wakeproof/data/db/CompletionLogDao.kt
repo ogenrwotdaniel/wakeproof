@@ -5,9 +5,19 @@ import androidx.room.Insert
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+/** Focus minutes per subject over a date range. */
+data class SubjectMinutes(val subject: String?, val minutes: Int)
+
 /** Room access to [CompletionLog]. */
 @Dao
 interface CompletionLogDao {
+    @Query(
+        "SELECT subject, SUM(amount) AS minutes FROM completion_logs " +
+            "WHERE kind = 'FOCUS' AND epochDay >= :fromEpochDay " +
+            "GROUP BY subject ORDER BY minutes DESC"
+    )
+    fun observeFocusBySubject(fromEpochDay: Long): Flow<List<SubjectMinutes>>
+
     @Insert
     suspend fun insert(log: CompletionLog)
 

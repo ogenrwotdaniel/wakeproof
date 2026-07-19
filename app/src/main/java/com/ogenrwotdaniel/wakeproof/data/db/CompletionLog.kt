@@ -25,5 +25,7 @@ data class CompletionLog(
     val kind: GoalKind,
     val status: CompletionStatus,
     val amount: Int = 0,
-    val alarmId: Long? = null
+    val alarmId: Long? = null,
+    /** Study subject for FOCUS entries ("Calculus"); null for other kinds. */
+    val subject: String? = null
 )

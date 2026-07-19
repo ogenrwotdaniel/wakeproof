@@ -7,12 +7,17 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Read/write access to the user's Kimi API key. */
+/**
+ * Read/write access to the AI provider choice and its API keys. Keys are kept
+ * per provider, so switching Kimi ↔ Gemini doesn't lose the other's key.
+ */
 interface ApiKeyStore {
     fun getKey(): String?
     fun setKey(value: String)
     fun clear()
     fun hasKey(): Boolean = getKey() != null
+    fun getProvider(): AiProvider
+    fun setProvider(provider: AiProvider)
 }
 
 /**
@@ -39,17 +44,30 @@ class KimiKeyStore @Inject constructor(
         )
     }
 
-    override fun getKey(): String? = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
+    override fun getKey(): String? =
+        prefs.getString(keyName(getProvider()), null)?.takeIf { it.isNotBlank() }
 
     override fun setKey(value: String) {
-        prefs.edit().putString(KEY_API, value.trim()).apply()
+        prefs.edit().putString(keyName(getProvider()), value.trim()).apply()
     }
 
     override fun clear() {
-        prefs.edit().remove(KEY_API).apply()
+        prefs.edit().remove(keyName(getProvider())).apply()
     }
 
+    override fun getProvider(): AiProvider =
+        AiProvider.fromId(prefs.getString(KEY_PROVIDER, null))
+
+    override fun setProvider(provider: AiProvider) {
+        prefs.edit().putString(KEY_PROVIDER, provider.id).apply()
+    }
+
+    /** Kimi keeps the pre-provider-era pref name so existing keys survive. */
+    private fun keyName(provider: AiProvider) =
+        if (provider == AiProvider.KIMI) KEY_API_LEGACY else "api_key_${provider.id}"
+
     private companion object {
-        const val KEY_API = "kimi_api_key"
+        const val KEY_API_LEGACY = "kimi_api_key"
+        const val KEY_PROVIDER = "ai_provider"
     }
 }

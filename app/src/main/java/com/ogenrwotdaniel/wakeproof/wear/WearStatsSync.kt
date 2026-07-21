@@ -26,6 +26,14 @@ object WearContract {
     const val KEY_WATER_TARGET = "water_target"
     const val KEY_WATER_ML = "water_ml"
     const val KEY_UPDATED = "updated_at"
+
+    // Live Pomodoro timer mirrored to the watch's Ongoing Activity.
+    const val TIMER_PATH = "/wakeproof/timer"
+    const val KEY_TIMER_ACTIVE = "t_active"
+    const val KEY_TIMER_RUNNING = "t_running"
+    const val KEY_TIMER_PHASE = "t_phase"
+    const val KEY_TIMER_REMAINING = "t_remaining"
+    const val KEY_TIMER_FINISH_AT = "t_finish_at"
 }
 
 /**

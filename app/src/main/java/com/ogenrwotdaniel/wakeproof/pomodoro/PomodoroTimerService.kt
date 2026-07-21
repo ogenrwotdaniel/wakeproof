@@ -21,6 +21,7 @@ import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
+import com.ogenrwotdaniel.wakeproof.wear.WearTimerSync
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +68,7 @@ class PomodoroTimerService : Service() {
 
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var completionRepository: CompletionRepository
+    @Inject lateinit var wearTimerSync: WearTimerSync
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
@@ -144,17 +146,20 @@ class PomodoroTimerService : Service() {
                     )
                     startTicker()
                     updateNotification()
+                    syncWatch()
                 }
             }
             ACTION_PAUSE -> {
                 tickerJob?.cancel()
                 _state.update { it.copy(running = false) }
                 updateNotification()
+                syncWatch()
             }
             ACTION_RESUME -> {
                 _state.update { it.copy(running = true) }
                 startTicker()
                 updateNotification()
+                syncWatch()
             }
             ACTION_RESET -> {
                 tickerJob?.cancel()
@@ -167,6 +172,7 @@ class PomodoroTimerService : Service() {
                     )
                 }
                 updateNotification()
+                syncWatch()
             }
             ACTION_STOP -> stopSelf()
         }
@@ -175,6 +181,9 @@ class PomodoroTimerService : Service() {
 
     override fun onDestroy() {
         tickerJob?.cancel()
+        // Best-effort: dismiss the watch timer chip. Detached from [scope] since
+        // that is cancelled immediately below.
+        CoroutineScope(Dispatchers.IO).launch { runCatching { wearTimerSync.clear() } }
         scope.cancel()
         overlay.hide()
         musicPlayer?.release()
@@ -244,6 +253,7 @@ class PomodoroTimerService : Service() {
                         .setAutoCancel(true)
                         .build()
                 )
+                runCatching { wearTimerSync.clear() }
                 stopSelf()
                 return
             }
@@ -267,6 +277,7 @@ class PomodoroTimerService : Service() {
                 )
             }
         }
+        syncWatch()
     }
 
     private fun durationOf(phase: PomodoroPhase) = when (phase) {
@@ -302,6 +313,21 @@ class PomodoroTimerService : Service() {
             if (s.running) "" else " (paused)"
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    /**
+     * Pushes the current phase to the watch. Called only on transitions (not
+     * every tick): the watch counts down on its own from the absolute finish
+     * time, so this stays quiet while the timer just runs.
+     */
+    private fun syncWatch() {
+        val s = _state.value
+        val finishAt = if (s.running) System.currentTimeMillis() + s.remainingSeconds * 1_000L else 0L
+        scope.launch {
+            runCatching {
+                wearTimerSync.push(s.active, s.running, s.phase.label, s.remainingSeconds, finishAt)
+            }
+        }
     }
 
     private fun buildNotification(text: String): Notification {

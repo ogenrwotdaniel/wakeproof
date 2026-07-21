@@ -44,4 +44,7 @@ dependencies {
     implementation(libs.androidx.wear.tiles)
     implementation(libs.androidx.wear.protolayout)
     implementation(libs.androidx.wear.protolayout.material)
+
+    // Ongoing Activity (self-ticking timer chip on the watch face)
+    implementation(libs.androidx.wear.ongoing)
 }

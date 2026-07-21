@@ -305,7 +305,8 @@ class PomodoroTimerService : Service() {
     }
 
     private fun buildNotification(text: String): Notification {
-        val toggleAction = if (_state.value.running) {
+        val s = _state.value
+        val toggleAction = if (s.running) {
             Notification.Action.Builder(
                 null, "Pause", servicePendingIntent(ACTION_PAUSE, 1)
             ).build()
@@ -317,15 +318,28 @@ class PomodoroTimerService : Service() {
         val stopAction = Notification.Action.Builder(
             null, "Stop", servicePendingIntent(ACTION_STOP, 3)
         ).build()
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Pomodoro")
+            .setContentTitle("Pomodoro — ${s.phase.label}")
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            // Marks it as a timer so the paired watch surfaces it as an ongoing
+            // activity; not setLocalOnly, so it bridges to the watch.
+            .setCategory(Notification.CATEGORY_STOPWATCH)
             .addAction(toggleAction)
             .addAction(stopAction)
-            .build()
+        if (s.active && s.running) {
+            // Self-ticking countdown: the watch renders a live timer off the
+            // bridged notification without a per-second Bluetooth sync.
+            builder.setWhen(System.currentTimeMillis() + s.remainingSeconds * 1_000L)
+                .setShowWhen(true)
+                .setUsesChronometer(true)
+                .setChronometerCountDown(true)
+        } else {
+            builder.setShowWhen(false).setUsesChronometer(false)
+        }
+        return builder.build()
     }
 
     private fun servicePendingIntent(action: String, requestCode: Int): PendingIntent =

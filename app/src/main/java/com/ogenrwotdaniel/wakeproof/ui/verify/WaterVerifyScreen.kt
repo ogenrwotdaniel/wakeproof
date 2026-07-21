@@ -47,9 +47,10 @@ import com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService
 import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
 
 /**
- * Two-photo hydration verification: photograph the FULL container, drink,
- * photograph it EMPTY; Kimi judges. The alarm keeps ringing, ducked while the
- * wizard runs. Offline/no-key falls back to a 30s honor-mode hold.
+ * Two-photo hydration verification: photograph the bottle's water line against
+ * its printed ml scale, drink some, photograph it again; the model reads both
+ * levels and logs the drop as ml consumed. The alarm keeps ringing, ducked
+ * while the wizard runs. Offline/no-key falls back to a 30s honor-mode hold.
  */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -69,7 +70,7 @@ fun WaterVerifyScreen(
     // Duck the ringtone while the wizard runs; quietest while drinking/proving.
     LaunchedEffect(state.step) {
         val volume = when (state.step) {
-            WaterVerifyViewModel.Step.CAPTURE_EMPTY, WaterVerifyViewModel.Step.UPLOADING -> 0.2f
+            WaterVerifyViewModel.Step.CAPTURE_AFTER, WaterVerifyViewModel.Step.UPLOADING -> 0.2f
             else -> 0.5f
         }
         AlarmRingingService.setVolume(context, volume)
@@ -84,10 +85,10 @@ fun WaterVerifyScreen(
         ) {
             Text(
                 text = when (state.step) {
-                    WaterVerifyViewModel.Step.CAPTURE_FULL -> "Step 1/3 — photograph your FULL ~${state.waterAmountMl} ml bottle or glass"
-                    WaterVerifyViewModel.Step.CONFIRM_FULL -> "Step 1/3 — use this photo?"
-                    WaterVerifyViewModel.Step.CAPTURE_EMPTY -> "Step 2/3 — drink it all, then photograph the SAME container EMPTY"
-                    WaterVerifyViewModel.Step.UPLOADING -> "Step 3/3 — verifying…"
+                    WaterVerifyViewModel.Step.CAPTURE_BEFORE -> "Step 1/3 — photograph your bottle so the water line AND the ml marks are clearly readable"
+                    WaterVerifyViewModel.Step.CONFIRM_BEFORE -> "Step 1/3 — use this photo? (marks must be legible)"
+                    WaterVerifyViewModel.Step.CAPTURE_AFTER -> "Step 2/3 — drink at least ${state.waterAmountMl} ml, then photograph the SAME bottle again"
+                    WaterVerifyViewModel.Step.UPLOADING -> "Step 3/3 — reading the water level…"
                     WaterVerifyViewModel.Step.SUCCESS -> "Verified!"
                     WaterVerifyViewModel.Step.FALLBACK -> "Verification unavailable"
                 },
@@ -107,22 +108,22 @@ fun WaterVerifyScreen(
 
             Box(modifier = Modifier.weight(1f)) {
                 when (state.step) {
-                    WaterVerifyViewModel.Step.CAPTURE_FULL ->
+                    WaterVerifyViewModel.Step.CAPTURE_BEFORE ->
                         if (cameraPermission.status.isGranted) {
-                            PhotoCaptureView(onCaptured = viewModel::onFullCaptured)
+                            PhotoCaptureView(onCaptured = viewModel::onBeforeCaptured)
                         } else {
                             CameraDeniedHint()
                         }
 
-                    WaterVerifyViewModel.Step.CONFIRM_FULL -> Column {
-                        state.fullPhoto?.let { photo ->
+                    WaterVerifyViewModel.Step.CONFIRM_BEFORE -> Column {
+                        state.beforePhoto?.let { photo ->
                             val bitmap = remember(photo) {
                                 BitmapFactory.decodeByteArray(photo, 0, photo.size)
                             }
                             bitmap?.let {
                                 Image(
                                     bitmap = it.asImageBitmap(),
-                                    contentDescription = "Full container photo",
+                                    contentDescription = "Before photo",
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .weight(1f),
@@ -131,17 +132,17 @@ fun WaterVerifyScreen(
                             }
                         }
                         Spacer(Modifier.height(12.dp))
-                        Button(onClick = viewModel::onFullConfirmed, modifier = Modifier.fillMaxWidth()) {
-                            Text("Looks good — I'll drink it now")
+                        Button(onClick = viewModel::onBeforeConfirmed, modifier = Modifier.fillMaxWidth()) {
+                            Text("Looks good — I'll drink now")
                         }
-                        OutlinedButton(onClick = viewModel::onRetakeFull, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = viewModel::onRetakeBefore, modifier = Modifier.fillMaxWidth()) {
                             Text("Retake")
                         }
                     }
 
-                    WaterVerifyViewModel.Step.CAPTURE_EMPTY ->
+                    WaterVerifyViewModel.Step.CAPTURE_AFTER ->
                         if (cameraPermission.status.isGranted) {
-                            PhotoCaptureView(onCaptured = viewModel::onEmptyCaptured)
+                            PhotoCaptureView(onCaptured = viewModel::onAfterCaptured)
                         } else {
                             CameraDeniedHint()
                         }
@@ -153,7 +154,7 @@ fun WaterVerifyScreen(
                     ) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(16.dp))
-                        Text("Sending both photos to the vision AI…")
+                        Text("Reading the before/after levels off the ml marks…")
                     }
 
                     WaterVerifyViewModel.Step.SUCCESS -> Column(
@@ -163,7 +164,7 @@ fun WaterVerifyScreen(
                     ) {
                         Text(text = "💧", style = MaterialTheme.typography.displayLarge)
                         Text(
-                            text = "${state.waterAmountMl} ml down. Logged.",
+                            text = "${state.consumedMl} ml down. Logged.",
                             style = MaterialTheme.typography.headlineSmall,
                             textAlign = TextAlign.Center
                         )

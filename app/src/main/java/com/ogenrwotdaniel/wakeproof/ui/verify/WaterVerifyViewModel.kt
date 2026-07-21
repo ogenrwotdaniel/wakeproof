@@ -17,9 +17,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Drives the two-photo water verification wizard: capture full → drink →
- * capture empty → Kimi verdict. Falls back to a 30s honor-mode hold when the
- * API is unreachable/unconfigured (logged UNVERIFIED), and opens the
+ * Drives the two-photo water verification wizard: photograph the bottle's
+ * water line against its printed ml scale (before) → drink some → photograph
+ * it again (after) → the model reads both levels and the drop is logged as the
+ * amount consumed, on any bottle size. Falls back to a 30s honor-mode hold when
+ * the API is unreachable/unconfigured (logged UNVERIFIED), and opens the
  * emergency dismiss after 3 rejections (logged SKIPPED).
  */
 @HiltViewModel
@@ -29,16 +31,17 @@ class WaterVerifyViewModel @Inject constructor(
     settingsRepository: SettingsRepository
 ) : ViewModel() {
 
-    enum class Step { CAPTURE_FULL, CONFIRM_FULL, CAPTURE_EMPTY, UPLOADING, SUCCESS, FALLBACK }
+    enum class Step { CAPTURE_BEFORE, CONFIRM_BEFORE, CAPTURE_AFTER, UPLOADING, SUCCESS, FALLBACK }
 
     data class UiState(
-        val step: Step = Step.CAPTURE_FULL,
-        val fullPhoto: ByteArray? = null,
+        val step: Step = Step.CAPTURE_BEFORE,
+        val beforePhoto: ByteArray? = null,
         val rejectionReason: String? = null,
         val rejections: Int = 0,
         val emergencyAvailable: Boolean = false,
         val emergencyHoldSeconds: Int = 60,
         val waterAmountMl: Int = 500,
+        val consumedMl: Int = 0,
         val motivation: String? = null,
         val fallbackReason: String? = null
     )
@@ -58,29 +61,30 @@ class WaterVerifyViewModel @Inject constructor(
         }
     }
 
-    fun onFullCaptured(bytes: ByteArray) {
-        _uiState.update { it.copy(step = Step.CONFIRM_FULL, fullPhoto = bytes) }
+    fun onBeforeCaptured(bytes: ByteArray) {
+        _uiState.update { it.copy(step = Step.CONFIRM_BEFORE, beforePhoto = bytes) }
     }
 
-    fun onRetakeFull() {
-        _uiState.update { it.copy(step = Step.CAPTURE_FULL, fullPhoto = null) }
+    fun onRetakeBefore() {
+        _uiState.update { it.copy(step = Step.CAPTURE_BEFORE, beforePhoto = null) }
     }
 
-    fun onFullConfirmed() {
-        _uiState.update { it.copy(step = Step.CAPTURE_EMPTY) }
+    fun onBeforeConfirmed() {
+        _uiState.update { it.copy(step = Step.CAPTURE_AFTER) }
     }
 
-    fun onEmptyCaptured(bytes: ByteArray) {
-        val full = _uiState.value.fullPhoto ?: run {
-            _uiState.update { it.copy(step = Step.CAPTURE_FULL) }
+    fun onAfterCaptured(bytes: ByteArray) {
+        val before = _uiState.value.beforePhoto ?: run {
+            _uiState.update { it.copy(step = Step.CAPTURE_BEFORE) }
             return
         }
         _uiState.update { it.copy(step = Step.UPLOADING, rejectionReason = null) }
         viewModelScope.launch {
-            when (val result = kimiRepository.verifyWater(full, bytes)) {
+            val result = kimiRepository.verifyWater(before, bytes, _uiState.value.waterAmountMl)
+            when (result) {
                 is KimiResult.Success -> {
                     val verdict = result.value
-                    if (verdict.verified) onVerdictAccepted() else onVerdictRejected(verdict.reason, verdict)
+                    if (verdict.verified) onVerdictAccepted(verdict) else onVerdictRejected(verdict.reason, verdict)
                 }
                 KimiResult.NoKey -> enterFallback("No Kimi API key configured.")
                 KimiResult.NetworkError -> enterFallback("No network connection.")
@@ -108,29 +112,30 @@ class WaterVerifyViewModel @Inject constructor(
         }
     }
 
-    private suspend fun onVerdictAccepted() {
+    private suspend fun onVerdictAccepted(verdict: com.ogenrwotdaniel.wakeproof.data.WaterVerdict) {
+        val consumed = verdict.consumedMl
         runCatching {
             completionRepository.log(
-                GoalKind.WATER, CompletionStatus.VERIFIED, amount = _uiState.value.waterAmountMl
+                GoalKind.WATER, CompletionStatus.VERIFIED, amount = consumed
             )
         }
-        _uiState.update { it.copy(step = Step.SUCCESS) }
+        _uiState.update { it.copy(step = Step.SUCCESS, consumedMl = consumed) }
         val message = kimiRepository.motivationalMessage(
-            "Drank ${_uiState.value.waterAmountMl} ml of water, camera-verified"
+            "Drank $consumed ml of water, camera-verified against the bottle's ml marks"
         )
         _uiState.update { it.copy(motivation = message) }
     }
 
     private fun onVerdictRejected(reason: String, verdict: com.ogenrwotdaniel.wakeproof.data.WaterVerdict) {
         val rejections = _uiState.value.rejections + 1
-        // Photo-1/container problems restart the whole wizard; an unconvincing
-        // "empty" photo only repeats the second shot.
-        val backTo = if (!verdict.sameContainer || !verdict.photo1Full) Step.CAPTURE_FULL
-        else Step.CAPTURE_EMPTY
+        // A wrong/unreadable bottle restarts the whole wizard; a valid bottle
+        // whose level just didn't drop enough only repeats the "after" shot.
+        val backTo = if (!verdict.sameContainer || !verdict.scaleVisible) Step.CAPTURE_BEFORE
+        else Step.CAPTURE_AFTER
         _uiState.update {
             it.copy(
                 step = backTo,
-                fullPhoto = if (backTo == Step.CAPTURE_FULL) null else it.fullPhoto,
+                beforePhoto = if (backTo == Step.CAPTURE_BEFORE) null else it.beforePhoto,
                 rejectionReason = reason.ifBlank { "Rejected by the verifier." },
                 rejections = rejections,
                 emergencyAvailable = rejections >= MAX_REJECTIONS

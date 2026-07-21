@@ -29,13 +29,18 @@ sealed interface KimiResult<out T> {
 @Serializable
 data class FlashcardDraft(val front: String = "", val back: String = "")
 
-/** The strict-JSON verdict for the two-photo water check. */
+/**
+ * The strict-JSON verdict for the two-photo water check. The bottle carries a
+ * printed ml scale; the model reads the water line against it before and after
+ * drinking, and [consumedMl] is the drop between the two.
+ */
 @Serializable
 data class WaterVerdict(
     @SerialName("same_container") val sameContainer: Boolean = false,
-    @SerialName("capacity_estimate_ml") val capacityEstimateMl: Int = 0,
-    @SerialName("photo1_full") val photo1Full: Boolean = false,
-    @SerialName("photo2_empty") val photo2Empty: Boolean = false,
+    @SerialName("scale_visible") val scaleVisible: Boolean = false,
+    @SerialName("before_level_ml") val beforeLevelMl: Int = 0,
+    @SerialName("after_level_ml") val afterLevelMl: Int = 0,
+    @SerialName("consumed_ml") val consumedMl: Int = 0,
     val verified: Boolean = false,
     val reason: String = ""
 )
@@ -55,13 +60,22 @@ class KimiRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
     /**
-     * Sends both photos in one request. The returned verdict's [WaterVerdict.verified]
-     * is re-enforced locally: same container AND 400–800 ml AND full-then-empty.
+     * Sends the before/after photos in one request. Verdict is re-computed
+     * locally (the model's own `verified` is ignored): same bottle AND a legible
+     * ml scale in both AND the level dropped by at least [minConsumedMl] (less a
+     * small reading tolerance, since printed marks are coarse). [WaterVerdict.consumedMl]
+     * is always recomputed as before − after so downstream logging uses the real amount.
      */
-    suspend fun verifyWater(fullPhoto: ByteArray, emptyPhoto: ByteArray): KimiResult<WaterVerdict> {
+    suspend fun verifyWater(
+        beforePhoto: ByteArray,
+        afterPhoto: ByteArray,
+        minConsumedMl: Int
+    ): KimiResult<WaterVerdict> {
         val encoder = Base64.getEncoder()
-        val images = listOf(fullPhoto, emptyPhoto).map {
-            encoder.encodeToString(imageCompressor.compressToJpeg(it, MAX_IMAGE_DIMENSION, JPEG_QUALITY))
+        val images = listOf(beforePhoto, afterPhoto).map {
+            encoder.encodeToString(
+                imageCompressor.compressToJpeg(it, WATER_IMAGE_DIMENSION, WATER_JPEG_QUALITY)
+            )
         }
         val request = KimiChatRequest(
             model = keyStore.getProvider().model,
@@ -71,7 +85,8 @@ class KimiRepository @Inject constructor(
                 KimiMessage(
                     "user",
                     imagesWithTextContent(
-                        "Image 1 is the BEFORE photo, image 2 is the AFTER photo. Respond with the JSON only.",
+                        "Image 1 is BEFORE drinking, image 2 is AFTER drinking. Read the water " +
+                            "line against the printed ml scale in each. Respond with the JSON only.",
                         images
                     )
                 )
@@ -79,12 +94,13 @@ class KimiRepository @Inject constructor(
         )
         return call(request) { content ->
             val verdict = json.decodeFromString<WaterVerdict>(stripMarkdownFences(content))
+            val consumed = (verdict.beforeLevelMl - verdict.afterLevelMl).coerceAtLeast(0)
             verdict.copy(
-                verified = verdict.verified &&
-                    verdict.sameContainer &&
-                    verdict.capacityEstimateMl in 400..800 &&
-                    verdict.photo1Full &&
-                    verdict.photo2Empty
+                consumedMl = consumed,
+                verified = verdict.sameContainer &&
+                    verdict.scaleVisible &&
+                    verdict.beforeLevelMl > verdict.afterLevelMl &&
+                    consumed >= (minConsumedMl - READING_TOLERANCE_ML)
             )
         }
     }
@@ -258,6 +274,15 @@ class KimiRepository @Inject constructor(
         const val MAX_IMAGE_DIMENSION = 1024
         const val JPEG_QUALITY = 80
 
+        // Water photos keep a larger, sharper frame so the small printed ml
+        // marks stay legible to the vision model.
+        const val WATER_IMAGE_DIMENSION = 1600
+        const val WATER_JPEG_QUALITY = 88
+
+        // Printed scales are ~100 ml apart, so allow the reading to fall a little
+        // short of the target before rejecting.
+        const val READING_TOLERANCE_ML = 50
+
         val FLASHCARD_SYSTEM_PROMPT = """
             You turn study notes (text or a photo of notes) into concise flashcards for
             spaced repetition. Rules:
@@ -271,22 +296,28 @@ class KimiRepository @Inject constructor(
         """.trimIndent()
 
         val WATER_SYSTEM_PROMPT = """
-            You are a strict hydration verifier. You receive two photos: photo 1 (before)
-            and photo 2 (after). Decide:
-            - same_container: are both photos of the SAME physical container (same shape,
-              material, labels, surroundings)? Different containers = false.
-            - capacity_estimate_ml: your best integer estimate of the container's capacity.
-            - photo1_full: is the container in photo 1 essentially full of water?
-            - photo2_empty: is the container in photo 2 essentially empty (a few drops ok;
-              half-full = false)?
-            - verified: true ONLY if same_container AND capacity between 400 and 800 ml
-              AND photo1_full AND photo2_empty.
+            You are a strict hydration verifier for a water bottle that has a printed
+            millilitre scale down its side. You receive two photos of the SAME bottle:
+            image 1 is BEFORE drinking, image 2 is AFTER drinking. In each photo find the
+            water line (the top surface of the water) and read it against the nearest
+            printed ml mark. Decide:
+            - same_container: are both photos the SAME physical bottle (shape, colour, cap,
+              printed scale, surroundings)? A different bottle = false.
+            - scale_visible: is a printed ml scale legible in BOTH photos AND can you read
+              the water line against it? If the scale or the water line is unreadable in
+              either photo = false.
+            - before_level_ml: the water level in image 1, in ml, read from the scale.
+            - after_level_ml: the water level in image 2, in ml, read from the scale.
+            - consumed_ml: before_level_ml minus after_level_ml (0 if the level did not drop).
+            - verified: true ONLY if same_container AND scale_visible AND the level clearly
+              dropped from before to after.
             - reason: one short sentence explaining your verdict.
-            Be skeptical: mismatched containers, tiny cups, partially-drunk bottles, or
-            photos of screens/pictures must be rejected.
+            Bottle size does not matter — read whatever scale is printed, up to 2000 ml.
+            Be skeptical: the same level in both photos, an after level HIGHER than before
+            (a refill), a different bottle, or a photo of a screen/picture must be rejected.
             Respond with ONLY this JSON object, no markdown, no extra text:
-            {"same_container": bool, "capacity_estimate_ml": int, "photo1_full": bool,
-             "photo2_empty": bool, "verified": bool, "reason": "string"}
+            {"same_container": bool, "scale_visible": bool, "before_level_ml": int,
+             "after_level_ml": int, "consumed_ml": int, "verified": bool, "reason": "string"}
         """.trimIndent()
     }
 }

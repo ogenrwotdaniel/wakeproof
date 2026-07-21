@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "WakeProof"
 include(":app")
+include(":wear")

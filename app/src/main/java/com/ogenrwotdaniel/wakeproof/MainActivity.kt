@@ -14,7 +14,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.launch
 import com.ogenrwotdaniel.wakeproof.ui.MainViewModel
+import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.widget.WakeProofWidget
+import javax.inject.Inject
 import com.ogenrwotdaniel.wakeproof.ui.navigation.HomeRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.OnboardingRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.WakeProofNavGraph
@@ -31,6 +33,8 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    @Inject lateinit var wearStatsSync: WearStatsSync
+
     override fun onStart() {
         super.onStart()
         AppForeground.set(true)
@@ -38,9 +42,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         AppForeground.set(false)
-        // Refresh the home-screen widget with whatever changed this session.
+        // Refresh the home-screen widget and the paired watch tile with whatever
+        // changed this session.
         lifecycleScope.launch {
             runCatching { WakeProofWidget().updateAll(applicationContext) }
+            runCatching { wearStatsSync.push() }
         }
         super.onStop()
     }

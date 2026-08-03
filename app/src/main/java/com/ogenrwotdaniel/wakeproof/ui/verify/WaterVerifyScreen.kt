@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,10 +48,11 @@ import com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService
 import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
 
 /**
- * Two-photo hydration verification: photograph the bottle's water line against
- * its printed ml scale, drink some, photograph it again; the model reads both
- * levels and logs the drop as ml consumed. The alarm keeps ringing, ducked
- * while the wizard runs. Offline/no-key falls back to a 30s honor-mode hold.
+ * Photo hydration verification: shoot the bottle, drink, shoot it again; the drop
+ * in the water level is credited in ml and the shots repeat until the per-alarm
+ * target is covered (see [WaterVerifyViewModel]). No printed ml scale needed. The
+ * alarm keeps ringing, ducked while the wizard runs. Offline/no-key falls back to
+ * a 30s honor-mode hold.
  */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -85,16 +87,33 @@ fun WaterVerifyScreen(
         ) {
             Text(
                 text = when (state.step) {
-                    WaterVerifyViewModel.Step.CAPTURE_BEFORE -> "Step 1/3 — photograph your bottle so the water line AND the ml marks are clearly readable"
-                    WaterVerifyViewModel.Step.CONFIRM_BEFORE -> "Step 1/3 — use this photo? (marks must be legible)"
-                    WaterVerifyViewModel.Step.CAPTURE_AFTER -> "Step 2/3 — drink at least ${state.waterAmountMl} ml, then photograph the SAME bottle again"
-                    WaterVerifyViewModel.Step.UPLOADING -> "Step 3/3 — reading the water level…"
+                    WaterVerifyViewModel.Step.CAPTURE_BEFORE ->
+                        "Photograph your bottle side-on, so the water line is clearly visible"
+                    WaterVerifyViewModel.Step.CONFIRM_BEFORE ->
+                        "Use this photo? The water line must be easy to see"
+                    WaterVerifyViewModel.Step.CAPTURE_AFTER ->
+                        if (state.consumedMl > 0) {
+                            "${state.consumedMl} of ${state.waterAmountMl} ml — drink more, " +
+                                "then shoot the same bottle again"
+                        } else {
+                            "Drink some water, then photograph the SAME bottle again"
+                        }
+                    WaterVerifyViewModel.Step.UPLOADING -> "Comparing the water levels…"
                     WaterVerifyViewModel.Step.SUCCESS -> "Verified!"
                     WaterVerifyViewModel.Step.FALLBACK -> "Verification unavailable"
                 },
                 style = MaterialTheme.typography.titleLarge,
                 textAlign = TextAlign.Center
             )
+            state.progressNote?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+            }
             state.rejectionReason?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -103,6 +122,13 @@ fun WaterVerifyScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center
                 )
+            }
+            // Bottle empty before the target is met? Top it up and re-baseline —
+            // only drops from a baseline count, so this can't be used to cheat.
+            if (state.step == WaterVerifyViewModel.Step.CAPTURE_AFTER && state.consumedMl > 0) {
+                TextButton(onClick = viewModel::onRefilled) {
+                    Text("I refilled the bottle — new baseline photo")
+                }
             }
             Spacer(Modifier.height(16.dp))
 
@@ -154,7 +180,7 @@ fun WaterVerifyScreen(
                     ) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(16.dp))
-                        Text("Reading the before/after levels off the ml marks…")
+                        Text("Measuring how far the level dropped…")
                     }
 
                     WaterVerifyViewModel.Step.SUCCESS -> Column(

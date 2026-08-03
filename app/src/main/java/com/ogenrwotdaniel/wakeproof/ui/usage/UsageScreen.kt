@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -37,8 +38,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.AppUsage
 import com.ogenrwotdaniel.wakeproof.data.DayUsage
+import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import java.time.DayOfWeek
 import java.time.LocalDate
 
@@ -158,7 +161,7 @@ fun UsageScreen(
                     val max = snap.topApps.maxOfOrNull { it.minutes } ?: 1
                     snap.topApps.forEach { app ->
                         val limit = limits[app.packageName]
-                        val overLimit = limit != null && app.minutes >= limit
+                        val overLimit = limit != null && app.minutes >= limit.minutes
                         Column(Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -171,7 +174,14 @@ fun UsageScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 TextButton(onClick = { limitDialogFor = app }) {
-                                    Text(limit?.let { "⏳ ${it}m cap" } ?: "Set limit")
+                                    Text(
+                                        when {
+                                            limit == null -> "Set limit"
+                                            limit.mode == LimitMode.BLOCK ->
+                                                "🔒 ${limit.minutes}m cap"
+                                            else -> "⏳ ${limit.minutes}m cap"
+                                        }
+                                    )
                                 }
                                 Text(
                                     text = formatMinutes(app.minutes),
@@ -218,7 +228,7 @@ fun UsageScreen(
                     }
                     Button(
                         onClick = viewModel::generateReport,
-                        enabled = viewModel.hasApiKey && !reportUi.generating,
+                        enabled = !reportUi.generating,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
@@ -229,21 +239,12 @@ fun UsageScreen(
                             }
                         )
                     }
-                    if (!viewModel.hasApiKey) {
-                        Text(
-                            text = "Needs an API key (Settings → AI provider — Gemini is free). " +
-                                "Only aggregate numbers are sent, never app contents.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    reportUi.error?.let {
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
+                    Text(
+                        text = "Written on your phone from your own logs — no key, no network, " +
+                            "nothing sent anywhere.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -255,8 +256,9 @@ fun UsageScreen(
         LimitDialog(
             app = app,
             currentLimit = limits[app.packageName],
-            onSet = { minutes ->
-                viewModel.setLimit(app.packageName, minutes)
+            canEnforceBlocks = viewModel.canEnforceBlocks(),
+            onSet = { minutes, mode ->
+                viewModel.setLimit(app.packageName, minutes, mode)
                 limitDialogFor = null
             },
             onDismiss = { limitDialogFor = null }
@@ -268,31 +270,69 @@ fun UsageScreen(
 @Composable
 private fun LimitDialog(
     app: AppUsage,
-    currentLimit: Int?,
-    onSet: (Int?) -> Unit,
+    currentLimit: AppLimit?,
+    canEnforceBlocks: Boolean,
+    onSet: (Int?, LimitMode) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var minutes by remember { mutableFloatStateOf((currentLimit ?: 30).toFloat()) }
+    var minutes by remember { mutableFloatStateOf((currentLimit?.minutes ?: 30).toFloat()) }
+    var mode by remember { mutableStateOf(currentLimit?.mode ?: LimitMode.NUDGE) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Daily limit — ${app.label}") },
         text = {
             Column {
-                Text("Nudge me after ${minutes.toInt()} min per day.")
+                Text("${minutes.toInt()} min per day.")
                 Slider(
                     value = minutes,
                     onValueChange = { minutes = it },
                     valueRange = 10f..240f
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == LimitMode.NUDGE,
+                        onClick = { mode = LimitMode.NUDGE },
+                        label = { Text("Nudge") }
+                    )
+                    FilterChip(
+                        selected = mode == LimitMode.BLOCK,
+                        onClick = { mode = LimitMode.BLOCK },
+                        label = { Text("Block") },
+                        enabled = canEnforceBlocks
+                    )
+                }
+                Text(
+                    text = when {
+                        mode == LimitMode.NUDGE ->
+                            "One notification when you cross it. The app keeps working."
+                        else ->
+                            "${app.label} stops opening once the ${minutes.toInt()} min are " +
+                                "spent, until midnight. There is no override, no extra " +
+                                "minutes — set this only if you mean it."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (mode == LimitMode.BLOCK) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                if (!canEnforceBlocks) {
+                    Text(
+                        text = "Blocking needs both usage access and “display over other " +
+                            "apps” (Settings → Floating timer grants the second).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSet(minutes.toInt()) }) { Text("Set") }
+            TextButton(onClick = { onSet(minutes.toInt(), mode) }) { Text("Set") }
         },
         dismissButton = {
             Row {
                 if (currentLimit != null) {
-                    TextButton(onClick = { onSet(null) }) { Text("Remove") }
+                    TextButton(onClick = { onSet(null, mode) }) { Text("Remove") }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }

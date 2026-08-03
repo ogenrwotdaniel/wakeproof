@@ -14,6 +14,7 @@ import androidx.work.WorkerParameters
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
+import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
@@ -34,15 +35,20 @@ class DistractionLimitWorker(
         val limitsRepository = DistractionLimitRepository(applicationContext)
         val usageRepository = UsageStatsRepository(applicationContext)
 
-        val limits = limitsRepository.currentLimits()
+        // Blocked apps get a wall instead, so a nudge for them would only be a
+        // notification about something the user has already been shown.
+        val limits = limitsRepository.currentLimits().filterValues { it.mode == LimitMode.NUDGE }
+        // Enforcement is separate from nudging and has to survive reboots, so every
+        // periodic run also makes sure the guard service is in the right state.
+        AppBlockService.sync(applicationContext)
         if (limits.isEmpty() || !usageRepository.hasAccess()) return Result.success()
 
         val usedToday = usageRepository.todayMinutesFor(limits.keys)
         val today = LocalDate.now().toEpochDay()
-        limits.forEach { (pkg, capMinutes) ->
+        limits.forEach { (pkg, limit) ->
             val used = usedToday[pkg] ?: 0
-            if (used >= capMinutes && limitsRepository.tryMarkNotified(pkg, today)) {
-                notifyOverLimit(usageRepository.appLabel(pkg), pkg, used, capMinutes)
+            if (used >= limit.minutes && limitsRepository.tryMarkNotified(pkg, today)) {
+                notifyOverLimit(usageRepository.appLabel(pkg), pkg, used, limit.minutes)
             }
         }
         return Result.success()

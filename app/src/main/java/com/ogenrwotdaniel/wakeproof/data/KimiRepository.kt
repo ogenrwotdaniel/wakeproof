@@ -30,46 +30,75 @@ sealed interface KimiResult<out T> {
 data class FlashcardDraft(val front: String = "", val back: String = "")
 
 /**
- * The strict-JSON verdict for the two-photo water check. The bottle carries a
- * printed ml scale; the model reads the water line against it before and after
- * drinking, and [consumedMl] is the drop between the two.
+ * The strict-JSON verdict for one before/after pair of bottle photos.
+ *
+ * The model's only hard job is the easy one: locate the water line in both shots
+ * and say how full the bottle is, as a fraction of its water column. Printed ml
+ * marks are used when they happen to be legible ([scaleMlReadable]) but are no
+ * longer required — most bottles don't have them, and reading them was where the
+ * old check failed. [consumedMl] and [accepted] are always computed locally in
+ * [KimiRepository.verifyWater], never taken from the model.
  */
 @Serializable
 data class WaterVerdict(
     @SerialName("same_container") val sameContainer: Boolean = false,
-    @SerialName("scale_visible") val scaleVisible: Boolean = false,
+    /** Is the water line locatable in BOTH photos? The one thing we insist on. */
+    @SerialName("level_readable") val levelReadable: Boolean = false,
+    /** How full the bottle is before drinking: 0.0 = empty, 1.0 = full to the brim. */
+    @SerialName("before_fill") val beforeFill: Double = 0.0,
+    @SerialName("after_fill") val afterFill: Double = 0.0,
+    /** True only if printed ml marks are legible in both photos. */
+    @SerialName("scale_ml_readable") val scaleMlReadable: Boolean = false,
     @SerialName("before_level_ml") val beforeLevelMl: Int = 0,
     @SerialName("after_level_ml") val afterLevelMl: Int = 0,
-    @SerialName("consumed_ml") val consumedMl: Int = 0,
-    val verified: Boolean = false,
-    val reason: String = ""
+    /** The bottle was topped up between the shots, so the drop means nothing. */
+    val refilled: Boolean = false,
+    val reason: String = "",
+    /** Locally computed: ml drunk between these two photos. */
+    val consumedMl: Int = 0,
+    /** Locally computed: this pair is a real, measurable drop on the same bottle. */
+    val accepted: Boolean = false
 )
 
 /**
- * All Kimi (Moonshot) calls: water verification, motivational messages, and
- * the Pomodoro study chat. One retry with backoff on 429/5xx; malformed
- * responses become [KimiResult.ApiError], never a crash.
+ * The calls that still need a model on the other end: water verification,
+ * flashcard drafting and the Pomodoro study chat. One retry with backoff on
+ * 429/5xx; malformed responses become [KimiResult.ApiError], never a crash.
+ *
+ * Motivational lines and the weekly report used to live here too. Both were
+ * arithmetic and phrasing over numbers the app already holds, so they moved
+ * on-device — see [com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation] and
+ * [WeeklyReportGenerator]. Neither needs a key, a network, or a round trip.
  */
 @Singleton
 class KimiRepository @Inject constructor(
     private val api: KimiApi,
     private val keyStore: ApiKeyStore,
     private val imageCompressor: ImageCompressor
-) : MotivationSource {
+) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
     /**
-     * Sends the before/after photos in one request. Verdict is re-computed
-     * locally (the model's own `verified` is ignored): same bottle AND a legible
-     * ml scale in both AND the level dropped by at least [minConsumedMl] (less a
-     * small reading tolerance, since printed marks are coarse). [WaterVerdict.consumedMl]
-     * is always recomputed as before − after so downstream logging uses the real amount.
+     * Compares one before/after pair of photos of the same bottle and reports how
+     * much was drunk between them.
+     *
+     * The verdict is always re-decided locally; the model only supplies
+     * observations. A pair is [WaterVerdict.accepted] when it is the same bottle,
+     * the water line is readable in both shots, nothing was refilled, and the
+     * level fell far enough to be a real gulp rather than reading noise
+     * ([MIN_FILL_DROP] of the bottle, or a legible ml reading). It does NOT have
+     * to cover the whole per-alarm target — the caller keeps asking for more
+     * photos until the accepted amounts add up, which is what makes a single
+     * mouthful count instead of being rejected outright.
+     *
+     * [bottleCapacityMl] is the user's declared full-bottle volume, used to turn
+     * the fill-fraction drop into ml when no printed scale is legible.
      */
     suspend fun verifyWater(
         beforePhoto: ByteArray,
         afterPhoto: ByteArray,
-        minConsumedMl: Int
+        bottleCapacityMl: Int
     ): KimiResult<WaterVerdict> {
         val encoder = Base64.getEncoder()
         val images = listOf(beforePhoto, afterPhoto).map {
@@ -85,8 +114,9 @@ class KimiRepository @Inject constructor(
                 KimiMessage(
                     "user",
                     imagesWithTextContent(
-                        "Image 1 is BEFORE drinking, image 2 is AFTER drinking. Read the water " +
-                            "line against the printed ml scale in each. Respond with the JSON only.",
+                        "Image 1 is BEFORE drinking, image 2 is AFTER drinking. The bottle holds " +
+                            "about $bottleCapacityMl ml when full. Find the water line in each " +
+                            "photo and report how full the bottle is. Respond with the JSON only.",
                         images
                     )
                 )
@@ -94,37 +124,24 @@ class KimiRepository @Inject constructor(
         )
         return call(request) { content ->
             val verdict = json.decodeFromString<WaterVerdict>(stripMarkdownFences(content))
-            val consumed = (verdict.beforeLevelMl - verdict.afterLevelMl).coerceAtLeast(0)
+            val capacity = bottleCapacityMl.coerceAtLeast(MIN_BOTTLE_CAPACITY_ML)
+            val fillDrop = verdict.beforeFill.coerceIn(0.0, 1.0) - verdict.afterFill.coerceIn(0.0, 1.0)
+            val scaleDrop = verdict.beforeLevelMl - verdict.afterLevelMl
+            // Printed marks win when legible and consistent; otherwise the drop in
+            // fill fraction against the declared capacity.
+            val measured =
+                if (verdict.scaleMlReadable && scaleDrop > 0) scaleDrop
+                else (fillDrop * capacity).toInt()
+            // Floor to 10 ml: under-crediting is fairer than inventing millilitres.
+            val consumed = (measured / ROUND_TO_ML * ROUND_TO_ML).coerceIn(0, capacity)
             verdict.copy(
                 consumedMl = consumed,
-                verified = verdict.sameContainer &&
-                    verdict.scaleVisible &&
-                    verdict.beforeLevelMl > verdict.afterLevelMl &&
-                    consumed >= (minConsumedMl - READING_TOLERANCE_ML)
+                accepted = verdict.sameContainer &&
+                    verdict.levelReadable &&
+                    !verdict.refilled &&
+                    consumed >= MIN_CONSUMED_ML &&
+                    (verdict.scaleMlReadable && scaleDrop > 0 || fillDrop >= MIN_FILL_DROP)
             )
-        }
-    }
-
-    /** 1–2 encouraging sentences; null on any failure (callers show nothing). */
-    override suspend fun motivationalMessage(context: String): String? {
-        val request = KimiChatRequest(
-            model = keyStore.getProvider().model,
-            temperature = 0.7,
-            maxTokens = 2048,
-            messages = listOf(
-                KimiMessage(
-                    "system",
-                    textContent(
-                        "You are a terse, upbeat discipline coach. Reply with 1-2 short " +
-                            "sentences of encouragement. No emojis, no preamble."
-                    )
-                ),
-                KimiMessage("user", textContent(context))
-            )
-        )
-        return when (val result = call(request) { it.trim() }) {
-            is KimiResult.Success -> result.value.takeIf { it.isNotBlank() }
-            else -> null
         }
     }
 
@@ -180,29 +197,6 @@ class KimiRepository @Inject constructor(
                 .filter { it.front.isNotBlank() && it.back.isNotBlank() }
                 .take(30)
         }
-    }
-
-    /** A short coaching write-up of the week from an aggregate stats summary. */
-    suspend fun weeklyReport(statsSummary: String): KimiResult<String> {
-        val request = KimiChatRequest(
-            model = keyStore.getProvider().model,
-            temperature = 0.7,
-            maxTokens = 2048,
-            messages = listOf(
-                KimiMessage(
-                    "system",
-                    textContent(
-                        "You are a supportive but honest study coach reviewing a STEM " +
-                            "student's week. From the stats given, write a report of at " +
-                            "most 130 words with exactly three short sections: " +
-                            "'Wins:', 'Watch out:' and 'Next week:' (one concrete, " +
-                            "specific suggestion). Plain text, no markdown headers."
-                    )
-                ),
-                KimiMessage("user", textContent(statsSummary))
-            )
-        )
-        return call(request) { it.trim() }
     }
 
     /**
@@ -274,14 +268,19 @@ class KimiRepository @Inject constructor(
         const val MAX_IMAGE_DIMENSION = 1024
         const val JPEG_QUALITY = 80
 
-        // Water photos keep a larger, sharper frame so the small printed ml
-        // marks stay legible to the vision model.
+        // Water photos keep a larger, sharper frame so the water line — and any
+        // printed ml marks — stay legible to the vision model.
         const val WATER_IMAGE_DIMENSION = 1600
         const val WATER_JPEG_QUALITY = 88
 
-        // Printed scales are ~100 ml apart, so allow the reading to fall a little
-        // short of the target before rejecting.
-        const val READING_TOLERANCE_ML = 50
+        /** Credited amounts are floored to this, so no ml is ever invented. */
+        const val ROUND_TO_ML = 10
+        /** Below this the level difference is reading noise, not a drink. */
+        const val MIN_CONSUMED_ML = 30
+        /** …and the same guard in fill-fraction terms (5 % of the bottle). */
+        const val MIN_FILL_DROP = 0.05
+        /** Guards against a nonsense capacity making the maths degenerate. */
+        const val MIN_BOTTLE_CAPACITY_ML = 100
 
         val FLASHCARD_SYSTEM_PROMPT = """
             You turn study notes (text or a photo of notes) into concise flashcards for
@@ -296,28 +295,40 @@ class KimiRepository @Inject constructor(
         """.trimIndent()
 
         val WATER_SYSTEM_PROMPT = """
-            You are a strict hydration verifier for a water bottle that has a printed
-            millilitre scale down its side. You receive two photos of the SAME bottle:
-            image 1 is BEFORE drinking, image 2 is AFTER drinking. In each photo find the
-            water line (the top surface of the water) and read it against the nearest
-            printed ml mark. Decide:
-            - same_container: are both photos the SAME physical bottle (shape, colour, cap,
-              printed scale, surroundings)? A different bottle = false.
-            - scale_visible: is a printed ml scale legible in BOTH photos AND can you read
-              the water line against it? If the scale or the water line is unreadable in
-              either photo = false.
-            - before_level_ml: the water level in image 1, in ml, read from the scale.
-            - after_level_ml: the water level in image 2, in ml, read from the scale.
-            - consumed_ml: before_level_ml minus after_level_ml (0 if the level did not drop).
-            - verified: true ONLY if same_container AND scale_visible AND the level clearly
-              dropped from before to after.
-            - reason: one short sentence explaining your verdict.
-            Bottle size does not matter — read whatever scale is printed, up to 2000 ml.
-            Be skeptical: the same level in both photos, an after level HIGHER than before
-            (a refill), a different bottle, or a photo of a screen/picture must be rejected.
+            You compare two photos of the SAME drinking bottle or glass: image 1 is BEFORE
+            drinking, image 2 is AFTER drinking. Your job is to locate the water line (the
+            top surface of the liquid) in each photo and say how full the container is.
+            Do NOT require a printed millilitre scale — most bottles have none.
+
+            Measure fullness as a fraction of the container's own water column: 0.0 = empty,
+            0.5 = half full, 1.0 = filled to the brim. Judge it from the visible geometry
+            (bottle height, shoulder, base), not from any label. An opaque or metal bottle,
+            a hand covering the water line, heavy glare or motion blur means you cannot see
+            the level — say so instead of guessing.
+
+            Report:
+            - same_container: are both photos the SAME physical container (shape, colour,
+              cap, label, surroundings)? A different bottle = false.
+            - level_readable: can you locate the water line in BOTH photos? If either is
+              opaque, covered, blurred or too dark = false.
+            - before_fill / after_fill: fullness fraction in image 1 and image 2 (0.0-1.0).
+            - scale_ml_readable: true ONLY if printed ml marks are legible in BOTH photos
+              and you can read the water line against them; otherwise false.
+            - before_level_ml / after_level_ml: the readings in ml if scale_ml_readable,
+              else 0.
+            - refilled: true if the container was topped up between the shots (after_fill
+              higher than before_fill, fresh condensation/bubbles at a higher line).
+            - reason: one short sentence explaining what you saw.
+
+            Be skeptical: an identical level in both photos, a different container, a photo
+            of a screen or of another photo, or a level that went UP must be reported
+            honestly — do not flatter the user. Small honest drops are fine to report; the
+            app decides whether the amount is enough.
+
             Respond with ONLY this JSON object, no markdown, no extra text:
-            {"same_container": bool, "scale_visible": bool, "before_level_ml": int,
-             "after_level_ml": int, "consumed_ml": int, "verified": bool, "reason": "string"}
+            {"same_container": bool, "level_readable": bool, "before_fill": number,
+             "after_fill": number, "scale_ml_readable": bool, "before_level_ml": int,
+             "after_level_ml": int, "refilled": bool, "reason": "string"}
         """.trimIndent()
     }
 }

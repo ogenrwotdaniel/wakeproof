@@ -63,19 +63,22 @@ class KimiRepositoryTest {
         return """{"id":"1","choices":[{"index":0,"message":{"role":"assistant","content":$escaped}}]}"""
     }
 
+    /** A clean pair: no printed scale, bottle went from 90 % to 50 % full. */
     private val goodVerdict = """
-        {"same_container": true, "scale_visible": true, "before_level_ml": 900,
-         "after_level_ml": 400, "consumed_ml": 500, "verified": true, "reason": "ok"}
+        {"same_container": true, "level_readable": true, "before_fill": 0.9,
+         "after_fill": 0.5, "scale_ml_readable": false, "before_level_ml": 0,
+         "after_level_ml": 0, "refilled": false, "reason": "ok"}
     """.trimIndent()
 
     @Test
-    fun `verifyWater parses a clean verdict`() = runTest {
+    fun `verifyWater credits the fill drop against the declared capacity`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(goodVerdict)))
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
+        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750)
         assertTrue(result is KimiResult.Success)
         val verdict = (result as KimiResult.Success).value
-        assertTrue(verdict.verified)
-        assertEquals(500, verdict.consumedMl)
+        assertTrue(verdict.accepted)
+        // 0.4 of 750 ml = 300 ml.
+        assertEquals(300, verdict.consumedMl)
     }
 
     @Test
@@ -84,30 +87,87 @@ class KimiRepositoryTest {
             MockResponse().setResponseCode(200)
                 .setBody(chatBody("```json\n$goodVerdict\n```"))
         )
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
-        assertTrue((result as KimiResult.Success).value.verified)
+        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750)
+        assertTrue((result as KimiResult.Success).value.accepted)
     }
 
     @Test
-    fun `verifyWater rejects locally when the level dropped less than the target`() = runTest {
-        // 900 -> 700 is only 200 ml, below the 500 ml target minus tolerance.
-        val smallSip = goodVerdict.replace("\"after_level_ml\": 400", "\"after_level_ml\": 700")
-        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(smallSip)))
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
-        assertFalse((result as KimiResult.Success).value.verified)
+    fun `a partial gulp is accepted and credited, not rejected`() = runTest {
+        // 10 % of a 750 ml bottle = 75 ml: nowhere near a 500 ml target, but real.
+        val sip = goodVerdict.replace("\"after_fill\": 0.5", "\"after_fill\": 0.8")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(sip)))
+        val verdict = (repository.verifyWater(
+            byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750
+        ) as KimiResult.Success).value
+        assertTrue(verdict.accepted)
+        assertEquals(70, verdict.consumedMl) // floored to 10 ml
     }
 
     @Test
-    fun `verifyWater accepts any bottle size when enough was drunk`() = runTest {
-        // A 1500 ml bottle drunk from 1500 down to 900 = 600 ml consumed.
-        val bigBottle = goodVerdict
-            .replace("\"before_level_ml\": 900", "\"before_level_ml\": 1500")
-            .replace("\"after_level_ml\": 400", "\"after_level_ml\": 900")
-        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(bigBottle)))
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
-        val verdict = (result as KimiResult.Success).value
-        assertTrue(verdict.verified)
-        assertEquals(600, verdict.consumedMl)
+    fun `noise-level differences are not a drink`() = runTest {
+        // 2 % of the bottle is within reading error.
+        val noise = goodVerdict.replace("\"after_fill\": 0.5", "\"after_fill\": 0.88")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(noise)))
+        val verdict = (repository.verifyWater(
+            byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750
+        ) as KimiResult.Success).value
+        assertFalse(verdict.accepted)
+    }
+
+    @Test
+    fun `an unreadable water line is rejected however big the apparent drop`() = runTest {
+        val unreadable = goodVerdict.replace("\"level_readable\": true", "\"level_readable\": false")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(unreadable)))
+        val verdict = (repository.verifyWater(
+            byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750
+        ) as KimiResult.Success).value
+        assertFalse(verdict.accepted)
+    }
+
+    @Test
+    fun `a different bottle or a refill is rejected`() = runTest {
+        val swapped = goodVerdict.replace("\"same_container\": true", "\"same_container\": false")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(swapped)))
+        assertFalse(
+            (repository.verifyWater(
+                byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750
+            ) as KimiResult.Success).value.accepted
+        )
+
+        val refilled = goodVerdict.replace("\"refilled\": false", "\"refilled\": true")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(refilled)))
+        assertFalse(
+            (repository.verifyWater(
+                byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750
+            ) as KimiResult.Success).value.accepted
+        )
+    }
+
+    @Test
+    fun `legible ml marks win over the fill estimate`() = runTest {
+        val scaled = goodVerdict
+            .replace("\"scale_ml_readable\": false", "\"scale_ml_readable\": true")
+            .replace("\"before_level_ml\": 0", "\"before_level_ml\": 900")
+            .replace("\"after_level_ml\": 0", "\"after_level_ml\": 400")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(scaled)))
+        val verdict = (repository.verifyWater(
+            byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 1000
+        ) as KimiResult.Success).value
+        assertTrue(verdict.accepted)
+        assertEquals(500, verdict.consumedMl)
+    }
+
+    @Test
+    fun `credit never exceeds the bottle capacity`() = runTest {
+        val scaled = goodVerdict
+            .replace("\"scale_ml_readable\": false", "\"scale_ml_readable\": true")
+            .replace("\"before_level_ml\": 0", "\"before_level_ml\": 5000")
+            .replace("\"after_level_ml\": 0", "\"after_level_ml\": 100")
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(scaled)))
+        val verdict = (repository.verifyWater(
+            byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750
+        ) as KimiResult.Success).value
+        assertEquals(750, verdict.consumedMl)
     }
 
     @Test
@@ -116,14 +176,14 @@ class KimiRepositoryTest {
             MockResponse().setResponseCode(200)
                 .setBody(chatBody("Sorry, I cannot verify this."))
         )
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
+        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750)
         assertTrue(result is KimiResult.ApiError)
     }
 
     @Test
     fun `missing key short-circuits without a network call`() = runTest {
         fakeKeyStore.stored = null
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
+        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750)
         assertEquals(KimiResult.NoKey, result)
         assertEquals(0, server.requestCount)
     }
@@ -132,7 +192,7 @@ class KimiRepositoryTest {
     fun `retries once on 500 then succeeds`() = runTest {
         server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
         server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody(goodVerdict)))
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
+        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750)
         assertTrue(result is KimiResult.Success)
         assertEquals(2, server.requestCount)
     }
@@ -140,18 +200,9 @@ class KimiRepositoryTest {
     @Test
     fun `client error does not retry`() = runTest {
         server.enqueue(MockResponse().setResponseCode(401).setBody("unauthorized"))
-        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), minConsumedMl = 500)
+        val result = repository.verifyWater(byteArrayOf(1), byteArrayOf(2), bottleCapacityMl = 750)
         assertTrue(result is KimiResult.ApiError)
         assertEquals(401, (result as KimiResult.ApiError).code)
         assertEquals(1, server.requestCount)
-    }
-
-    @Test
-    fun `motivationalMessage returns trimmed text and null on failure`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(chatBody("  Go get it.  ")))
-        assertEquals("Go get it.", repository.motivationalMessage("streak 5"))
-
-        server.enqueue(MockResponse().setResponseCode(401).setBody("no"))
-        assertEquals(null, repository.motivationalMessage("streak 5"))
     }
 }

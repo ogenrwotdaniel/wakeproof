@@ -21,6 +21,15 @@ enum class FocusSound(
     DEEP("deep_noise", "Deep noise", R.raw.deep_noise, gain = 1.2f);
 
     companion object {
-        fun fromId(id: String?): FocusSound = entries.firstOrNull { it.id == id } ?: AMBIENT
+        /**
+         * Sentinel sound id meaning "Spotify is the study sound". Stored in the
+         * same setting as the bundled loops so the choice is exclusive: picking
+         * Spotify silences the loops instead of stacking a second track on top.
+         */
+        const val SPOTIFY_ID = "spotify"
+
+        /** null when [id] selects Spotify (an outside player) over a bundled loop. */
+        fun fromId(id: String?): FocusSound? =
+            if (id == SPOTIFY_ID) null else entries.firstOrNull { it.id == id } ?: AMBIENT
     }
 }

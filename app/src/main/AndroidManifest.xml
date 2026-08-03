@@ -31,12 +31,15 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
-    <!-- Visibility of launcher apps, needed to label screen-time entries. -->
+    <!-- Visibility of launcher apps, needed to label screen-time entries.
+         Spotify is named explicitly so the study-music button can tell whether
+         it is installed and deep-link straight into it. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <package android:name="com.spotify.music" />
     </queries>
 
     <!-- allowBackup=false: restoring EncryptedSharedPreferences from a backup of another
@@ -76,6 +79,28 @@
             android:directBootAware="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- The wall for apps past their daily cap. Empty taskAffinity puts it in
+             its own task, so throwing it up never disturbs (or clears) the main
+             WakeProof back stack; singleTask stops it stacking on itself, and
+             excludeFromRecents keeps it from being something to swipe back into. -->
+        <activity
+            android:name=".distraction.BlockedActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WakeProof" />
+
+        <service
+            android:name=".distraction.AppBlockService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="app_usage_limit_enforcement" />
+        </service>
 
         <service
             android:name=".pomodoro.PomodoroTimerService"

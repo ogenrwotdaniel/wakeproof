@@ -14,7 +14,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -118,6 +120,19 @@ fun SettingsScreen(
                 onCommit = viewModel::setWaterAmountMl
             )
             SliderSetting(
+                label = "Bottle size",
+                value = settings.bottleCapacityMl,
+                range = 250f..2000f,
+                unit = "ml",
+                onCommit = viewModel::setBottleCapacityMl
+            )
+            Text(
+                text = "Your bottle's full capacity — how the camera check turns the drop in " +
+                    "the water level into millilitres. No printed ml marks needed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            SliderSetting(
                 label = "Emergency hold",
                 value = settings.emergencyHoldSeconds,
                 range = 30f..120f,
@@ -137,17 +152,37 @@ fun SettingsScreen(
             )
             SwitchSetting(
                 label = "Study sound",
-                description = "Ambient sound plays automatically during focus phases. Pick the " +
-                    "sound (rain, fireplace…) on the Pomodoro screen. Turn off to listen to " +
-                    "Spotify or another app instead.",
+                description = "Sound plays automatically during focus phases. Pick the source " +
+                    "on the Pomodoro screen — an ambient loop (rain, fireplace…) or Spotify, " +
+                    "one or the other. Turn off for silence.",
                 checked = settings.focusMusicEnabled,
                 onCheckedChange = viewModel::setFocusMusicEnabled
             )
+            if (settings.focusMusicEnabled || settings.breakMusicEnabled) {
+                SliderSetting(
+                    label = "Sound fade in / out",
+                    value = settings.soundFadeSeconds,
+                    range = 0f..15f,
+                    unit = "s",
+                    onCommit = viewModel::setSoundFadeSeconds
+                )
+                Text(
+                    text = "The ambient loop eases up from silence when a phase starts and " +
+                        "back down before it ends, instead of snapping on and off. " +
+                        "0 turns fading off. Spotify is controlled with media keys, which " +
+                        "carry no volume, so it is unaffected.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             SwitchSetting(
-                label = "Keep screen awake in focus",
-                description = "The screen won't time out while a focus countdown is on screen.",
-                checked = settings.focusKeepScreenOn,
-                onCheckedChange = viewModel::setFocusKeepScreenOn
+                label = "Keep screen awake in sessions",
+                description = "The screen never times out while a timer is counting down — " +
+                    "focus AND breaks, on any screen of the app, and over other apps too " +
+                    "while the floating timer bubble is showing. Only pausing or stopping " +
+                    "lets it sleep again.",
+                checked = settings.sessionKeepScreenOn,
+                onCheckedChange = viewModel::setSessionKeepScreenOn
             )
             SwitchSetting(
                 label = "Lock phone during focus",
@@ -186,6 +221,14 @@ fun SettingsScreen(
                     ) { Text("Allow display over other apps") }
                 }
             }
+
+            HorizontalDivider()
+
+            SpotifySection(
+                playlistUri = settings.spotifyPlaylistUri,
+                installed = viewModel.spotifyInstalled,
+                onPlaylistChange = viewModel::setSpotifyPlaylistUri
+            )
 
             HorizontalDivider()
 
@@ -252,6 +295,71 @@ fun SettingsScreen(
                 editingAlarm = null
             },
             onDismiss = { editingAlarm = null }
+        )
+    }
+}
+
+/**
+ * Spotify hand-off settings: the playlist the study button opens (paste the
+ * "Share → Copy link" URL). Whether playback follows the timer is not a switch
+ * here — it follows from picking Spotify as the study sound on the Pomodoro
+ * screen. No Spotify login happens either: WakeProof only deep-links out and
+ * sends media keys, so there is nothing to authorise.
+ */
+@Composable
+private fun SpotifySection(
+    playlistUri: String,
+    installed: Boolean,
+    onPlaylistChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Seeded once per saved value: typing must not be clobbered by DataStore emissions.
+    var draft by remember(playlistUri) { mutableStateOf(playlistUri) }
+
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = "Spotify", style = MaterialTheme.typography.titleMedium)
+        if (!installed) {
+            Text(
+                text = "Spotify isn't installed — the button on the Pomodoro screen will " +
+                    "offer to install it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Focus playlist link") },
+            placeholder = { Text("https://open.spotify.com/playlist/…") },
+            singleLine = true
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { onPlaylistChange(draft) },
+                enabled = draft.trim() != playlistUri
+            ) { Text("Save") }
+            if (playlistUri.isNotBlank()) {
+                OutlinedButton(
+                    onClick = {
+                        draft = ""
+                        onPlaylistChange("")
+                    }
+                ) { Text("Clear") }
+            }
+        }
+        Text(
+            text = "In Spotify: playlist → ⋯ → Share → Copy link, then paste it here. " +
+                "Left blank, the button just opens Spotify.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "To let Spotify be your study sound, pick it in the sound row on the " +
+                "Pomodoro screen. It then plays and pauses with the timer, and no ambient " +
+                "loop plays underneath it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

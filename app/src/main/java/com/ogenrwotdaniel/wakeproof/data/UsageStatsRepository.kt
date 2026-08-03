@@ -1,6 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.data
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -92,6 +93,71 @@ class UsageStatsRepository @Inject constructor(
                 .mapValues { (_, stats) -> stats.totalTimeInForeground / 60_000 }
         }
 
+    /**
+     * Foreground milliseconds so far today for [packages], summed from raw
+     * resume/pause events rather than aggregated stats.
+     *
+     * Enforcement needs this: `totalTimeInForeground` is only guaranteed to
+     * settle once an app leaves the foreground, so a cap checked that way can sit
+     * crossed for minutes while the app is still on screen — exactly the moment
+     * the kill switch is meant to act. Walking events counts the session in
+     * progress by closing it off at `now`.
+     */
+    suspend fun todayForegroundMillisFor(packages: Set<String>): Map<String, Long> =
+        withContext(Dispatchers.IO) {
+            if (!hasAccess() || packages.isEmpty()) return@withContext emptyMap()
+            val usm = context.getSystemService(UsageStatsManager::class.java)
+            val now = System.currentTimeMillis()
+            val start = LocalDate.now().atStartOfDay(ZoneId.systemDefault())
+                .toInstant().toEpochMilli()
+
+            val totals = mutableMapOf<String, Long>()
+            val resumedAt = mutableMapOf<String, Long>()
+            val events = usm.queryEvents(start, now)
+            val event = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val pkg = event.packageName
+                if (pkg !in packages) continue
+                when (event.eventType) {
+                    // Keep the earliest open resume: back-to-back resumes with no
+                    // pause between them are activity swaps inside one session.
+                    UsageEvents.Event.ACTIVITY_RESUMED ->
+                        resumedAt.putIfAbsent(pkg, event.timeStamp)
+
+                    UsageEvents.Event.ACTIVITY_PAUSED,
+                    UsageEvents.Event.ACTIVITY_STOPPED ->
+                        resumedAt.remove(pkg)?.let { from ->
+                            totals[pkg] = (totals[pkg] ?: 0L) + (event.timeStamp - from)
+                        }
+                }
+            }
+            // Anything still open is on screen right now, so it runs until now.
+            resumedAt.forEach { (pkg, from) ->
+                totals[pkg] = (totals[pkg] ?: 0L) + (now - from)
+            }
+            totals
+        }
+
+    /**
+     * The package on screen, or null when no resume event landed in the recent
+     * window — which usually means the user has been sitting in the same app.
+     * Callers are expected to hold on to the last non-null answer.
+     */
+    suspend fun foregroundPackage(): String? = withContext(Dispatchers.IO) {
+        if (!hasAccess()) return@withContext null
+        val usm = context.getSystemService(UsageStatsManager::class.java)
+        val now = System.currentTimeMillis()
+        val events = usm.queryEvents(now - FOREGROUND_LOOKBACK_MILLIS, now)
+        val event = UsageEvents.Event()
+        var latest: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) latest = event.packageName
+        }
+        latest
+    }
+
     /** Human label for [packageName], falling back to the raw package. */
     fun appLabel(packageName: String): String = runCatching {
         val pm = context.packageManager
@@ -109,5 +175,8 @@ class UsageStatsRepository @Inject constructor(
 
     private companion object {
         const val TOP_APP_COUNT = 10
+
+        /** How far back [foregroundPackage] looks for a resume event. */
+        const val FOREGROUND_LOOKBACK_MILLIS = 60_000L
     }
 }

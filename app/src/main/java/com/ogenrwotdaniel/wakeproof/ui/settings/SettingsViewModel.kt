@@ -16,6 +16,7 @@ import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
+import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -42,7 +43,8 @@ class SettingsViewModel @Inject constructor(
     private val alarmScheduler: AlarmScheduler,
     private val settingsRepository: SettingsRepository,
     private val completionRepository: CompletionRepository,
-    private val reliabilityChecker: ReliabilityChecker
+    private val reliabilityChecker: ReliabilityChecker,
+    spotifyController: SpotifyController
 ) : ViewModel() {
 
     private val _exportMessage = MutableStateFlow<String?>(null)
@@ -132,12 +134,20 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setWaterAmountMl(value.coerceIn(250, 1000)) }
     }
 
+    fun setBottleCapacityMl(value: Int) {
+        viewModelScope.launch { settingsRepository.setBottleCapacityMl(value.coerceIn(250, 2000)) }
+    }
+
     fun setEmergencyHoldSeconds(value: Int) {
         viewModelScope.launch { settingsRepository.setEmergencyHoldSeconds(value.coerceIn(30, 120)) }
     }
 
     fun setFocusMusicEnabled(value: Boolean) {
         viewModelScope.launch { settingsRepository.setFocusMusicEnabled(value) }
+    }
+
+    fun setSoundFadeSeconds(value: Int) {
+        viewModelScope.launch { settingsRepository.setSoundFadeSeconds(value.coerceIn(0, 15)) }
     }
 
     fun setFocusLockPhone(value: Boolean) {
@@ -148,8 +158,15 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setFocusFloatingTimer(value) }
     }
 
-    fun setFocusKeepScreenOn(value: Boolean) {
-        viewModelScope.launch { settingsRepository.setFocusKeepScreenOn(value) }
+    fun setSessionKeepScreenOn(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setSessionKeepScreenOn(value) }
+    }
+
+    /** True when the Spotify app is present, so the UI can adapt its wording. */
+    val spotifyInstalled: Boolean = spotifyController.isInstalled()
+
+    fun setSpotifyPlaylistUri(value: String) {
+        viewModelScope.launch { settingsRepository.setSpotifyPlaylistUri(value) }
     }
 
     fun setDailyFocusGoalMinutes(value: Int) {

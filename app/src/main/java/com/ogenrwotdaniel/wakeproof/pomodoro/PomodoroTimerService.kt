@@ -19,6 +19,7 @@ import com.ogenrwotdaniel.wakeproof.AppForeground
 import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
+import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import com.ogenrwotdaniel.wakeproof.wear.WearTimerSync
@@ -58,6 +59,13 @@ data class PomodoroState(
     val targetFocusBlocks: Int = 0
 )
 
+/** What the floating bubble should be doing right now. */
+private data class OverlayTarget(
+    val state: PomodoroState,
+    val show: Boolean,
+    val keepScreenOn: Boolean
+)
+
 /**
  * Foreground service (specialUse: countdown timer) so Pomodoro cycles survive
  * backgrounding. Publishes state through a process-wide StateFlow; completed
@@ -69,6 +77,7 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var completionRepository: CompletionRepository
     @Inject lateinit var wearTimerSync: WearTimerSync
+    @Inject lateinit var spotify: SpotifyController
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
@@ -77,42 +86,85 @@ class PomodoroTimerService : Service() {
     private var longBreakSeconds = 15 * 60
     private var musicPlayer: MediaPlayer? = null
     private var currentSound: FocusSound? = null
+    /** Volume ramp in flight; cancelled whenever the target volume changes. */
+    private var fadeJob: Job? = null
+    /** MediaPlayer has no getVolume, so the ramp tracks where it left off. */
+    private var musicVolume = 0f
+    /** Latest settings, so the ticker can consult them without suspending. */
+    private var latestSettings = WakeProofSettings()
+    /** Short-lived player for the transition chime; released on completion. */
+    private var chimePlayer: MediaPlayer? = null
+    /** Last play/pause we sent Spotify; null = we have never touched playback. */
+    private var spotifyPlaying: Boolean? = null
     private val overlay by lazy { FloatingTimerOverlay(this) }
 
     override fun onCreate() {
         super.onCreate()
         // Ambient sound rides the timer: focus and break phases each have their
-        // own toggle, and switching the selected sound swaps the loop live.
+        // own toggle, and switching the selected sound swaps the loop live. A
+        // null sound means Spotify is the chosen source — no loop at all.
+        scope.launch { settingsRepository.settings.collect { latestSettings = it } }
         scope.launch {
             combine(state, settingsRepository.settings) { s, cfg ->
-                val wanted = s.active && s.running &&
-                    if (s.phase == PomodoroPhase.FOCUS) cfg.focusMusicEnabled
-                    else cfg.breakMusicEnabled
-                wanted to FocusSound.fromId(cfg.focusSoundId)
-            }.distinctUntilChanged().collect { (shouldPlay, sound) ->
+                val sound = FocusSound.fromId(cfg.focusSoundId)
+                Triple(sound != null && soundWanted(s, cfg), sound, cfg.soundFadeSeconds)
+            }.distinctUntilChanged().collect { (shouldPlay, sound, fade) ->
                 if (sound != currentSound) {
+                    fadeJob?.cancel()
                     musicPlayer?.release()
                     musicPlayer = null
+                    musicVolume = 0f
                     currentSound = sound
                 }
-                if (shouldPlay) startMusic(sound) else pauseMusic()
+                if (shouldPlay && sound != null) startMusic(sound, fade) else pauseMusic(fade)
             }
         }
         // Floating countdown bubble: visible whenever a timer is active but the
         // app UI isn't. Runs on Main (scope's dispatcher), as WindowManager requires.
         scope.launch {
             combine(state, settingsRepository.settings, AppForeground.visible) { s, cfg, appVisible ->
-                s to (cfg.focusFloatingTimer && s.active && !appVisible)
-            }.collect { (s, show) ->
-                if (show) {
+                OverlayTarget(
+                    state = s,
+                    show = cfg.focusFloatingTimer && s.active && !appVisible,
+                    // Keeps the screen alive outside the app too, for as long as the
+                    // bubble is up and the timer is counting down — breaks included.
+                    keepScreenOn = cfg.sessionKeepScreenOn && s.active && s.running
+                )
+            }.collect { target ->
+                if (target.show) {
                     overlay.show()
-                    overlay.update(s)
+                    overlay.setKeepScreenOn(target.keepScreenOn)
+                    overlay.update(target.state)
                 } else {
                     overlay.hide()
                 }
             }
         }
+        // Spotify picked as the study sound: it rides the timer through the very
+        // same phase toggles the loops use. Media keys only — playback resumes
+        // when the phase wants sound and pauses on break/pause/stop. We never
+        // send a pause before having sent a play, so a timer cannot silence
+        // music the user started for something else.
+        scope.launch {
+            combine(state, settingsRepository.settings) { s, cfg ->
+                cfg.focusSoundId == FocusSound.SPOTIFY_ID && soundWanted(s, cfg)
+            }.distinctUntilChanged().collect { shouldPlay ->
+                if (shouldPlay == spotifyPlaying) return@collect
+                if (spotifyPlaying == null && !shouldPlay) return@collect
+                spotifyPlaying = shouldPlay
+                if (shouldPlay) spotify.play() else spotify.pause()
+            }
+        }
     }
+
+    /**
+     * Whether the phase the timer sits in wants sound at all — each phase has its
+     * own toggle, and a paused or stopped timer is always silent. Shared by the
+     * bundled loops and Spotify so exactly one of them can ever be playing.
+     */
+    private fun soundWanted(s: PomodoroState, cfg: WakeProofSettings) =
+        s.active && s.running &&
+            if (s.phase == PomodoroPhase.FOCUS) cfg.focusMusicEnabled else cfg.breakMusicEnabled
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -185,14 +237,63 @@ class PomodoroTimerService : Service() {
         // that is cancelled immediately below.
         CoroutineScope(Dispatchers.IO).launch { runCatching { wearTimerSync.clear() } }
         scope.cancel()
+        // Session over: stop the music we started, but never touch playback we didn't.
+        if (spotifyPlaying == true) {
+            spotify.pause()
+            spotifyPlaying = false
+        }
         overlay.hide()
-        musicPlayer?.release()
+        // Stopping shouldn't cut the loop dead either, but [scope] is cancelled
+        // above — hand the player to a detached ramp that releases it when done.
+        val dying = musicPlayer
+        val fade = latestSettings.soundFadeSeconds
         musicPlayer = null
+        if (dying != null) {
+            CoroutineScope(Dispatchers.Default).launch {
+                runCatching { ramp(dying, 0f, fade) }
+                runCatching { dying.release() }
+            }
+        }
+        chimePlayer?.release()
+        chimePlayer = null
         _state.value = PomodoroState()
         super.onDestroy()
     }
 
-    private fun startMusic(sound: FocusSound) {
+    /** Loudness the loop settles at once faded in. */
+    private fun peakVolumeOf(sound: FocusSound) = (MUSIC_VOLUME * sound.gain).coerceAtMost(1f)
+
+    private fun MediaPlayer.applyVolume(v: Float) {
+        musicVolume = v
+        setVolume(v, v)
+    }
+
+    /**
+     * Walks the loop's volume to [to] over [seconds], on a curve rather than a
+     * straight line: the ear hears loudness roughly logarithmically, so a linear
+     * amplitude ramp sounds like it jumps at the quiet end and crawls at the loud
+     * one. Squaring the progress spends more of the ramp down low, which is what
+     * reads as a smooth fade.
+     */
+    private suspend fun ramp(player: MediaPlayer, to: Float, seconds: Int) {
+        val from = musicVolume
+        if (seconds <= 0 || from == to) {
+            runCatching { player.applyVolume(to) }
+            return
+        }
+        val steps = seconds * FADE_STEPS_PER_SECOND
+        val stepMillis = 1000L / FADE_STEPS_PER_SECOND
+        for (step in 1..steps) {
+            delay(stepMillis)
+            val progress = step.toFloat() / steps
+            val eased =
+                if (to > from) progress * progress
+                else 1f - (1f - progress) * (1f - progress)
+            runCatching { player.applyVolume(from + (to - from) * eased) }
+        }
+    }
+
+    private fun startMusic(sound: FocusSound, fadeSeconds: Int) {
         runCatching {
             val player = musicPlayer ?: MediaPlayer.create(
                 this, sound.res, // seamless ambient loop, generated asset
@@ -201,17 +302,55 @@ class PomodoroTimerService : Service() {
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build(),
                 0
-            )?.apply {
-                isLooping = true
-                val volume = (MUSIC_VOLUME * sound.gain).coerceAtMost(1f)
-                setVolume(volume, volume)
-            }.also { musicPlayer = it }
-            if (player?.isPlaying == false) player.start()
+            )?.apply { isLooping = true }.also { musicPlayer = it } ?: return
+            val peak = peakVolumeOf(sound)
+            fadeJob?.cancel()
+            if (!player.isPlaying) {
+                // Start from silence so the loop arrives under you rather than
+                // snapping on at full level the instant the phase flips.
+                player.applyVolume(if (fadeSeconds > 0) 0f else peak)
+                player.start()
+            }
+            fadeJob = scope.launch { ramp(player, peak, fadeSeconds) }
         }
     }
 
-    private fun pauseMusic() {
-        runCatching { if (musicPlayer?.isPlaying == true) musicPlayer?.pause() }
+    /**
+     * Eases the loop down to silence and only then pauses it, so resuming later
+     * picks the loop up where it left off instead of restarting the waveform.
+     */
+    private fun pauseMusic(fadeSeconds: Int) {
+        val player = musicPlayer ?: return
+        fadeJob?.cancel()
+        fadeJob = scope.launch {
+            if (runCatching { player.isPlaying }.getOrDefault(false)) {
+                ramp(player, 0f, fadeSeconds)
+                runCatching { player.pause() }
+            }
+        }
+    }
+
+    /**
+     * Begins the fade-out [soundFadeSeconds] *before* the phase ends, so the loop
+     * has reached silence by the time the chime lands — a fade that only starts at
+     * the boundary bleeds into the next phase. Skipped when the next phase wants
+     * sound anyway, since dipping to zero and climbing straight back is worse than
+     * simply carrying on. Fires on the single tick where the countdown equals the
+     * fade length, so repeated calls cannot restart the ramp and stall it short of
+     * silence.
+     */
+    private fun maybeFadeOutBeforePhaseEnd(s: PomodoroState) {
+        val fade = latestSettings.soundFadeSeconds
+        if (fade <= 0 || s.remainingSeconds != fade) return
+        if (musicPlayer?.isPlaying != true) return
+        val nextPhaseWantsSound = if (s.phase == PomodoroPhase.FOCUS) {
+            // A timed session that ends on this block goes quiet for good.
+            val done = s.completedFocusSessions + 1
+            s.targetFocusBlocks !in 1..done && latestSettings.breakMusicEnabled
+        } else {
+            latestSettings.focusMusicEnabled
+        }
+        if (!nextPhaseWantsSound) pauseMusic(fade)
     }
 
     private fun startTicker() {
@@ -225,6 +364,7 @@ class PomodoroTimerService : Service() {
                     onPhaseComplete()
                 } else {
                     _state.update { it.copy(remainingSeconds = it.remainingSeconds - 1) }
+                    maybeFadeOutBeforePhaseEnd(_state.value)
                 }
                 updateNotification()
             }
@@ -232,8 +372,12 @@ class PomodoroTimerService : Service() {
     }
 
     private suspend fun onPhaseComplete() {
-        chime()
         val current = _state.value
+        // The session-complete notification alerts loudly on its own channel, so
+        // chiming here too would fire the same tone twice over itself.
+        val finishing = current.phase == PomodoroPhase.FOCUS &&
+            current.targetFocusBlocks in 1..(current.completedFocusSessions + 1)
+        if (!finishing) chime()
         if (current.phase == PomodoroPhase.FOCUS) {
             runCatching {
                 completionRepository.log(
@@ -246,7 +390,7 @@ class PomodoroTimerService : Service() {
             if (current.targetFocusBlocks in 1..done) {
                 getSystemService(NotificationManager::class.java).notify(
                     SESSION_DONE_NOTIFICATION_ID,
-                    Notification.Builder(this, CHANNEL_ID)
+                    Notification.Builder(this, ALERT_CHANNEL_ID)
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
                         .setContentTitle("Session complete 🎉")
                         .setContentText("$done pomodoros done — great work.")
@@ -286,23 +430,67 @@ class PomodoroTimerService : Service() {
         PomodoroPhase.LONG_BREAK -> longBreakSeconds
     }
 
+    /**
+     * Phase-transition alert, deliberately loud: the tone is played through the
+     * ALARM stream at full player volume rather than handed to [RingtoneManager],
+     * whose notification stream sits far too low to be heard over study music or
+     * from across the room — and a transition you miss defeats the timer. Falls
+     * back to the plain ringtone if the player cannot be built.
+     */
     private fun chime() {
-        runCatching {
-            RingtoneManager.getRingtone(
-                this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            )?.play()
+        chimePlayer?.release()
+        chimePlayer = null
+        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val started = uri != null && runCatching {
+            MediaPlayer().also { player ->
+                chimePlayer = player
+                player.setAudioAttributes(ALERT_AUDIO_ATTRIBUTES)
+                player.setDataSource(this, uri)
+                player.setVolume(1f, 1f)
+                player.setOnPreparedListener { it.start() }
+                player.setOnCompletionListener { done ->
+                    done.release()
+                    if (chimePlayer === done) chimePlayer = null
+                }
+                player.setOnErrorListener { _, _, _ -> true } // stay silent, never crash
+                player.prepareAsync()
+            }
+        }.isSuccess
+        if (!started) {
+            chimePlayer = null
+            runCatching { RingtoneManager.getRingtone(this, uri)?.play() }
         }
+        // Two firm pulses at full amplitude: one soft buzz goes unnoticed in a pocket.
         getSystemService(VibratorManager::class.java).defaultVibrator.vibrate(
-            VibrationEffect.createOneShot(400, VibrationEffect.DEFAULT_AMPLITUDE),
-            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_NOTIFICATION)
+            VibrationEffect.createWaveform(
+                longArrayOf(0, 400, 200, 400), intArrayOf(0, 255, 0, 255), -1
+            ),
+            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM)
         )
     }
 
     private fun createChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID, "Pomodoro timer", NotificationManager.IMPORTANCE_LOW
-        ).apply { description = "Live Pomodoro countdown" }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID, "Pomodoro timer", NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Live Pomodoro countdown" }
+        )
+        // Separate channel for the end of a session: the countdown itself has to
+        // stay silent, but this one must cut through, so it alerts on the alarm
+        // stream instead of the quieter notification stream.
+        manager.createNotificationChannel(
+            NotificationChannel(
+                ALERT_CHANNEL_ID, "Pomodoro alerts", NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Session-complete alerts"
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                    ALERT_AUDIO_ATTRIBUTES
+                )
+                enableVibration(true)
+            }
+        )
     }
 
     private fun updateNotification() {
@@ -388,11 +576,21 @@ class PomodoroTimerService : Service() {
         private const val ACTION_RESET = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESET"
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.POMODORO_STOP"
         private const val CHANNEL_ID = "wakeproof_pomodoro"
+        private const val ALERT_CHANNEL_ID = "wakeproof_pomodoro_alerts"
         private const val NOTIFICATION_ID = 2
         private const val SESSION_DONE_NOTIFICATION_ID = 3
         private const val SESSIONS_PER_LONG_BREAK = 4
         private const val MUSIC_VOLUME = 0.55f
+
+        /** Ramp resolution. 20 Hz is well under the threshold where steps are audible. */
+        private const val FADE_STEPS_PER_SECOND = 20
         private const val EXTRA_SESSION_MINUTES = "session_minutes"
+
+        /** Alarm-stream routing, so timer alerts are heard over study music. */
+        private val ALERT_AUDIO_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
 
         /** [sessionMinutes] > 0 runs a timed session (e.g. 60 or 120); 0 loops forever. */
         fun start(context: Context, sessionMinutes: Int = 0) = context.startForegroundService(

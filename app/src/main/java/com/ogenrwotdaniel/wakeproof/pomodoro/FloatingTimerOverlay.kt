@@ -87,6 +87,22 @@ class FloatingTimerOverlay(private val context: Context) {
         }
     }
 
+    /**
+     * Keeps the screen from timing out while the bubble is visible. The bubble is
+     * a real (if tiny) window, so FLAG_KEEP_SCREEN_ON on it holds the screen on
+     * even though another app is in front — that's how "keep screen awake in
+     * focus" survives leaving WakeProof, with no wake lock to leak.
+     */
+    fun setKeepScreenOn(enabled: Boolean) {
+        val params = layoutParams ?: return
+        val view = bubble ?: return
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        val updated = if (enabled) params.flags or flag else params.flags and flag.inv()
+        if (updated == params.flags) return
+        params.flags = updated
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
     /** Updates the countdown text; no-op while hidden. */
     fun update(state: PomodoroState) {
         phaseView?.text = state.phase.label + if (state.running) "" else " · paused"

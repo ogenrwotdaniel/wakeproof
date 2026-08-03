@@ -2,6 +2,7 @@ package com.ogenrwotdaniel.wakeproof
 
 import android.app.ActivityManager
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.launch
+import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.ui.MainViewModel
 import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.widget.WakeProofWidget
@@ -38,6 +40,10 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AppForeground.set(true)
+        // Bring the app-limit guard up (or down) to match the current limits and
+        // grants. Done from a visible Activity, which is always allowed to start a
+        // foreground service.
+        lifecycleScope.launch { runCatching { AppBlockService.sync(applicationContext) } }
     }
 
     override fun onStop() {
@@ -66,6 +72,18 @@ class MainActivity : ComponentActivity() {
                         if (lock && !pinned) startLockTask()
                         else if (!lock && pinned) stopLockTask()
                     }
+                }
+            }
+        }
+        // "Screen must not go off during focus": held on the window, so it covers
+        // every screen in the app while a focus countdown runs (the Pomodoro screen
+        // does not have to be the one on top). STARTED, not RESUMED, so it survives
+        // a transparent dialog/permission sheet on top.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.keepScreenOnActive.collect { keepOn ->
+                    if (keepOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
         }

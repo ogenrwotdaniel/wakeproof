@@ -7,6 +7,7 @@ import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
+import com.ogenrwotdaniel.wakeproof.verify.Achievement
 import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
 import com.ogenrwotdaniel.wakeproof.verify.pushup.PoseFrame
 import com.ogenrwotdaniel.wakeproof.verify.pushup.PosePoint
@@ -127,7 +128,7 @@ class PushupVerifyViewModel @Inject constructor(
                 )
             }
             val message = runCatching {
-                motivationSource.motivationalMessage("Completed ${_uiState.value.target} pushups at 5 AM")
+                motivationSource.motivationalMessage(Achievement.Pushups(_uiState.value.target))
             }.getOrNull()
             _uiState.update { it.copy(motivation = message) }
         }

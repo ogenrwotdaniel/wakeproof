@@ -1,6 +1,5 @@
 package com.ogenrwotdaniel.wakeproof.di
 
-import com.ogenrwotdaniel.wakeproof.data.KimiRepository
 import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.AndroidImageCompressor
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
@@ -9,6 +8,7 @@ import com.ogenrwotdaniel.wakeproof.data.remote.KIMI_BASE_URL
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiKeyStore
 import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
+import com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -68,7 +68,12 @@ object NetworkModule {
             .create(KimiApi::class.java)
     }
 
+    /**
+     * On-device, always. The line is one sentence about a number the app already
+     * knows, so there is nothing for a remote model to add — and plenty for a
+     * 5 AM network round trip to cost.
+     */
     @Provides
     @Singleton
-    fun provideMotivationSource(repository: KimiRepository): MotivationSource = repository
+    fun provideMotivationSource(offline: OfflineMotivation): MotivationSource = offline
 }

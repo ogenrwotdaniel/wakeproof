@@ -35,7 +35,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +45,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -70,20 +68,14 @@ fun PomodoroScreen(
     val chat by viewModel.chat.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val thoughts by viewModel.thoughts.collectAsStateWithLifecycle()
+    val spotifyError by viewModel.spotifyError.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val chatAllowed = viewModel.hasKimiKey && (!timer.active || !timer.running ||
         timer.phase != PomodoroPhase.FOCUS)
 
-    // Keep the screen awake while a focus countdown is running (opt-out in
-    // Settings). Cleared automatically when the screen leaves composition.
-    val view = LocalView.current
-    val keepAwake = settings.focusKeepScreenOn && timer.active && timer.running &&
-        timer.phase == PomodoroPhase.FOCUS
-    DisposableEffect(keepAwake) {
-        view.keepScreenOn = keepAwake
-        onDispose { view.keepScreenOn = false }
-    }
+    // Keeping the screen awake during focus is owned by MainActivity (window-wide,
+    // every screen), not by this composable — see MainViewModel.keepScreenOnActive.
 
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -233,9 +225,22 @@ fun PomodoroScreen(
                 focusEnabled = settings.focusMusicEnabled,
                 breakEnabled = settings.breakMusicEnabled,
                 soundId = settings.focusSoundId,
+                spotifyInstalled = viewModel.spotifyInstalled,
                 onFocusChange = viewModel::setMusicEnabled,
                 onBreakChange = viewModel::setBreakMusicEnabled,
                 onSoundChange = viewModel::setFocusSound
+            )
+
+            Spacer(Modifier.height(8.dp))
+            SpotifyControls(
+                installed = viewModel.spotifyInstalled,
+                hasPlaylist = settings.spotifyPlaylistUri.isNotBlank(),
+                followsTimer = settings.focusSoundId == FocusSound.SPOTIFY_ID,
+                error = spotifyError,
+                onOpen = viewModel::openSpotify,
+                onPlayPause = viewModel::spotifyPlayPause,
+                onNext = viewModel::spotifyNext,
+                onPrevious = viewModel::spotifyPrevious
             )
             if (settings.focusLockPhone) {
                 Text(
@@ -407,9 +412,11 @@ private fun ThoughtParking(
 }
 
 /**
- * Ambient sound controls: independent focus/break toggles plus the sound
- * picker (shown while either toggle is on). Turning both off frees the
- * audio output for Spotify or any other music app.
+ * Study-sound controls: independent focus/break toggles plus the source picker
+ * (shown while either toggle is on). The picker is exclusive — one of the
+ * bundled loops *or* Spotify, never both — so choosing Spotify silences the
+ * ambient loop and hands the same phase toggles to Spotify instead. Turning
+ * both toggles off frees the audio output entirely.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -417,12 +424,15 @@ private fun MusicControls(
     focusEnabled: Boolean,
     breakEnabled: Boolean,
     soundId: String,
+    spotifyInstalled: Boolean,
     onFocusChange: (Boolean) -> Unit,
     onBreakChange: (Boolean) -> Unit,
     onSoundChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val spotifyPicked = soundId == FocusSound.SPOTIFY_ID
     Column(modifier = modifier.fillMaxWidth()) {
+        Text(text = "Study sound", style = MaterialTheme.typography.titleSmall)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -448,7 +458,86 @@ private fun MusicControls(
                         label = { Text(sound.label) }
                     )
                 }
+                // Spotify sits in the same row as the loops because it is the
+                // same choice: whatever is selected here is the only sound.
+                // Kept visible when already picked, even if Spotify got removed.
+                if (spotifyInstalled || spotifyPicked) {
+                    FilterChip(
+                        selected = spotifyPicked,
+                        onClick = { onSoundChange(FocusSound.SPOTIFY_ID) },
+                        label = { Text("🎧 Spotify") }
+                    )
+                }
             }
+            if (spotifyPicked) {
+                Text(
+                    text = "Spotify is your study sound — no ambient loop plays. Open the " +
+                        "playlist once below so Spotify owns playback; after that the timer " +
+                        "plays and pauses it for you.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Spotify hand-off row: one button to jump into the saved playlist (or the app),
+ * plus transport keys that work without leaving WakeProof — the useful half when
+ * "Lock phone during focus" makes switching apps impossible. Media keys reach
+ * whichever app currently owns the media session, so they only hit Spotify while
+ * Spotify is the phone's active player.
+ */
+@Composable
+private fun SpotifyControls(
+    installed: Boolean,
+    hasPlaylist: Boolean,
+    followsTimer: Boolean,
+    error: String?,
+    onOpen: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onOpen) {
+                Text(
+                    when {
+                        !installed -> "Get Spotify"
+                        hasPlaylist -> "🎧 Focus playlist"
+                        else -> "🎧 Spotify"
+                    }
+                )
+            }
+            if (installed) {
+                OutlinedButton(onClick = onPrevious) { Text("⏮") }
+                OutlinedButton(onClick = onPlayPause) { Text("⏯") }
+                OutlinedButton(onClick = onNext) { Text("⏭") }
+            }
+        }
+        Text(
+            text = when {
+                !installed -> "Spotify isn't installed on this phone."
+                followsTimer -> "Spotify is your study sound: it plays and pauses with the timer."
+                hasPlaylist -> "Controls work while the phone is pinned to WakeProof."
+                else -> "Set a focus playlist in Settings to open it in one tap."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        error?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
         }
     }
 }

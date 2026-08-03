@@ -11,6 +11,7 @@ import com.ogenrwotdaniel.wakeproof.data.db.ParkedThoughtDao
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,7 @@ class PomodoroViewModel @Inject constructor(
     private val kimiRepository: KimiRepository,
     private val settingsRepository: SettingsRepository,
     private val parkedThoughtDao: ParkedThoughtDao,
+    private val spotify: SpotifyController,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
@@ -70,6 +72,23 @@ class PomodoroViewModel @Inject constructor(
     fun setFocusSound(id: String) {
         viewModelScope.launch { settingsRepository.setFocusSoundId(id) }
     }
+
+    /** Whether to offer Spotify controls at all (false → the button installs it). */
+    val spotifyInstalled: Boolean = spotify.isInstalled()
+
+    private val _spotifyError = MutableStateFlow<String?>(null)
+    val spotifyError: StateFlow<String?> = _spotifyError
+
+    /** Opens the saved playlist, or Spotify itself when none is configured. */
+    fun openSpotify() {
+        val link = settings.value.spotifyPlaylistUri
+        _spotifyError.value =
+            if (spotify.open(link)) null else "Couldn't open Spotify on this phone."
+    }
+
+    fun spotifyPlayPause() = spotify.playPause()
+    fun spotifyNext() = spotify.next()
+    fun spotifyPrevious() = spotify.previous()
 
     fun setActiveSubject(name: String) {
         viewModelScope.launch { settingsRepository.setActiveSubject(name) }

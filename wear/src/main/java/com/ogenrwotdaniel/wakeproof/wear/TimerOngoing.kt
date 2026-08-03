@@ -1,10 +1,12 @@
 package com.ogenrwotdaniel.wakeproof.wear
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.wear.ongoing.OngoingActivity
@@ -78,6 +80,17 @@ object TimerNotifier {
             manager.cancel(NOTIFICATION_ID)
             return
         }
+        // POST_NOTIFICATIONS is declared, but the watch asks for it at runtime and
+        // the user can say no — in which case there is no Now Bar item to post and
+        // the whole build-up below is wasted work. Cancelling first keeps a stale
+        // chip from outliving a revoked grant. Inlined rather than extracted to a
+        // helper because lint only credits the guard inside the same function.
+        val granted = context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            manager.cancel(NOTIFICATION_ID)
+            return
+        }
         ensureChannel(context)
         val touchIntent = PendingIntent.getActivity(
             context,
@@ -111,7 +124,7 @@ object TimerNotifier {
             .setStatus(status)
             .build()
             .apply(context)
-        runCatching { manager.notify(NOTIFICATION_ID, builder.build()) }
+        manager.notify(NOTIFICATION_ID, builder.build())
     }
 
     private fun ensureChannel(context: Context) {

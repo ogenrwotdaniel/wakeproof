@@ -17,6 +17,61 @@ import kotlinx.coroutines.withContext
 /** One app's foreground time today. */
 data class AppUsage(val packageName: String, val label: String, val minutes: Long)
 
+/** An installed app the user can put a limit on. */
+data class InstalledApp(val packageName: String, val label: String)
+
+/** One activity going to or leaving the foreground. */
+internal data class ForegroundEvent(
+    val packageName: String,
+    val className: String,
+    val resumed: Boolean,
+    val timestamp: Long
+)
+
+/**
+ * Sums per-app foreground time from activity events, closing any session still
+ * open at [now].
+ *
+ * The subtlety that makes this worth isolating: these events are per *activity*,
+ * not per app. Apps routinely trampoline — WhatsApp Business resumes
+ * `com.whatsapp.Main`, hands straight off to `HomeActivity`, then emits
+ * `Main`'s PAUSED and STOPPED afterwards. Tracking one open timestamp per
+ * package lets that trailing PAUSED close the session the *other* activity just
+ * opened, collapsing hours of use to nearly zero, so a cap never trips. Apps
+ * that live in a single activity (Instagram) measure fine, which is what makes
+ * the bug look app-specific rather than structural.
+ *
+ * So the state per package is the set of activities currently resumed; the app
+ * counts as foreground from the moment that set becomes non-empty until it
+ * empties again. PAUSED and STOPPED both arrive for the same activity, and the
+ * second one is a no-op because the class is already gone from the set.
+ */
+internal fun foldForegroundMillis(
+    events: List<ForegroundEvent>,
+    now: Long
+): Map<String, Long> {
+    val totals = mutableMapOf<String, Long>()
+    val openActivities = mutableMapOf<String, MutableSet<String>>()
+    val foregroundSince = mutableMapOf<String, Long>()
+
+    for (event in events.sortedBy { it.timestamp }) {
+        val open = openActivities.getOrPut(event.packageName) { mutableSetOf() }
+        if (event.resumed) {
+            if (open.isEmpty()) foregroundSince[event.packageName] = event.timestamp
+            open += event.className
+        } else if (open.remove(event.className) && open.isEmpty()) {
+            val from = foregroundSince.remove(event.packageName) ?: event.timestamp
+            totals[event.packageName] =
+                (totals[event.packageName] ?: 0L) + (event.timestamp - from)
+        }
+    }
+    // Anything still open is on screen right now, so it runs until now.
+    foregroundSince.forEach { (pkg, from) ->
+        totals[pkg] = (totals[pkg] ?: 0L) + (now - from)
+    }
+    return totals
+}
+
 /** One day's total screen time across launchable apps. */
 data class DayUsage(val epochDay: Long, val minutes: Long)
 
@@ -111,32 +166,26 @@ class UsageStatsRepository @Inject constructor(
             val start = LocalDate.now().atStartOfDay(ZoneId.systemDefault())
                 .toInstant().toEpochMilli()
 
-            val totals = mutableMapOf<String, Long>()
-            val resumedAt = mutableMapOf<String, Long>()
+            val collected = mutableListOf<ForegroundEvent>()
             val events = usm.queryEvents(start, now)
             val event = UsageEvents.Event()
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                val pkg = event.packageName
-                if (pkg !in packages) continue
-                when (event.eventType) {
-                    // Keep the earliest open resume: back-to-back resumes with no
-                    // pause between them are activity swaps inside one session.
-                    UsageEvents.Event.ACTIVITY_RESUMED ->
-                        resumedAt.putIfAbsent(pkg, event.timeStamp)
-
+                if (event.packageName !in packages) continue
+                val resumed = when (event.eventType) {
+                    UsageEvents.Event.ACTIVITY_RESUMED -> true
                     UsageEvents.Event.ACTIVITY_PAUSED,
-                    UsageEvents.Event.ACTIVITY_STOPPED ->
-                        resumedAt.remove(pkg)?.let { from ->
-                            totals[pkg] = (totals[pkg] ?: 0L) + (event.timeStamp - from)
-                        }
+                    UsageEvents.Event.ACTIVITY_STOPPED -> false
+                    else -> continue
                 }
+                collected += ForegroundEvent(
+                    packageName = event.packageName,
+                    className = event.className ?: "",
+                    resumed = resumed,
+                    timestamp = event.timeStamp
+                )
             }
-            // Anything still open is on screen right now, so it runs until now.
-            resumedAt.forEach { (pkg, from) ->
-                totals[pkg] = (totals[pkg] ?: 0L) + (now - from)
-            }
-            totals
+            foldForegroundMillis(collected, now)
         }
 
     /**
@@ -163,6 +212,18 @@ class UsageStatsRepository @Inject constructor(
         val pm = context.packageManager
         pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
     }.getOrDefault(packageName)
+
+    /**
+     * Every launcher-visible app, alphabetically — the pool a limit can be set on.
+     * The top-apps list only covers what was actually used today, which is far too
+     * narrow to cap something *before* it becomes a problem.
+     */
+    suspend fun installedApps(): List<InstalledApp> = withContext(Dispatchers.IO) {
+        launchableAppLabels()
+            .filterKeys { it != context.packageName }
+            .map { (pkg, label) -> InstalledApp(pkg, label) }
+            .sortedBy { it.label.lowercase() }
+    }
 
     /** Package → label for apps a launcher shows (needs the manifest <queries> block). */
     private fun launchableAppLabels(): Map<String, String> {

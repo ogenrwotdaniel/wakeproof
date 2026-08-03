@@ -11,6 +11,7 @@ import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.StatsRepository
 import com.ogenrwotdaniel.wakeproof.data.TodayStatus
+import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.UsageSnapshot
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WeekStats
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -81,6 +83,43 @@ class UsageViewModel @Inject constructor(
     val limits: StateFlow<Map<String, AppLimit>> = limitRepository.limits
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    /** One capped app as the limits list shows it. */
+    data class LimitedApp(
+        val packageName: String,
+        val label: String,
+        val limit: AppLimit,
+        val usedMinutes: Long
+    )
+
+    /** Today's measured minutes for capped apps, refreshed on each resume. */
+    private val _limitUsage = MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    /**
+     * Every capped app, whether or not it made today's top-apps list. Without
+     * this a limit on something barely used today is invisible, which reads as
+     * "the limit didn't save".
+     */
+    val limitedApps: StateFlow<List<LimitedApp>> =
+        combine(limitRepository.limits, _limitUsage) { limits, usage ->
+            limits.map { (pkg, limit) ->
+                LimitedApp(
+                    packageName = pkg,
+                    label = usageStatsRepository.appLabel(pkg),
+                    limit = limit,
+                    usedMinutes = usage[pkg] ?: 0L
+                )
+            }.sortedBy { it.label.lowercase() }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Full app list for the picker; loaded on first use, then cached. */
+    private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+    val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
+
+    fun loadInstalledApps() {
+        if (_installedApps.value.isNotEmpty()) return
+        viewModelScope.launch { _installedApps.value = usageStatsRepository.installedApps() }
+    }
+
     /** True once the grants a hard block needs are both in place. */
     fun canEnforceBlocks(): Boolean =
         usageStatsRepository.hasAccess() && android.provider.Settings.canDrawOverlays(context)
@@ -111,6 +150,13 @@ class UsageViewModel @Inject constructor(
     fun refresh() {
         _hasAccess.value = usageStatsRepository.hasAccess()
         if (!_hasAccess.value) return
-        viewModelScope.launch { _snapshot.value = usageStatsRepository.snapshot() }
+        viewModelScope.launch {
+            _snapshot.value = usageStatsRepository.snapshot()
+            // Same event-based measurement the enforcer uses, so the number shown
+            // next to a cap is the number the block actually acts on.
+            val capped = limitRepository.currentLimits().keys
+            _limitUsage.value = usageStatsRepository.todayForegroundMillisFor(capped)
+                .mapValues { (_, millis) -> millis / 60_000 }
+        }
     }
 }

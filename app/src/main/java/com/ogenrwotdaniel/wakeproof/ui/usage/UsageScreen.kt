@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -18,6 +21,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -41,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.AppUsage
 import com.ogenrwotdaniel.wakeproof.data.DayUsage
+import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -60,9 +66,12 @@ fun UsageScreen(
     val today by viewModel.today.collectAsStateWithLifecycle()
     val subjectMinutes by viewModel.subjectMinutes.collectAsStateWithLifecycle()
     val limits by viewModel.limits.collectAsStateWithLifecycle()
+    val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
+    val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val report by viewModel.report.collectAsStateWithLifecycle()
     val reportUi by viewModel.reportUi.collectAsStateWithLifecycle()
-    var limitDialogFor by remember { mutableStateOf<AppUsage?>(null) }
+    var limitDialogFor by remember { mutableStateOf<InstalledApp?>(null) }
+    var showAppPicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     LifecycleResumeEffect(Unit) {
@@ -173,7 +182,11 @@ fun UsageScreen(
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier.weight(1f)
                                 )
-                                TextButton(onClick = { limitDialogFor = app }) {
+                                TextButton(
+                                    onClick = {
+                                        limitDialogFor = InstalledApp(app.packageName, app.label)
+                                    }
+                                ) {
                                     Text(
                                         when {
                                             limit == null -> "Set limit"
@@ -205,6 +218,60 @@ fun UsageScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    // Separate from the top-apps list on purpose: a cap on something
+                    // barely used today would never appear there, which reads as the
+                    // limit not having saved.
+                    Text(
+                        text = "Daily limits",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    limitedApps.forEach { capped ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = (if (capped.limit.mode == LimitMode.BLOCK) "🔒 " else "⏳ ") +
+                                        capped.label,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "${capped.usedMinutes} of ${capped.limit.minutes} min" +
+                                        if (capped.usedMinutes >= capped.limit.minutes) {
+                                            if (capped.limit.mode == LimitMode.BLOCK) " — blocked until midnight"
+                                            else " — over"
+                                        } else "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (capped.usedMinutes >= capped.limit.minutes)
+                                        MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    limitDialogFor = InstalledApp(capped.packageName, capped.label)
+                                }
+                            ) { Text("Edit") }
+                        }
+                    }
+                    if (limitedApps.isEmpty()) {
+                        Text(
+                            text = "No limits set yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.loadInstalledApps()
+                            showAppPicker = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Limit another app…") }
 
                     Text(
                         text = "Weekly coach report",
@@ -264,12 +331,84 @@ fun UsageScreen(
             onDismiss = { limitDialogFor = null }
         )
     }
+
+    if (showAppPicker) {
+        AppPickerDialog(
+            apps = installedApps,
+            limited = limits.keys,
+            onPick = { app ->
+                showAppPicker = false
+                limitDialogFor = app
+            },
+            onDismiss = { showAppPicker = false }
+        )
+    }
+}
+
+/**
+ * Picks any installed app to cap, not just the handful that happen to be in
+ * today's top-usage list — capping something *before* it eats a day is the
+ * point. Searchable, because the list runs to a few hundred entries.
+ */
+@Composable
+private fun AppPickerDialog(
+    apps: List<InstalledApp>,
+    limited: Set<String>,
+    onPick: (InstalledApp) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val shown = remember(apps, query) {
+        if (query.isBlank()) apps
+        else apps.filter { it.label.contains(query, ignoreCase = true) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Limit an app") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (apps.isEmpty()) {
+                    Text(
+                        text = "Reading the app list…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
+                LazyColumn(modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .padding(top = 8.dp)
+                ) {
+                    items(shown, key = { it.packageName }) { app ->
+                        TextButton(
+                            onClick = { onPick(app) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = app.label + if (app.packageName in limited) "  (capped)" else "",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Start
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }
 
 /** Slider dialog for one app's daily cap; "Remove" clears it. */
 @Composable
 private fun LimitDialog(
-    app: AppUsage,
+    app: InstalledApp,
     currentLimit: AppLimit?,
     canEnforceBlocks: Boolean,
     onSet: (Int?, LimitMode) -> Unit,

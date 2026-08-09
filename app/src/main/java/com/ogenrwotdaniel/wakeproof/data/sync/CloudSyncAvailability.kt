@@ -28,19 +28,12 @@ class CloudSyncAvailability @Inject constructor(@ApplicationContext private val 
 
     /**
      * The OAuth *web* client id Google sign-in must be asked for — not the Android
-     * client id. The google-services plugin emits it as a string resource, which
-     * only exists when the plugin ran, so it is looked up by name instead of
-     * through `R` to keep a Firebase-less build compiling.
+     * client id. Extracted from `google-services.json` at build time (see
+     * app/build.gradle.kts) rather than read from the generated string resource:
+     * that resource can only be reached by name, and the resource shrinker deleted
+     * it from the release build because nothing referenced it statically.
      */
-    val webClientId: String? by lazy {
-        @Suppress("DiscouragedApi")
-        val id = context.resources.getIdentifier(
-            "default_web_client_id",
-            "string",
-            context.packageName
-        )
-        if (id == 0) null else context.getString(id).takeIf { it.isNotBlank() }
-    }
+    val webClientId: String? by lazy { BuildConfig.WEB_CLIENT_ID.takeIf { it.isNotBlank() } }
 
     /** Sign-in additionally needs the web client id; storage alone is not enough. */
     val canSignIn: Boolean get() = isAvailable && webClientId != null

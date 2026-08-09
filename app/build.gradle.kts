@@ -29,6 +29,32 @@ if (firebaseConfigured) {
     )
 }
 
+/**
+ * The OAuth *web* client id (client_type 3) that Google sign-in must request.
+ *
+ * Read here rather than from the `default_web_client_id` string resource the
+ * google-services plugin generates. That resource can only be reached by name at
+ * runtime (it does not exist in a build without the plugin, so `R` cannot refer to
+ * it), and a by-name lookup is invisible to the resource shrinker — which duly
+ * deleted it from the release build, breaking sign-in for Play installs only while
+ * every debug build kept working. Baking the value into BuildConfig removes the
+ * resource, and the whole failure mode, from the picture.
+ */
+val firebaseWebClientId: String = if (!firebaseConfigured) "" else {
+    @Suppress("UNCHECKED_CAST")
+    val json = groovy.json.JsonSlurper()
+        .parse(file("google-services.json")) as Map<String, Any>
+    val clients = json["client"] as List<Map<String, Any>>
+    clients.asSequence()
+        .flatMap { (it["oauth_client"] as? List<Map<String, Any>> ?: emptyList()).asSequence() }
+        .firstOrNull { (it["client_type"] as? Number)?.toInt() == 3 }
+        ?.get("client_id") as? String
+        ?: throw GradleException(
+            "google-services.json has no web OAuth client (client_type 3). Enable Google " +
+                "sign-in in the Firebase console and re-download it — see docs/CLOUD_SYNC.md."
+        )
+}
+
 android {
     namespace = "com.ogenrwotdaniel.wakeproof"
     compileSdk = 37
@@ -48,6 +74,7 @@ android {
         // Lets the UI explain *why* sync is unavailable (build without Firebase
         // config) rather than silently doing nothing.
         buildConfigField("boolean", "FIREBASE_CONFIGURED", firebaseConfigured.toString())
+        buildConfigField("String", "WEB_CLIENT_ID", "\"$firebaseWebClientId\"")
 
         // Target device (Samsung S25 Edge) is arm64-only; dropping the other ABIs
         // cuts the ML Kit / CameraX native-lib payload from the APK.

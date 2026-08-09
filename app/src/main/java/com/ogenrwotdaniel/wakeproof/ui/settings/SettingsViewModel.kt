@@ -16,6 +16,7 @@ import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
+import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -124,6 +125,11 @@ class SettingsViewModel @Inject constructor(
             alarmRepository.updateAlarm(updated)
             if (enabled) alarmScheduler.schedule(updated) else alarmScheduler.cancel(updated)
         }
+    }
+
+    /** Adds a pushup or water alarm at the chosen time. */
+    fun addAlarm(type: AlarmType, hour: Int, minute: Int, label: String) {
+        viewModelScope.launch { alarmRepository.addAlarm(type, hour, minute, label) }
     }
 
     /**

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
@@ -29,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
+import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 
 /**
  * Settings: alarm times + enable switches (rescheduled immediately), goal
@@ -59,6 +62,7 @@ fun SettingsScreen(
     val exportMessage by viewModel.exportMessage.collectAsStateWithLifecycle()
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
     var deletingAlarm by remember { mutableStateOf<Alarm?>(null) }
+    var addingAlarm by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         viewModel.refreshReliability()
@@ -114,6 +118,10 @@ fun SettingsScreen(
                     }
                 }
             }
+            OutlinedButton(
+                onClick = { addingAlarm = true },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Add alarm") }
 
             HorizontalDivider()
 
@@ -306,6 +314,16 @@ fun SettingsScreen(
         }
     }
 
+    if (addingAlarm) {
+        AddAlarmDialog(
+            onConfirm = { type, hour, minute, label ->
+                viewModel.addAlarm(type, hour, minute, label)
+                addingAlarm = false
+            },
+            onDismiss = { addingAlarm = false }
+        )
+    }
+
     // Confirmed rather than immediate: with sync on, deleting here also removes the
     // alarm from the user's other devices, and there is no undo.
     deletingAlarm?.let { alarm ->
@@ -491,6 +509,60 @@ private fun SliderSetting(
             valueRange = range
         )
     }
+}
+
+/**
+ * Creates an extra alarm — a second pushup session, another water reminder.
+ *
+ * A new alarm never conflicts across devices: it gets its own sync id, so one
+ * added on the phone and one added on the tablet are two separate alarms rather
+ * than two versions of the same one.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AddAlarmDialog(
+    onConfirm: (AlarmType, Int, Int, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var type by rememberSaveable { mutableStateOf(AlarmType.PUSHUP) }
+    var label by rememberSaveable { mutableStateOf("") }
+    val state = rememberTimePickerState(initialHour = 6, initialMinute = 0, is24Hour = true)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add alarm") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // CUSTOM is left out on purpose: it has no verification screen,
+                    // so offering it here would create an alarm nothing can dismiss.
+                    listOf(AlarmType.PUSHUP, AlarmType.WATER).forEach { candidate ->
+                        FilterChip(
+                            selected = candidate == type,
+                            onClick = { type = candidate },
+                            label = { Text(candidate.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("Label (optional)") },
+                    singleLine = true
+                )
+                TimePicker(state = state)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(type, state.hour, state.minute, label) }) {
+                Text("Add")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)

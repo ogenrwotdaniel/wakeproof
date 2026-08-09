@@ -48,6 +48,28 @@ class AlarmRepository @Inject constructor(
         dao.markCompleted(id, LocalDate.now().toEpochDay())
 
     /**
+     * Adds an alarm and schedules it.
+     *
+     * Adding is inherently conflict-free across devices: the new row gets its own
+     * [java.util.UUID] syncId, so an alarm added on the phone and one added on the
+     * tablet are two different alarms and neither can overwrite the other. Only
+     * edits to the *same* alarm are ever resolved by last-write-wins.
+     */
+    suspend fun addAlarm(type: AlarmType, hour: Int, minute: Int, label: String) {
+        val alarm = Alarm(
+            type = type,
+            hour = hour,
+            minute = minute,
+            label = label.trim(),
+            // Deliberately not `seeded`: this one the user asked for, so it syncs.
+            seeded = false
+        )
+        dao.insertAll(listOf(alarm))
+        // insertAll does not hand back the rowid, and the schedule is keyed on it.
+        dao.findBySyncId(alarm.syncId)?.let(scheduler::schedule)
+    }
+
+    /**
      * Removes an alarm everywhere: cancels the pending AlarmManager intent (Room is
      * not the schedule) and leaves a tombstone so the other devices drop it too.
      */

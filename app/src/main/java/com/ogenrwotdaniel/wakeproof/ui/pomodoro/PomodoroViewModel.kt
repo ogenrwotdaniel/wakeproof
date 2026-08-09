@@ -48,7 +48,9 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun setThoughtDone(thought: ParkedThought, done: Boolean) {
-        viewModelScope.launch { parkedThoughtDao.update(thought.copy(done = done)) }
+        viewModelScope.launch {
+            parkedThoughtDao.updateContent(thought.id, thought.text, done)
+        }
     }
 
     fun clearDoneThoughts() {

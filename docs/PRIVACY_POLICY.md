@@ -1,15 +1,16 @@
 # WakeProof Privacy Policy
 
-**Effective date:** 19 July 2026
+**Effective date:** 9 August 2026
 **Developer:** Ogenrwot Daniel
 **Contact:** ogenrwotdaniel@gmail.com
 
 WakeProof is an alarm clock and study companion app. This policy explains what
 data the app handles, where it goes, and the choices you have. The short
-version: **WakeProof has no accounts, no ads, no analytics, and no server of
-its own. Almost everything stays on your phone.** The only data that ever
-leaves your device is what you explicitly send to the AI provider you
-configure, described below.
+version: **WakeProof has no ads and no analytics, and everything stays on your
+phone unless you turn on one of two optional features.** Those two are cloud
+sync (which needs you to sign in) and the AI features (which need you to supply
+your own API key). Both are off until you switch them on, and both are
+described below.
 
 ## Data stored only on your device
 
@@ -31,6 +32,35 @@ app:
   processed entirely on-device (Google ML Kit pose detection). No video or
   image from pushup verification is stored or transmitted.
 - **Your AI API key**, stored encrypted (Android EncryptedSharedPreferences).
+
+## Optional cloud sync — only when you sign in
+
+WakeProof can keep your data the same across your own devices (for example a
+phone and a tablet). This is **off by default**. It starts only when you sign in
+under Settings → Sync across devices, and stops when you sign out.
+
+- **Signing in** uses your Google account. WakeProof receives your Google
+  account identifier, email address and display name, and uses them for one
+  purpose: to know which private storage area is yours. There is no profile, no
+  public presence, and no way for another user to find you.
+- **What is synced:** your alarms, your completion history and streak, your
+  flashcards and their review schedule, your exams, and your parked thoughts.
+- **What is *not* synced:** your settings and preferences, your API key, your
+  screen-time statistics, and your calendar data. These stay on each device.
+- **Where it is stored:** Google Firebase (Firestore and Firebase
+  Authentication), operated by Google LLC, in a private area readable only by
+  your signed-in account. See <https://firebase.google.com/support/privacy> and
+  Google's privacy policy at <https://policies.google.com/privacy>.
+- **Who can see it:** you. Access rules restrict every record to the account
+  that created it. The developer of WakeProof does not read your synced data,
+  and it is never sold, shared or used for advertising.
+- **Turning it off:** sign out in Settings. Your data stays on the device; it
+  simply stops mirroring.
+- **Deleting it:** email **ogenrwotdaniel@gmail.com** from the address you
+  signed in with and your stored data and account record will be deleted.
+
+If you never sign in, none of the above applies and no account data is
+collected.
 
 ## Data sent to an AI provider — only when you enable it
 
@@ -70,21 +100,27 @@ water verification falls back to an on-device honor mode.
 | Usage access (special) | Showing you your own screen-time stats and enforcing your app limits |
 | Display over other apps (special) | The floating Pomodoro timer bubble and opening the alarm screen while you use other apps |
 | Calendar (read) | Showing your agenda so you can tick events off |
-| Internet | Only for the optional AI features above |
+| Internet | Only for the optional cloud sync and AI features above |
 
 Every permission is optional except notifications/alarms (the app's core); the
 related feature simply stays off if you decline.
 
 ## Data sharing and selling
 
-WakeProof does not sell, rent, or share your personal data with anyone, other
-than the direct AI-provider transmission you opt into, described above. There
-are no third-party analytics or advertising SDKs in the app.
+WakeProof does not sell or rent your personal data to anyone, and does not
+share it except with the two processors you opt into: the cloud-sync provider
+(Google Firebase) if you sign in, and the AI provider you configure if you add
+an API key. Both are described above. There are no third-party analytics or
+advertising SDKs in the app.
 
 ## Data retention and deletion
 
-All app data lives on your device. To delete everything: uninstall the app, or
-use Android Settings → Apps → WakeProof → Storage → Clear data. Data you
+App data lives on your device. To delete it: uninstall the app, or use Android
+Settings → Apps → WakeProof → Storage → Clear data.
+
+If you enabled cloud sync, a copy also exists under your account. Signing out
+stops the mirroring but does not erase that copy; to have it deleted, email
+**ogenrwotdaniel@gmail.com** from the address you signed in with. Data you
 export yourself (CSV) is under your control. Data already processed by your
 chosen AI provider is subject to that provider's policy and account tools.
 

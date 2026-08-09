@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Exam::class,
         ParkedThought::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class WakeProofDatabase : RoomDatabase() {
@@ -54,5 +54,35 @@ abstract class WakeProofDatabase : RoomDatabase() {
                 )
             }
         }
+
+        /**
+         * v4 (cloud sync): every table gains the [SyncableEntity] columns.
+         *
+         * Existing rows are stamped `pending = 1`, so the first sync after signing
+         * in uploads the history already on the device rather than starting the
+         * cloud copy empty. `updatedAt` is left at 0 for them: last-write-wins then
+         * treats a locally-edited row on any *other* device as newer, which is the
+         * safe direction — the alternative (stamping "now") would make whichever
+         * device happened to update last silently win against real edits.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                SYNCED_TABLES.forEach { table ->
+                    SyncColumns.addColumnsTo(table).forEach(db::execSQL)
+                }
+                // Local-only, alarms only. Existing alarms are the user's real ones
+                // by definition, so they default to 0 (not seeded) and do sync.
+                db.execSQL("ALTER TABLE `alarms` ADD COLUMN `seeded` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** Tables that mirror to Firestore, and the collection names they use. */
+        val SYNCED_TABLES = listOf(
+            "alarms",
+            "completion_logs",
+            "flashcards",
+            "exams",
+            "parked_thoughts"
+        )
     }
 }

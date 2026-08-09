@@ -1,7 +1,10 @@
 package com.ogenrwotdaniel.wakeproof.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
+import java.util.UUID
 
 /** Which daily goal a log entry belongs to. */
 enum class GoalKind { PUSHUP, WATER, FOCUS }
@@ -18,14 +21,25 @@ enum class CompletionStatus { VERIFIED, UNVERIFIED, SKIPPED }
  * [java.time.LocalDate.toEpochDay]; [amount] is reps for PUSHUP, ml for WATER,
  * minutes for FOCUS.
  */
-@Entity(tableName = "completion_logs")
+@Entity(
+    tableName = "completion_logs",
+    indices = [Index(value = ["syncId"], unique = true)]
+)
 data class CompletionLog(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @PrimaryKey(autoGenerate = true) override val id: Long = 0,
     val epochDay: Long,
     val kind: GoalKind,
     val status: CompletionStatus,
     val amount: Int = 0,
     val alarmId: Long? = null,
     /** Study subject for FOCUS entries ("Calculus"); null for other kinds. */
-    val subject: String? = null
-)
+    val subject: String? = null,
+    @ColumnInfo(defaultValue = "''")
+    override val syncId: String = UUID.randomUUID().toString(),
+    @ColumnInfo(defaultValue = "0")
+    override val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0")
+    override val deleted: Boolean = false,
+    @ColumnInfo(defaultValue = "1")
+    override val pending: Boolean = true
+) : SyncableEntity

@@ -59,10 +59,22 @@ Already done in the repo:
   untracked). **Back both up somewhere safe (password manager + offline copy).
   If the keystore is lost, the app can never be updated again.** Never commit
   them.
-- `targetSdk 35` — meets Play's 2026 target-API requirement.
+- `targetSdk 36` — Play requires API 36 for new apps and updates from
+  **31 Aug 2026**. Shipping at 36 now avoids being locked out of publishing
+  updates three weeks after launch.
+- `versionName 1.0.0`, `versionCode 1`.
 - Debug-only test buttons are stripped from release (`BuildConfig.DEBUG`).
-- R8 minification is OFF for the first release (larger download, zero
-  obfuscation risk). Revisit later.
+- R8 minification and resource shrinking are **ON** (AAB 39 MB vs 93 MB
+  unminified). Keep rules live in `app/proguard-rules.pro`; the deobfuscation
+  map is bundled into the AAB automatically, so Play Console de-obfuscates
+  crash reports without a separate upload.
+- `app/google-services.json` must be present or the build ships **without cloud
+  sync**. Gradle prints a warning when it is missing — see `docs/CLOUD_SYNC.md`.
+
+> **Before the first production upload, re-read `docs/CLOUD_SYNC.md` step 3.**
+> Play App Signing re-signs the app with Google's key, so Google sign-in fails
+> for everyone installing from Play until that key's SHA-1 is added to Firebase.
+> It cannot be done in advance — the key only exists after the first AAB upload.
 
 To produce the upload artifact:
 
@@ -98,7 +110,7 @@ answer you need is below and in `docs/STORE_LISTING.md`.
 | Form | Answer |
 |---|---|
 | Privacy policy | URL from Step 2 |
-| App access | "All functionality is available without special access" is **wrong** — choose "All or some functionality is restricted" and provide a note: AI features (water verification, flashcard drafting, study coach, weekly report) need the reviewer to enter a free Gemini API key in Settings → AI provider. Provide a temporary key for review if asked, or state features degrade gracefully (honor mode) without one. |
+| App access | Choose "All or some functionality is restricted" and note: (a) AI features (water verification, flashcard drafting, study coach) need the reviewer to enter their own free Gemini API key in Settings → AI provider, and degrade gracefully (honor mode) without one; (b) cross-device sync needs a Google sign-in in Settings → Sync across devices. **State explicitly that no account is required to use the app** — sign-in only adds sync — so Play does not demand demo credentials. |
 | Ads | **No**, the app contains no ads |
 | Content rating (IARC questionnaire) | Category: Utility/Productivity. Answer **No** to all violence/sex/drugs/gambling questions; no user-generated public content; no location sharing. Expected rating: **Everyone / PEGI 3** |
 | Target audience | 18+ (simplest; avoids all child-policy obligations). Do **not** tick "appeals to children". |

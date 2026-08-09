@@ -10,10 +10,10 @@ data class SubjectMinutes(val subject: String?, val minutes: Int)
 
 /** Room access to [CompletionLog]. */
 @Dao
-interface CompletionLogDao {
+interface CompletionLogDao : SyncDao<CompletionLog> {
     @Query(
         "SELECT subject, SUM(amount) AS minutes FROM completion_logs " +
-            "WHERE kind = 'FOCUS' AND epochDay >= :fromEpochDay " +
+            "WHERE kind = 'FOCUS' AND epochDay >= :fromEpochDay AND deleted = 0 " +
             "GROUP BY subject ORDER BY minutes DESC"
     )
     fun observeFocusBySubject(fromEpochDay: Long): Flow<List<SubjectMinutes>>
@@ -21,12 +21,29 @@ interface CompletionLogDao {
     @Insert
     suspend fun insert(log: CompletionLog)
 
-    @Query("SELECT * FROM completion_logs WHERE epochDay >= :fromEpochDay ORDER BY epochDay")
+    @Query(
+        "SELECT * FROM completion_logs WHERE epochDay >= :fromEpochDay AND deleted = 0 " +
+            "ORDER BY epochDay"
+    )
     fun observeSince(fromEpochDay: Long): Flow<List<CompletionLog>>
 
-    @Query("SELECT * FROM completion_logs WHERE epochDay = :epochDay AND kind = :kind")
+    @Query(
+        "SELECT * FROM completion_logs WHERE epochDay = :epochDay AND kind = :kind " +
+            "AND deleted = 0"
+    )
     fun observeForDay(epochDay: Long, kind: GoalKind): Flow<List<CompletionLog>>
 
-    @Query("SELECT * FROM completion_logs ORDER BY epochDay")
+    @Query("SELECT * FROM completion_logs WHERE deleted = 0 ORDER BY epochDay")
     suspend fun getAll(): List<CompletionLog>
+
+    @Query("SELECT * FROM completion_logs WHERE pending = 1 ORDER BY updatedAt LIMIT :limit")
+    override suspend fun pendingUploads(limit: Int): List<CompletionLog>
+
+    @Query("SELECT * FROM completion_logs WHERE syncId = :syncId")
+    override suspend fun findBySyncId(syncId: String): CompletionLog?
+
+    @Query(
+        "UPDATE completion_logs SET pending = 0 WHERE syncId = :syncId AND updatedAt = :updatedAt"
+    )
+    override suspend fun clearPending(syncId: String, updatedAt: Long)
 }

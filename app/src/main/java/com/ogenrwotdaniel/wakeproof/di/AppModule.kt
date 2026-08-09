@@ -24,7 +24,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): WakeProofDatabase =
         Room.databaseBuilder(context, WakeProofDatabase::class.java, "wakeproof.db")
-            .addMigrations(WakeProofDatabase.MIGRATION_2_3)
+            .addMigrations(WakeProofDatabase.MIGRATION_2_3, WakeProofDatabase.MIGRATION_3_4)
             // Pre-release safety net for version jumps with no migration path.
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()

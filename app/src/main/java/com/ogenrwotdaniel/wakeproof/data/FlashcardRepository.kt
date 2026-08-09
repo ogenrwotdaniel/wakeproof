@@ -20,7 +20,10 @@ class FlashcardRepository @Inject constructor(private val dao: FlashcardDao) {
 
     /** Grades a card and persists its new SM-2 schedule. */
     suspend fun review(card: Flashcard, grade: ReviewGrade) {
-        dao.update(Sm2Scheduler.review(card, grade, LocalDate.now().toEpochDay()))
+        val reviewed = Sm2Scheduler.review(card, grade, LocalDate.now().toEpochDay())
+        // Stamped for upload here so a review done on the tablet does not come due
+        // again on the phone.
+        dao.update(reviewed.copy(updatedAt = System.currentTimeMillis(), pending = true))
     }
 
     /** New cards are due immediately so they enter today's review queue. */
@@ -39,7 +42,7 @@ class FlashcardRepository @Inject constructor(private val dao: FlashcardDao) {
         )
     }
 
-    suspend fun delete(card: Flashcard) = dao.delete(card)
+    suspend fun delete(card: Flashcard) = dao.softDelete(card.id)
 
-    suspend fun deleteSubject(subject: String) = dao.deleteSubject(subject)
+    suspend fun deleteSubject(subject: String) = dao.softDeleteSubject(subject)
 }

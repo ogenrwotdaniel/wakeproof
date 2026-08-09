@@ -15,6 +15,20 @@ val keystoreProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Cloud sync is configured by an untracked app/google-services.json. The plugin is
+// applied only when that file is present, so a fresh clone (or CI) still builds —
+// the app then detects at runtime that no Firebase app initialised and keeps sync
+// switched off instead of crashing. See CloudSyncAvailability.
+val firebaseConfigured = file("google-services.json").exists()
+if (firebaseConfigured) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.warn(
+        "WakeProof: app/google-services.json is missing — building WITHOUT cloud sync. " +
+            "A Play release build must have it."
+    )
+}
+
 android {
     namespace = "com.ogenrwotdaniel.wakeproof"
     compileSdk = 37
@@ -22,11 +36,18 @@ android {
     defaultConfig {
         applicationId = "com.ogenrwotdaniel.wakeproof"
         minSdk = 35
-        targetSdk = 35
+        // Play requires new apps and updates to target API 36 from 31 Aug 2026;
+        // production rollout lands after that date, so ship at 36 now rather than
+        // be locked out of shipping updates three weeks in.
+        targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Lets the UI explain *why* sync is unavailable (build without Firebase
+        // config) rather than silently doing nothing.
+        buildConfigField("boolean", "FIREBASE_CONFIGURED", firebaseConfigured.toString())
 
         // Target device (Samsung S25 Edge) is arm64-only; dropping the other ABIs
         // cuts the ML Kit / CameraX native-lib payload from the APK.
@@ -48,13 +69,20 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // On for the Play build: strips unused library code (Firebase, CameraX
+            // and ML Kit each pull in far more than this app calls) and keeps the
+            // download honest. See proguard-rules.pro for the cases R8 cannot infer.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.findByName("release")
         }
+        // No applicationIdSuffix on debug: :wear must share the phone's
+        // applicationId for companion recognition and the Wearable Data Layer, and
+        // a suffix would also orphan the data on the already-installed debug build.
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -111,6 +139,15 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+
+    // Cross-device sync (phone <-> tablet): Google sign-in via Credential Manager,
+    // mirrored into Firestore.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.google.identity.googleid)
 
     // Wear OS data sync (push stats to the paired watch tile)
     implementation(libs.play.services.wearable)

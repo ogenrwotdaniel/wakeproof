@@ -14,6 +14,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.launch
+import com.ogenrwotdaniel.wakeproof.data.sync.SyncEngine
+import com.ogenrwotdaniel.wakeproof.data.sync.SyncResult
+import com.ogenrwotdaniel.wakeproof.data.sync.SyncWorker
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.ui.MainViewModel
 import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
@@ -37,6 +40,8 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var wearStatsSync: WearStatsSync
 
+    @Inject lateinit var syncEngine: SyncEngine
+
     override fun onStart() {
         super.onStart()
         AppForeground.set(true)
@@ -44,6 +49,14 @@ class MainActivity : ComponentActivity() {
         // grants. Done from a visible Activity, which is always allowed to start a
         // foreground service.
         lifecycleScope.launch { runCatching { AppBlockService.sync(applicationContext) } }
+        // Pull whatever the other device did before the user reads anything. This is
+        // the case that matters: picking up the tablet after studying on the phone.
+        // sync() is a no-op unless signed in and enabled, and never throws.
+        lifecycleScope.launch {
+            if (syncEngine.sync() is SyncResult.Success) {
+                runCatching { WakeProofWidget().updateAll(applicationContext) }
+            }
+        }
     }
 
     override fun onStop() {
@@ -54,6 +67,10 @@ class MainActivity : ComponentActivity() {
             runCatching { WakeProofWidget().updateAll(applicationContext) }
             runCatching { wearStatsSync.push() }
         }
+        // Upload this session's changes so the other device sees them now rather
+        // than at the next hourly pass. Handed to WorkManager because this scope is
+        // about to be torn down.
+        SyncWorker.requestOneOff(applicationContext)
         super.onStop()
     }
 

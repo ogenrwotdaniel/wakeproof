@@ -3,6 +3,8 @@ package com.ogenrwotdaniel.wakeproof
 import android.app.Application
 import android.os.UserManager
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer
+import com.ogenrwotdaniel.wakeproof.data.sync.SyncPreferences
+import com.ogenrwotdaniel.wakeproof.data.sync.SyncWorker
 import com.ogenrwotdaniel.wakeproof.distraction.DistractionLimitWorker
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -20,6 +22,8 @@ class WakeProofApp : Application() {
 
     @Inject lateinit var alarmInitializer: AlarmInitializer
 
+    @Inject lateinit var syncPreferences: SyncPreferences
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -29,6 +33,12 @@ class WakeProofApp : Application() {
         if (getSystemService(UserManager::class.java).isUserUnlocked) {
             applicationScope.launch { alarmInitializer.initialize() }
             DistractionLimitWorker.schedule(this)
+            // Re-arms the periodic pass after a reboot. Only for users who turned
+            // sync on — an hourly wake-up that can only report "nothing to do" is
+            // not worth spending on everyone else.
+            applicationScope.launch {
+                if (syncPreferences.isEnabled()) SyncWorker.schedule(this@WakeProofApp)
+            }
         }
     }
 }

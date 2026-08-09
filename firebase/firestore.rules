@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// WakeProof cloud sync.
+//
+// The whole data model is "a user's own devices share the user's own data", so
+// the only rule that matters is that a signed-in user can reach exactly the tree
+// under their own uid and nothing else. There is no sharing, no admin surface and
+// no cross-user read anywhere in the app.
+//
+// Deploy with:  firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId}/{collection}/{docId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Anything not matched above is denied. Firestore denies by default, but
+    // saying so explicitly keeps a future "just for testing" wildcard from being
+    // added above without someone noticing what it costs.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

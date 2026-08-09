@@ -38,6 +38,7 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 
@@ -252,6 +253,10 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            SyncSection()
+
+            HorizontalDivider()
+
             Text(text = "Data", style = MaterialTheme.typography.titleMedium)
             val csvLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument("text/csv")
@@ -273,7 +278,10 @@ fun SettingsScreen(
 
             Text(text = "About", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "WakeProof 0.1.0 — alarms you can only dismiss by proving it. " +
+                // Read from BuildConfig so the About line cannot drift from the
+                // version actually shipped.
+                text = "WakeProof ${BuildConfig.VERSION_NAME} — alarms you can only " +
+                    "dismiss by proving it. " +
                     "Pushups are verified on-device; water via the selected vision AI " +
                     "(Kimi or Gemini).",
                 style = MaterialTheme.typography.bodyMedium,

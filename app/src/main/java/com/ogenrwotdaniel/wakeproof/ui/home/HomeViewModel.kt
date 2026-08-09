@@ -42,7 +42,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun deleteExam(exam: Exam) {
-        viewModelScope.launch { examDao.delete(exam) }
+        viewModelScope.launch { examDao.softDelete(exam.id) }
     }
 
     /** Daily focus goal in minutes, for the Focus card's progress. */

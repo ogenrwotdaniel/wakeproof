@@ -12,3 +12,6 @@ build/
 *.keystore
 keystore.properties
 .kotlin/
+# Firebase project config: ties the build to a specific Firebase project and
+# carries its API keys. See docs/CLOUD_SYNC.md.
+google-services.json

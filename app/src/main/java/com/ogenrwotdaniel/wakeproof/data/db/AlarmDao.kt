@@ -33,8 +33,17 @@ interface AlarmDao : SyncDao<Alarm> {
     )
     suspend fun getFirstByType(type: AlarmType): Alarm?
 
-    @Query("SELECT COUNT(*) FROM alarms WHERE deleted = 0")
+    /**
+     * Counts tombstones too, because this is what decides whether to seed the
+     * starter alarms. Ignoring them would re-seed the defaults for a user who has
+     * deliberately deleted every alarm — on the next app start, every time.
+     */
+    @Query("SELECT COUNT(*) FROM alarms")
     suspend fun count(): Int
+
+    /** Soft delete, so the other devices learn the alarm is gone. */
+    @Query("UPDATE alarms SET deleted = 1, pending = 1, updatedAt = :now WHERE id = :id")
+    suspend fun softDelete(id: Long, now: Long = System.currentTimeMillis())
 
     @Insert
     suspend fun insertAll(alarms: List<Alarm>)

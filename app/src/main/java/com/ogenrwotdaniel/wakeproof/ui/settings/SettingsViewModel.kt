@@ -126,6 +126,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Deletes an alarm. Needed once alarms sync: a device can now receive alarms
+     * it never created, and before this there was no way to get rid of one.
+     */
+    fun deleteAlarm(alarm: Alarm) {
+        viewModelScope.launch { alarmRepository.deleteAlarm(alarm) }
+    }
+
     fun setPushupTarget(value: Int) {
         viewModelScope.launch { settingsRepository.setPushupTarget(value.coerceIn(5, 50)) }
     }

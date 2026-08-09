@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.data
 
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
@@ -13,7 +14,10 @@ import kotlinx.coroutines.flow.Flow
  * (pushups at 05:00, water at 08:50 / 12:50 / 18:30) on first launch.
  */
 @Singleton
-class AlarmRepository @Inject constructor(private val dao: AlarmDao) {
+class AlarmRepository @Inject constructor(
+    private val dao: AlarmDao,
+    private val scheduler: AlarmScheduler
+) {
 
     fun observeAlarms(): Flow<List<Alarm>> = dao.observeAll()
 
@@ -42,6 +46,15 @@ class AlarmRepository @Inject constructor(private val dao: AlarmDao) {
 
     suspend fun markCompletedToday(id: Long) =
         dao.markCompleted(id, LocalDate.now().toEpochDay())
+
+    /**
+     * Removes an alarm everywhere: cancels the pending AlarmManager intent (Room is
+     * not the schedule) and leaves a tombstone so the other devices drop it too.
+     */
+    suspend fun deleteAlarm(alarm: Alarm) {
+        scheduler.cancel(alarm)
+        dao.softDelete(alarm.id)
+    }
 
     suspend fun seedDefaultAlarmsIfEmpty() {
         if (dao.count() == 0) dao.insertAll(DEFAULT_ALARMS)

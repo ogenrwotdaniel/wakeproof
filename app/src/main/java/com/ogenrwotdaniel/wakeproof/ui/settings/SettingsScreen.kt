@@ -58,6 +58,7 @@ fun SettingsScreen(
     val reliability by viewModel.reliability.collectAsStateWithLifecycle()
     val exportMessage by viewModel.exportMessage.collectAsStateWithLifecycle()
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
+    var deletingAlarm by remember { mutableStateOf<Alarm?>(null) }
 
     LifecycleResumeEffect(Unit) {
         viewModel.refreshReliability()
@@ -96,10 +97,21 @@ fun SettingsScreen(
                             modifier = Modifier.padding(start = 12.dp)
                         )
                     }
-                    Switch(
-                        checked = alarm.enabled,
-                        onCheckedChange = { viewModel.setAlarmEnabled(alarm, it) }
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Switch(
+                            checked = alarm.enabled,
+                            onCheckedChange = { viewModel.setAlarmEnabled(alarm, it) }
+                        )
+                        TextButton(onClick = { deletingAlarm = alarm }) {
+                            Text(
+                                text = "Delete",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 
@@ -292,6 +304,32 @@ fun SettingsScreen(
                 Text("Back")
             }
         }
+    }
+
+    // Confirmed rather than immediate: with sync on, deleting here also removes the
+    // alarm from the user's other devices, and there is no undo.
+    deletingAlarm?.let { alarm ->
+        AlertDialog(
+            onDismissRequest = { deletingAlarm = null },
+            title = { Text("Delete this alarm?") },
+            text = {
+                val time = "%02d:%02d".format(alarm.hour, alarm.minute)
+                val name = alarm.label.ifBlank { alarm.type.name.lowercase() }
+                Text(
+                    "$time ($name) will be removed from this device, and from any " +
+                        "other device signed into the same account."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteAlarm(alarm)
+                    deletingAlarm = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingAlarm = null }) { Text("Cancel") }
+            }
+        )
     }
 
     editingAlarm?.let { alarm ->

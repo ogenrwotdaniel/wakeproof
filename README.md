@@ -4,7 +4,7 @@ An Android alarm app that makes you **prove you're awake** before the alarm stop
 Dismissing an alarm requires camera-verified pushups or drinking a glass of water —
 no more half-asleep snoozing.
 
-Built for Samsung Galaxy S25 Edge, Android 15+.
+Built for Samsung Galaxy S25 Edge, Android 14+.
 
 **Project page:** https://ogenrwotdaniel.github.io/wakeproof/ ·
 **Privacy policy:** https://ogenrwotdaniel.github.io/wakeproof/privacy/
@@ -55,7 +55,7 @@ so it can't be used to cheat.
 
 ## Requirements
 
-- Android 15+ (minSdk 35, targetSdk 35), compileSdk 37
+- Android 14+ (minSdk 34, targetSdk 36), compileSdk 37
 - Gradle 9.4.1 wrapper, AGP 9.2.1 with built-in Kotlin
   (do **not** apply `org.jetbrains.kotlin.android`)
 - A Moonshot (Kimi) API key for water verification and study chat — optional;

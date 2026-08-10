@@ -32,6 +32,10 @@ slower to obtain, not worth it here.)
 
 ## Step 1 — Developer account (Day 1)
 
+**DONE (2026-08-10):** account created and identity verification passed.
+Tester recruitment stands at **10 of the 12** needed; closed-testing upload
+planned for 2026-08-11.
+
 1. Go to https://play.google.com/console/signup
 2. Sign in with **ogenrwotdaniel@gmail.com**, choose **Personal** account.
 3. Pay the **one-time $25 USD** registration fee (card required).
@@ -88,8 +92,19 @@ Before every upload, bump in `app/build.gradle.kts`:
 - `versionName` — human-readable (suggest `1.0.0` for the first Play upload)
 
 Known audience constraints (deliberate, document but don't change):
-- `minSdk 35` → the app only installs on **Android 15+** devices. Fine for a
-  focused launch; lowering it later is a real project.
+- `minSdk 34` → the app only installs on **Android 14+** devices. Lowered from
+  35 on 2026-08-10: every API the code touched that lint flagged below 35 turned
+  out to be an API-34 symbol, so 34 was a one-line change with a fully green
+  `lintDebug` and no version guards anywhere.
+  Going further to 33 (Android 13) is **not** free, and the blocker is not the
+  code. Four call sites would need guards —
+  `NotificationManager.canUseFullScreenIntent` (`ReliabilityChecker`),
+  `Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` (`OnboardingScreen`), and
+  `ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE` in `PomodoroTimerService` +
+  `AppBlockService` — but that last one is a compile-time constant, so it inlines
+  and lint only warns. Whether Android 13 accepts the raw `specialUse` type at
+  `startForeground` or throws can only be settled on a real API-33 device, and it
+  sits under the Pomodoro timer and the app blocker. Don't ship 33 without one.
 - arm64-only native libs → excludes a handful of old 32-bit devices; all
   current phones are arm64.
 
@@ -161,6 +176,21 @@ All texts are pre-written in `docs/STORE_LISTING.md`. Assets you must create:
 | Phone screenshots | 2–8, PNG/JPG, 9:16-ish | `adb exec-out screencap -p > shot1.png` on each key screen: Home dashboard, alarm ringing, pushup verify, Pomodoro with subject chips, Flashcards review, Phone usage, Agenda |
 
 ## Step 5 — Closed testing release (Day 2–3)
+
+> **Upload to Internal testing FIRST, then promote the same artifact to Closed.**
+> Internal has no 12-tester rule and no 14-day wait, and it is Play-signed — which
+> is the only way to hit the Play App Signing / Firebase problem in step 3 of
+> `docs/CLOUD_SYNC.md` *before* the 14-day clock is running. Google re-signs the
+> AAB with its own key, so Google sign-in (and therefore all cross-device sync)
+> fails for every Play installer until that key's SHA-1 is added to Firebase, and
+> the key does not exist until after the first upload. Going straight to Closed
+> means running the whole 14 days on a build where sync sign-in is broken for all
+> 12 testers. Upload to Internal → add the SHA-1 → confirm sign-in on a real Play
+> install → then promote.
+>
+> Also screen testers for **Android 14+** (`minSdk 34`). An older phone can still
+> opt in and count toward the 12, but can never install the app, so it produces no
+> feedback. Ask what phone each tester has before counting on them.
 
 1. Play Console → **Testing → Closed testing → Create track** (use the default
    "Alpha" track).

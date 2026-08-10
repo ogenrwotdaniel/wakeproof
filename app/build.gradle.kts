@@ -61,7 +61,7 @@ android {
 
     defaultConfig {
         applicationId = "com.ogenrwotdaniel.wakeproof"
-        minSdk = 35
+        minSdk = 34
         // Play requires new apps and updates to target API 36 from 31 Aug 2026;
         // production rollout lands after that date, so ship at 36 now rather than
         // be locked out of shipping updates three weeks in.

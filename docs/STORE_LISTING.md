@@ -62,7 +62,7 @@ Pushup counting runs entirely on your device. There are no ads, no analytics
 and no tracking. Sync is optional and off until you sign in. The AI features
 are optional too and use an API key you supply yourself.
 
-WakeProof needs Android 15 or newer.
+WakeProof needs Android 14 or newer.
 ```
 
 **Category:** Productivity

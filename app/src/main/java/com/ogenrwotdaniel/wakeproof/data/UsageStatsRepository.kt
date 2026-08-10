@@ -72,6 +72,35 @@ internal fun foldForegroundMillis(
     return totals
 }
 
+/**
+ * Splits [events] into the spans marked out by [edges] (ascending; N edges give
+ * N-1 spans), returning per-package foreground millis for each span.
+ *
+ * Done by folding cumulatively up to each edge and subtracting neighbours rather
+ * than folding each span in isolation. That is what makes a session running
+ * across a boundary — the phone still in your hand at midnight — count towards
+ * both days in the right proportion. Folding spans separately would lose it
+ * entirely from the later day, since that span contains no resume event.
+ *
+ * [now] clamps every edge: future edges contribute nothing.
+ */
+internal fun foregroundMillisPerSpan(
+    events: List<ForegroundEvent>,
+    edges: List<Long>,
+    now: Long
+): List<Map<String, Long>> {
+    val cumulative = edges.map { edge ->
+        val upTo = minOf(edge, now)
+        foldForegroundMillis(events.filter { it.timestamp < upTo }, upTo)
+    }
+    return (0 until edges.size - 1).map { index ->
+        val before = cumulative[index]
+        cumulative[index + 1].mapValues { (pkg, total) ->
+            (total - (before[pkg] ?: 0L)).coerceAtLeast(0L)
+        }.filterValues { it > 0L }
+    }
+}
+
 /** One day's total screen time across launchable apps. */
 data class DayUsage(val epochDay: Long, val minutes: Long)
 
@@ -101,6 +130,23 @@ class UsageStatsRepository @Inject constructor(
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
+    /**
+     * Everything the usage screen shows, measured the same way enforcement
+     * measures it — by walking raw resume/pause events.
+     *
+     * It used to use [UsageStatsManager.queryAndAggregateUsageStats], which reads
+     * whole aggregation buckets and is NOT clipped to the range you ask for: a
+     * query starting at midnight still returned time spent before midnight. On a
+     * real device (2026-08-10) that showed Instagram at 1 h 17 m for "today" when
+     * it had actually been open for 5 minutes — the previous day's 2 h 47 m
+     * bleeding through. The number sat next to a "5 of 10 min" figure from the
+     * event walk on the same screen, and next to a 10-minute cap that correctly
+     * refused to fire, which reads exactly like a broken kill switch.
+     *
+     * Day totals come from cumulative folds at each midnight boundary and
+     * subtracting neighbours, so a session running across midnight is split
+     * between the two days instead of being lost or double-counted.
+     */
     suspend fun snapshot(): UsageSnapshot = withContext(Dispatchers.IO) {
         if (!hasAccess()) return@withContext UsageSnapshot()
         val usm = context.getSystemService(UsageStatsManager::class.java)
@@ -109,22 +155,22 @@ class UsageStatsRepository @Inject constructor(
         val now = System.currentTimeMillis()
         val today = LocalDate.now()
 
-        val week = (6 downTo 0).map { offset ->
-            val day = today.minusDays(offset.toLong())
-            val start = day.atStartOfDay(zone).toInstant().toEpochMilli()
-            val end = minOf(day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(), now)
-            val total = usm.queryAndAggregateUsageStats(start, end)
-                .filterKeys { it in labels }
-                .values.sumOf { it.totalTimeInForeground }
-            DayUsage(epochDay = day.toEpochDay(), minutes = total / 60_000)
+        val days = (6 downTo 0).map { today.minusDays(it.toLong()) }
+        val weekStart = days.first().atStartOfDay(zone).toInstant().toEpochMilli()
+        val events = collectForegroundEvents(usm, weekStart, now, packages = labels.keys)
+
+        val edges = days.map { it.atStartOfDay(zone).toInstant().toEpochMilli() } + now
+        val spans = foregroundMillisPerSpan(events, edges, now)
+
+        val week = days.mapIndexed { index, day ->
+            DayUsage(
+                epochDay = day.toEpochDay(),
+                minutes = spans[index].values.sum() / 60_000
+            )
         }
 
-        val startOfToday = today.atStartOfDay(zone).toInstant().toEpochMilli()
-        val topApps = usm.queryAndAggregateUsageStats(startOfToday, now)
-            .filterKeys { it in labels }
-            .map { (pkg, stats) ->
-                AppUsage(pkg, labels.getValue(pkg), stats.totalTimeInForeground / 60_000)
-            }
+        val topApps = spans[days.lastIndex]
+            .map { (pkg, millis) -> AppUsage(pkg, labels.getValue(pkg), millis / 60_000) }
             .filter { it.minutes >= 1 }
             .sortedByDescending { it.minutes }
             .take(TOP_APP_COUNT)
@@ -136,17 +182,13 @@ class UsageStatsRepository @Inject constructor(
         )
     }
 
-    /** Today's foreground minutes for specific [packages] (limit enforcement). */
+    /**
+     * Today's foreground minutes for specific [packages] — the nudge path.
+     * Shares [todayForegroundMillisFor] with the block path so a nudge and a
+     * block never disagree about how long an app has been open.
+     */
     suspend fun todayMinutesFor(packages: Set<String>): Map<String, Long> =
-        withContext(Dispatchers.IO) {
-            if (!hasAccess() || packages.isEmpty()) return@withContext emptyMap()
-            val usm = context.getSystemService(UsageStatsManager::class.java)
-            val start = LocalDate.now().atStartOfDay(ZoneId.systemDefault())
-                .toInstant().toEpochMilli()
-            usm.queryAndAggregateUsageStats(start, System.currentTimeMillis())
-                .filterKeys { it in packages }
-                .mapValues { (_, stats) -> stats.totalTimeInForeground / 60_000 }
-        }
+        todayForegroundMillisFor(packages).mapValues { (_, millis) -> millis / 60_000 }
 
     /**
      * Foreground milliseconds so far today for [packages], summed from raw
@@ -166,27 +208,41 @@ class UsageStatsRepository @Inject constructor(
             val start = LocalDate.now().atStartOfDay(ZoneId.systemDefault())
                 .toInstant().toEpochMilli()
 
-            val collected = mutableListOf<ForegroundEvent>()
-            val events = usm.queryEvents(start, now)
-            val event = UsageEvents.Event()
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event)
-                if (event.packageName !in packages) continue
-                val resumed = when (event.eventType) {
-                    UsageEvents.Event.ACTIVITY_RESUMED -> true
-                    UsageEvents.Event.ACTIVITY_PAUSED,
-                    UsageEvents.Event.ACTIVITY_STOPPED -> false
-                    else -> continue
-                }
-                collected += ForegroundEvent(
-                    packageName = event.packageName,
-                    className = event.className ?: "",
-                    resumed = resumed,
-                    timestamp = event.timeStamp
-                )
-            }
-            foldForegroundMillis(collected, now)
+            foldForegroundMillis(collectForegroundEvents(usm, start, now, packages), now)
         }
+
+    /**
+     * Raw activity resume/pause events in `[start, end)`, restricted to
+     * [packages] when given (null means every package). Kept in one place so the
+     * usage screen and limit enforcement can never drift apart in what they count.
+     */
+    private fun collectForegroundEvents(
+        usm: UsageStatsManager,
+        start: Long,
+        end: Long,
+        packages: Set<String>?
+    ): List<ForegroundEvent> {
+        val collected = mutableListOf<ForegroundEvent>()
+        val events = usm.queryEvents(start, end)
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (packages != null && event.packageName !in packages) continue
+            val resumed = when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> true
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.ACTIVITY_STOPPED -> false
+                else -> continue
+            }
+            collected += ForegroundEvent(
+                packageName = event.packageName,
+                className = event.className ?: "",
+                resumed = resumed,
+                timestamp = event.timeStamp
+            )
+        }
+        return collected
+    }
 
     /**
      * The package on screen, or null when no resume event landed in the recent

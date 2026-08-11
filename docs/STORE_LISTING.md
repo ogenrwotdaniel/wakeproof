@@ -73,6 +73,45 @@ WakeProof needs Android 14 or newer.
 
 ---
 
+## Release notes ("What's new")
+
+Play Console asks for these on every release. **500 characters max per
+language**, and it counts the blank lines — the two below are 426 and 420.
+Paste as plain text; the field takes no markdown.
+
+### Closed testing — 1.0.0 (versionCode 1)
+
+Tester-facing: it has to say what to exercise and set expectations about the
+API key, or you get "the water thing didn't work" as your only feedback.
+
+```
+First closed test of WakeProof 1.0.0.
+
+Please try: set a real alarm and dismiss it with pushups or water, run a Pomodoro session, review a few flashcards, and put a daily limit on one app.
+
+Water verification needs your own free Gemini key (Settings, AI provider); without one it falls back to a 30-second honour hold. Everything else works with no key and no account.
+
+Bugs to ogenrwotdaniel@gmail.com with your phone model.
+```
+
+### Production — 1.0.0
+
+```
+First release.
+
+WakeProof is an alarm you cannot tap away: dismiss it by doing pushups in front of the camera, or by proving your water bottle actually emptied.
+
+Then it helps you study — Pomodoro timer with a floating bubble, spaced-repetition flashcards, exam countdowns, ambient focus sounds, screen-time limits that can block an app, a Wear OS tile, and optional sync across your own devices.
+
+No ads, no analytics.
+```
+
+Do not reuse the tester note in production: the API-key caveat and the bug
+email address are test-track business, and a public release note that opens
+with instructions reads like an unfinished app.
+
+---
+
 ## Data safety
 
 Play Console → Policy → App content → Data safety. Answer the wizard as below.

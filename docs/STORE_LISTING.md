@@ -92,8 +92,7 @@ Play Console → Policy → App content → Data safety. Answer the wizard as be
 | Personal info → Name | Yes | No | No | **Optional** | App functionality (account for sync) |
 | Personal info → User IDs | Yes | No | No | **Optional** | App functionality (account for sync) |
 | Photos | Yes | Yes | **Yes** | **Optional** | App functionality (water verification — sent to the AI provider you configure, not retained by WakeProof) |
-| App activity → Other user-generated content | Yes | No | No | **Optional** | App functionality (alarms, streak history, flashcards, exams, parked thoughts — synced only if you sign in) |
-| App activity → Other actions | Yes | No | No | **Optional** | App functionality (aggregate focus/screen-time numbers used by the AI features when enabled) |
+| App activity → Other user-generated content | Yes | No | No | **Optional** | App functionality (alarms, streak history, flashcards, exams, parked thoughts — synced only if you sign in; plus the notes text you paste for flashcard drafting and the messages you type in the study chat, which go to the AI provider you configure) |
 
 ### Do NOT declare
 
@@ -104,8 +103,9 @@ and invites questions you would then have to walk back:
   the phone. (The *water photos* are declared above, because those do.)
 - **Calendar events** — read for the agenda, never transmitted.
 - **App usage / screen time** — read for the usage screen and app limits,
-  processed on-device. (Only the *aggregate* numbers reach the AI provider if
-  you enable the AI features, which is what the "Other actions" row covers.)
+  processed on-device. Nothing derived from it leaves the phone: the weekly
+  report and the motivational lines are generated on-device (as of 2026-08-03),
+  so no screen-time number, subject total or app name is sent to an AI provider.
 - **Location, contacts, files, messages, financial info, health** — not accessed
   at all.
 

@@ -1,6 +1,6 @@
 # WakeProof Privacy Policy
 
-**Effective date:** 9 August 2026
+**Effective date:** 11 August 2026
 **Developer:** Ogenrwot Daniel
 **Contact:** ogenrwotdaniel@gmail.com
 
@@ -22,9 +22,10 @@ app:
 - **Habit history** (which alarms you completed, focus minutes, streaks,
   flashcards and their review schedule, exams, parked thoughts).
 - **Screen-time statistics.** With your permission (Usage access), WakeProof
-  reads your device's app-usage statistics to show you your own screen time
-  and to nudge you when an app crosses a limit you set. These statistics are
-  processed on-device only.
+  reads your device's app-usage statistics to show you your own screen time and
+  to act on the daily limits you set — either a notification, or blocking the
+  app from opening for the rest of the day, whichever you chose for that app.
+  These statistics are processed on-device only.
 - **Calendar events.** With your permission, WakeProof reads event titles and
   times from your device calendar to show your agenda. It never modifies your
   calendar and never transmits calendar data.
@@ -32,6 +33,10 @@ app:
   processed entirely on-device (Google ML Kit pose detection). No video or
   image from pushup verification is stored or transmitted.
 - **Your AI API key**, stored encrypted (Android EncryptedSharedPreferences).
+- **Your paired watch.** If you install the WakeProof watch app, your phone
+  sends it a small snapshot — streak, focus minutes and goal, water count and
+  target, and the current timer — over Google's on-device Wearable Data Layer.
+  This travels between your own two devices and reaches no server of ours.
 
 ## Optional cloud sync — only when you sign in
 
@@ -79,7 +84,11 @@ What is sent, per feature, over an encrypted connection (HTTPS):
 | Water-drinking verification | The two photos you take of your water container |
 | Flashcard drafting | The notes text you paste, or the notes photo you pick |
 | Study coach chat | The messages you type in the chat |
-| Weekly report | Aggregate numbers only (minutes per subject, daily screen-time totals, top-3 app names with minutes, your focus goal) |
+
+That is the whole list. In particular your **weekly report** and the
+**motivational lines** after an alarm are written on your device from your own
+numbers; no statistics, screen-time totals or app names are sent to an AI
+provider, with or without a key.
 
 WakeProof sends this data directly from your phone to the provider you chose;
 the developer of WakeProof never receives, stores or sees any of it. The
@@ -88,8 +97,9 @@ are governed by their privacy policy. Don't include personal information you
 wouldn't share with that provider (e.g. avoid photographing notes containing
 other people's personal data).
 
-If you never add an API key, the app makes **no network requests at all**, and
-water verification falls back to an on-device honor mode.
+If you never add an API key and never sign in for sync, the app makes **no
+network requests at all**, and water verification falls back to an on-device
+honor mode.
 
 ## Permissions summary
 
@@ -97,8 +107,8 @@ water verification falls back to an on-device honor mode.
 |---|---|
 | Camera | Counting pushups (on-device) and photographing your water container |
 | Notifications, exact alarms, full-screen alarms | Making the alarm ring reliably, including on the lock screen |
-| Usage access (special) | Showing you your own screen-time stats and enforcing your app limits |
-| Display over other apps (special) | The floating Pomodoro timer bubble and opening the alarm screen while you use other apps |
+| Usage access (special) | Showing you your own screen-time stats, and applying the daily app limits you set (notify, or block for the rest of the day) |
+| Display over other apps (special) | The floating Pomodoro timer bubble, the block screen for an app that has hit its limit, and opening the alarm screen while you use other apps |
 | Calendar (read) | Showing your agenda so you can tick events off |
 | Internet | Only for the optional cloud sync and AI features above |
 
@@ -132,6 +142,12 @@ personal information from children.
 ## Changes to this policy
 
 Material changes will be posted at this URL with an updated effective date.
+
+**11 August 2026** — added the optional cloud sync section (Google sign-in and
+Firebase, off until you sign in); removed the weekly report from the list of
+features that call an AI provider, because it is now written on your device;
+noted that a daily app limit can block an app as well as notify you; noted the
+snapshot your phone sends to a paired watch.
 
 ## Contact
 

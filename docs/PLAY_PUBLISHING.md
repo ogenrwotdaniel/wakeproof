@@ -167,13 +167,16 @@ Upload to YouTube (unlisted) and paste the link in the declaration form.
 
 ### 4c. Store listing (Main store listing)
 
-All texts are pre-written in `docs/STORE_LISTING.md`. Assets you must create:
+All texts are pre-written in `docs/STORE_LISTING.md` (app name, both
+descriptions, release notes). Graphics live in `docs/store-assets/` — see the
+README there for specs, the regeneration commands, and the screenshot recipe:
 
-| Asset | Spec | How |
-|---|---|---|
-| App icon | 512×512 PNG, <1 MB | Export the launcher icon at 512px |
-| Feature graphic | 1024×500 PNG/JPG | Simple: dark background, app name + "The alarm you can't cheat." |
-| Phone screenshots | 2–8, PNG/JPG, 9:16-ish | `adb exec-out screencap -p > shot1.png` on each key screen: Home dashboard, alarm ringing, pushup verify, Pomodoro with subject chips, Flashcards review, Phone usage, Agenda |
+| Asset | State |
+|---|---|
+| App icon | ✅ `docs/store-assets/icon-512.png` |
+| Feature graphic | ✅ `docs/store-assets/feature-graphic-1024x500.png` |
+| Phone screenshots | capture per `docs/store-assets/README.md` (lead with alarm ringing + pushup verify) |
+| Tablet screenshots | same, in portrait — the layout is phone-width and looks empty in landscape |
 
 ## Step 5 — Closed testing release (Day 2–3)
 

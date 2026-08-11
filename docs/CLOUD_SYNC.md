@@ -70,7 +70,7 @@ untracked, and a build without it simply reports sync as unavailable
    |---|---|
    | Debug (sideloading from this machine) | `5E:6E:0D:3D:EF:C6:2A:24:2C:E1:A0:27:7C:6C:59:A9:4F:0A:47:C0` |
    | Release upload key (`wakeproof-release.keystore`) | `40:28:6E:CA:7C:DD:1E:E5:A0:61:AF:11:1E:9E:91:B5:B4:74:91:1C` |
-   | **Play App Signing key** | Only exists after the first AAB upload — see below. |
+   | **Play App Signing key** | `8F:72:B7:BD:91:6F:A9:0C:9A:3F:0B:42:01:00:3D:C9:6E:9B:D2:EB` (exists only after the first AAB upload — see below) |
 
    > **The one that bites.** Play App Signing re-signs the app with a key Google
    > holds, so the copy users install is **not** signed with the upload key above.
@@ -78,6 +78,32 @@ untracked, and a build without it simply reports sync as unavailable
    > install by hand and fails for everyone who installs from Play. Get it from
    > Play Console → Test and release → Setup → App signing, and add it as another
    > fingerprint. Re-download `google-services.json` afterwards.
+   >
+   > **Hit for real on 2026-08-12**, on the first Play-installed (internal
+   > testing) build. What the user sees is *"No Google account is available on
+   > this device"*, which sends you to the device's account settings — the wrong
+   > place entirely. The truth is only in logcat:
+   >
+   > ```
+   > CredentialManager: Get credential errorMsg=[28444] Developer console is not set up correctly.
+   > ```
+   >
+   > To confirm which certificate actually signed a Play install, pull it off the
+   > device rather than trusting any console page:
+   >
+   > ```bash
+   > adb shell pm path com.ogenrwotdaniel.wakeproof     # gives the base.apk path
+   > adb pull <base.apk path> play-base.apk
+   > $ANDROID_HOME/build-tools/37.0.0/apksigner verify --print-certs play-base.apk
+   > ```
+   >
+   > Read the **V3.0 Signer** SHA-1. Google's signature shows up as
+   > `CN=Android, O=Google Inc.`, and the V3.2 hybrid/PQC signers and the source
+   > stamp signer listed alongside it are NOT the fingerprint Firebase wants.
+   >
+   > Adding the fingerprint needs no rebuild and no `versionCode` bump: the
+   > registration is server-side, and `WEB_CLIENT_ID` (the only thing baked into
+   > the build) does not change when an android-type OAuth client is added.
 
 4. **Download `google-services.json`** into `app/`. It is gitignored. The Gradle
    build detects it and applies the plugin; without it you get a build warning and

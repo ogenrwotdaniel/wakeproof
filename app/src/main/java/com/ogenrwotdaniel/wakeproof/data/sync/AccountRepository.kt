@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -90,6 +91,18 @@ class AccountRepository @Inject constructor(
                 throw SignInCancelled("Sign-in cancelled.")
             } catch (e: NoCredentialException) {
                 throw SignInCancelled("No Google account is available on this device.")
+            } catch (e: GetCredentialException) {
+                // Everything else from Credential Manager, and the reason this is not
+                // folded into the NoCredentialException branch: an unregistered signing
+                // certificate arrives here as "[28444] Developer console is not set up
+                // correctly", and reporting that as a missing account sends whoever hit
+                // it to their device settings instead of the Firebase console. Play App
+                // Signing makes it the DEFAULT state of a fresh Play track until that
+                // key's SHA-1 is added — see docs/CLOUD_SYNC.md step 3.
+                throw SignInCancelled(
+                    "Google could not offer an account for this build " +
+                        "(${e.type}). Sync is unavailable; everything else works."
+                )
             }
 
             val googleCredential = GoogleIdTokenCredential.createFrom(response.credential.data)

@@ -37,6 +37,14 @@ If a promo video is ever attached to the listing, Play overlays a play button
 over the middle of the feature graphic, which lands on the wordmark. Either skip
 the promo video or re-cut the graphic with the text off-centre.
 
+## Where the captured screenshots live
+
+**Not in this repo** — `~/wakeproof-store-assets/screenshots/`, with a contact
+sheet one level up. They are real captures from the S25 Edge, so they contain
+real app-usage data (which apps, how many minutes) and real alarm labels. That
+is fine on a Play listing you chose to publish, but this repo is public, so the
+frames stay out of git until you have looked at each one.
+
 ## Screenshots — capture recipe
 
 Needs a connected device (`adb devices` must list one). Both dev devices are on

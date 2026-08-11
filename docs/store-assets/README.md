@@ -61,19 +61,28 @@ good listing looks abandoned.
 The eight phone screens, in the order they should appear on the listing (Play
 shows them in upload order, and the first two carry the install decision):
 
-1. Alarm ringing — the full-screen alarm with the verify prompt
-2. Pushup verification — camera with the skeleton overlay and the rep count
-3. Pomodoro — running timer with subject chips and the sound picker
-4. Water verification — before/after capture screen
-5. Phone usage — screen-time chart plus the Daily limits section
-6. Flashcards — a card mid-review with Again/Hard/Good/Easy
-7. Home dashboard — streak, today's focus vs goal, exam countdown
-8. Settings — sync across devices, or the Agenda screen
+The set that was actually shot and picked, on 2026-08-12, lives in
+`~/wakeproof-store-assets/upload/phone/` in upload order:
 
-Lead with the alarm and the pushup camera, not the dashboard. Those two are the
-only things in this app no other alarm clock does, and neither depends on
-accumulated history — whereas Home is exactly the screen that looks empty on a
-device without a streak yet.
+1. Pushup verification — camera, pose skeleton, "1 / 15"
+2. Alarm ringing — "No dismiss button. Verification is the only way out."
+3. Pomodoro — running at 24:09, subject chips, sound picker
+4. Phone usage — screen-time total and the 7-day chart
+5. Daily limits — an app over its cap, with the limits list
+6. Flashcards — card revealed, Again/Hard/Good/Easy
+7. Home — exam countdown and the 7-day chart
+8. Settings — pushup target, water, bottle size, emergency hold
+
+Lead with the pushup camera and the ringing alarm, not the dashboard. Those two
+are the only things in this app no other alarm clock does, and neither depends
+on accumulated history — whereas Home is exactly the screen that looks empty on
+a device without a streak yet. Photo first, claim second: Play shows the first
+few frames in search results, and the camera shot is what stops a thumb.
+
+Frames deliberately left out, all of which were shot: the populated **Agenda**
+(it repeats the developer's email on every row next to a real class schedule —
+a listing page is permanent and scraped), both permission/empty states, the
+onboarding checklist, the Add-exam date picker, and idle-timer duplicates.
 
 Tablet: shoot it in **portrait**. The layout is phone-width with no two-pane
 adaptation, so in landscape the cards stretch the full 2560 px and the screen

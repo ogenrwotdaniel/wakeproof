@@ -75,35 +75,35 @@ WakeProof needs Android 14 or newer.
 
 ## Release notes ("What's new")
 
-Play Console asks for these on every release. **500 characters max per
-language**, and it counts the blank lines — the two below are 426 and 420.
-Paste as plain text; the field takes no markdown.
+Play Console asks for these on every release. The documented limit is **500
+characters per language**, but the console rejected a 426-character en-US note
+on 2026-08-11, so treat the usable budget as **~300 characters** and keep it to
+a single paragraph. Two things eat into it: the `<en-US>` / `</en-US>` tags are
+counted, and blank lines count as characters. Plain text only — no markdown.
 
-### Closed testing — 1.0.0 (versionCode 1)
+> If the console still says too long, check which field you are in. **Release
+> name** is a separate 50-character field (internal, testers never see it) and
+> is easy to mistake for the notes box. Put `1.0.0 (1)` there.
+
+### Closed testing — 1.0.0 (versionCode 1), 306 chars
 
 Tester-facing: it has to say what to exercise and set expectations about the
 API key, or you get "the water thing didn't work" as your only feedback.
 
 ```
-First closed test of WakeProof 1.0.0.
-
-Please try: set a real alarm and dismiss it with pushups or water, run a Pomodoro session, review a few flashcards, and put a daily limit on one app.
-
-Water verification needs your own free Gemini key (Settings, AI provider); without one it falls back to a 30-second honour hold. Everything else works with no key and no account.
-
-Bugs to ogenrwotdaniel@gmail.com with your phone model.
+Closed test of WakeProof 1.0.0. Please try an alarm dismissed by pushups or water, a Pomodoro session, a few flashcards, and a daily limit on one app. Water checks need your own free Gemini key (Settings, AI provider); without one there is a 30-second honour hold instead. Bugs to ogenrwotdaniel@gmail.com.
 ```
 
-### Production — 1.0.0
+Fallback if even that is refused — 170 chars:
 
 ```
-First release.
+First closed test of WakeProof 1.0.0. Try an alarm dismissed by pushups or water, a Pomodoro session, flashcards, and a daily app limit. Bugs to ogenrwotdaniel@gmail.com.
+```
 
-WakeProof is an alarm you cannot tap away: dismiss it by doing pushups in front of the camera, or by proving your water bottle actually emptied.
+### Production — 1.0.0, 300 chars
 
-Then it helps you study — Pomodoro timer with a floating bubble, spaced-repetition flashcards, exam countdowns, ambient focus sounds, screen-time limits that can block an app, a Wear OS tile, and optional sync across your own devices.
-
-No ads, no analytics.
+```
+First release. An alarm you cannot tap away: dismiss it with pushups in front of the camera, or by proving your water bottle emptied. Plus a Pomodoro timer, spaced-repetition flashcards, exam countdowns, screen-time limits, a Wear OS tile, and optional sync across your devices. No ads, no analytics.
 ```
 
 Do not reuse the tester note in production: the API-key caveat and the bug

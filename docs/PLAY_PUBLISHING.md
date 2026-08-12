@@ -115,6 +115,14 @@ Play Console → **Create app**:
 - Default language: English (or en-GB)
 - App or game: App · Free or paid: **Free**
   (⚠️ a free app can never be switched to paid later)
+
+  > Set to **Paid** by mistake on 2026-08-12. That direction *is* recoverable:
+  > **Monetize → App pricing** (older console: Store presence → Pricing &
+  > distribution) converts paid → free, and the Console search box finds the page
+  > under "pricing". It is one-way too, so after converting, paid is gone for
+  > good. Paid also demands a payments/merchant profile and blocks installs for
+  > anyone outside the licensed-tester list, so leaving it set would have stalled
+  > the closed test.
 - Declarations: accept Developer Program Policies + US export laws.
 
 Then work through the **Dashboard → "Set up your app"** checklist. Every form

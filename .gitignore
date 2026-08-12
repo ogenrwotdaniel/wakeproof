@@ -15,3 +15,7 @@ keystore.properties
 # Firebase project config: ties the build to a specific Firebase project and
 # carries its API keys. See docs/CLOUD_SYNC.md.
 google-services.json
+
+# Private working documents — never commit
+CLAUDE.md
+docs/TESTER_EMAIL.md

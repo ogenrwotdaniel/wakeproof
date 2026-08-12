@@ -16,9 +16,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
+import android.content.Intent
 
 /**
  * AI provider + API key management: pick Kimi (paid) or Gemini (free tier),
@@ -38,6 +41,7 @@ fun ApiKeySection(
     modifier: Modifier = Modifier
 ) {
     var keyInput by rememberSaveable { mutableStateOf("") }
+    val context = LocalContext.current
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(text = "AI provider", style = MaterialTheme.typography.titleMedium)
@@ -60,6 +64,20 @@ fun ApiKeySection(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (!hasKey) {
+            // The key is the one thing the user cannot get from inside the app, and
+            // "go to aistudio.google.com/api-keys" typed on a phone is where people
+            // give up. One tap out to the page instead.
+            OutlinedButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, provider.keyUrl.toUri()))
+                    }
+                }
+            ) {
+                Text(if (provider == AiProvider.GEMINI) "Get a free key" else "Get a key")
+            }
+        }
         OutlinedTextField(
             value = keyInput,
             onValueChange = { keyInput = it },

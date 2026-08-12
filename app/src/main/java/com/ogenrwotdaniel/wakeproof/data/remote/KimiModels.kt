@@ -21,7 +21,9 @@ enum class AiProvider(
     val baseUrl: String,
     val model: String,
     val keyHint: String,
-    val keySource: String
+    val keySource: String,
+    /** Where the "Get a key" button in Settings sends you. */
+    val keyUrl: String
 ) {
     GEMINI(
         id = "gemini",
@@ -29,7 +31,8 @@ enum class AiProvider(
         baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/",
         model = "gemini-3.5-flash",
         keyHint = "AIza…",
-        keySource = "aistudio.google.com/apikey (free, no card needed)"
+        keySource = "aistudio.google.com/api-keys (free, no card needed)",
+        keyUrl = "https://aistudio.google.com/api-keys"
     ),
     KIMI(
         id = "kimi",
@@ -37,7 +40,8 @@ enum class AiProvider(
         baseUrl = KIMI_BASE_URL,
         model = KIMI_MODEL,
         keyHint = "sk-…",
-        keySource = "platform.moonshot.ai"
+        keySource = "platform.moonshot.ai",
+        keyUrl = "https://platform.moonshot.ai"
     );
 
     companion object {

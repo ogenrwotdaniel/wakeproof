@@ -1,7 +1,10 @@
 package com.ogenrwotdaniel.wakeproof.ui.home
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
@@ -25,6 +28,7 @@ import kotlinx.coroutines.launch
 /** Home dashboard state: alarms, today's goals, streak, 7-day history. */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
     private val examDao: ExamDao,
@@ -62,12 +66,12 @@ class HomeViewModel @Inject constructor(
     val streak: StateFlow<StreakInfo> = statsRepository.observeStreak()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StreakInfo())
 
-    /** Next enabled pushup alarm as "HH:MM", or null when none. */
+    /** Next enabled pushup alarm, in the device's clock format, or null when none. */
     val nextPushupAlarm: StateFlow<String?> = repository.observeAlarms()
         .map { list ->
             list.filter { it.type == AlarmType.PUSHUP && it.enabled }
                 .minByOrNull { it.hour * 60 + it.minute }
-                ?.let { "%02d:%02d".format(it.hour, it.minute) }
+                ?.let { formatAlarmTime(context, it.hour, it.minute) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 

@@ -20,12 +20,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 /**
@@ -58,7 +59,7 @@ fun AlarmRingingScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = now.format(DateTimeFormatter.ofPattern("HH:mm")),
+                text = formatAlarmTime(LocalContext.current, now.hour, now.minute),
                 style = MaterialTheme.typography.displayLarge
             )
             Text(

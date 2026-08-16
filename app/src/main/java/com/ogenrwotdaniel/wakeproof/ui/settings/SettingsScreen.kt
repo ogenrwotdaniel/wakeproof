@@ -35,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.ogenrwotdaniel.wakeproof.ui.deviceUses24HourClock
+import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -90,7 +92,7 @@ fun SettingsScreen(
                     Column {
                         TextButton(onClick = { editingAlarm = alarm }) {
                             Text(
-                                text = "%02d:%02d".format(alarm.hour, alarm.minute),
+                                text = formatAlarmTime(LocalContext.current, alarm.hour, alarm.minute),
                                 style = MaterialTheme.typography.headlineSmall
                             )
                         }
@@ -331,7 +333,7 @@ fun SettingsScreen(
             onDismissRequest = { deletingAlarm = null },
             title = { Text("Delete this alarm?") },
             text = {
-                val time = "%02d:%02d".format(alarm.hour, alarm.minute)
+                val time = formatAlarmTime(LocalContext.current, alarm.hour, alarm.minute)
                 val name = alarm.label.ifBlank { alarm.type.name.lowercase() }
                 Text(
                     "$time ($name) will be removed from this device, and from any " +
@@ -526,7 +528,11 @@ private fun AddAlarmDialog(
 ) {
     var type by rememberSaveable { mutableStateOf(AlarmType.PUSHUP) }
     var label by rememberSaveable { mutableStateOf("") }
-    val state = rememberTimePickerState(initialHour = 6, initialMinute = 0, is24Hour = true)
+    val state = rememberTimePickerState(
+        initialHour = 6,
+        initialMinute = 0,
+        is24Hour = deviceUses24HourClock(LocalContext.current)
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -576,7 +582,7 @@ private fun TimePickerDialog(
     val state = rememberTimePickerState(
         initialHour = initialHour,
         initialMinute = initialMinute,
-        is24Hour = true
+        is24Hour = deviceUses24HourClock(LocalContext.current)
     )
     AlertDialog(
         onDismissRequest = onDismiss,

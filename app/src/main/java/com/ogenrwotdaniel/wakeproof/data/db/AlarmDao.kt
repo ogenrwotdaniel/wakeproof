@@ -73,9 +73,17 @@ interface AlarmDao : SyncDao<Alarm> {
     @Query("SELECT COUNT(*) FROM alarms WHERE seeded = 0 AND deleted = 0")
     suspend fun countRealAlarms(): Int
 
+    /** The starter alarms, read so their schedules can be cancelled before they go. */
+    @Query("SELECT * FROM alarms WHERE seeded = 1")
+    suspend fun seededAlarms(): List<Alarm>
+
     /**
      * Hard delete, not a tombstone: seeded rows are never uploaded, so no other
      * device has heard of them and there is nothing to announce.
+     *
+     * Cancel these alarms with [seededAlarms] BEFORE calling this. A tombstone
+     * would keep them reconcilable; a hard delete does not, so once the rows are
+     * gone nothing in the table can point at their still-armed pending intents.
      */
     @Query("DELETE FROM alarms WHERE seeded = 1")
     suspend fun deleteSeeded()

@@ -41,9 +41,23 @@ class AlarmScheduler @Inject constructor(
         directBootStore.put(alarm)
     }
 
-    fun cancel(alarm: Alarm) {
-        alarmManager.cancel(fireIntent(alarm.id, requestCode = alarm.id.toInt()))
-        directBootStore.remove(alarm.id)
+    fun cancel(alarm: Alarm) = cancelById(alarm.id)
+
+    /**
+     * Drops every schedule belonging to [alarmId] — daily and test — and forgets
+     * it in the mirror.
+     *
+     * Takes an id rather than an [Alarm] because the callers that need it most
+     * have no row to pass: an alarm hard-deleted from the table still has its
+     * pending intents armed, and by then the id is all that is left of it.
+     */
+    fun cancelById(alarmId: Long) {
+        val requestCode = alarmId.toInt()
+        alarmManager.cancel(fireIntent(alarmId, requestCode))
+        alarmManager.cancel(
+            fireIntent(alarmId, requestCode + TEST_REQUEST_CODE_OFFSET, testFire = true)
+        )
+        directBootStore.remove(alarmId)
     }
 
     /**

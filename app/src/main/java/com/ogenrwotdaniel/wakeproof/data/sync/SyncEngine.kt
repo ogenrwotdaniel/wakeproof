@@ -105,6 +105,11 @@ class SyncEngine @Inject constructor(
      */
     private suspend fun retireSeededAlarms(): Boolean {
         if (alarms.countRealAlarms() == 0) return false
+        // Cancel first. This is a hard delete, so the moment the rows go
+        // reconcileAlarmSchedule can no longer see them — and a starter alarm whose
+        // row is gone but whose pending intent is still armed rings every morning
+        // with nothing left in the app to switch it off.
+        alarms.seededAlarms().forEach(scheduler::cancel)
         alarms.deleteSeeded()
         return true
     }

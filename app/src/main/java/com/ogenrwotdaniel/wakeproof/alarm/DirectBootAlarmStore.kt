@@ -38,6 +38,12 @@ class DirectBootAlarmStore @Inject constructor(
     /** Schedule stubs for every mirrored alarm; only id/hour/minute are meaningful. */
     fun all(): List<Alarm> = prefs.all.mapNotNull { (key, value) -> decode(key, value as? String) }
 
+    /**
+     * Every mirrored alarm id. Read by [AlarmInitializer] to find ids that
+     * outlived their row and are still ringing with nothing behind them.
+     */
+    fun ids(): Set<Long> = prefs.all.keys.mapNotNullTo(mutableSetOf()) { it.toLongOrNull() }
+
     private fun decode(key: String, value: String?): Alarm? {
         val id = key.toLongOrNull() ?: return null
         val parts = value?.split(":") ?: return null

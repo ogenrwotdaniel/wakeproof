@@ -1,22 +1,64 @@
 package com.ogenrwotdaniel.wakeproof.alarm
 
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
+import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Brings AlarmManager in sync with the database: seeds the default alarms on
- * first launch and (re)schedules every enabled alarm. Safe to call repeatedly —
- * rescheduling replaces the existing PendingIntent. Called from app startup
- * and from [BootReceiver].
+ * first launch, (re)schedules every live alarm, and drops the schedule of every
+ * alarm that is no longer live. Safe to call repeatedly — rescheduling replaces
+ * the existing PendingIntent. Called from app startup and from [BootReceiver].
  */
 @Singleton
 class AlarmInitializer @Inject constructor(
     private val repository: AlarmRepository,
-    private val scheduler: AlarmScheduler
+    private val scheduler: AlarmScheduler,
+    private val directBootStore: DirectBootAlarmStore
 ) {
     suspend fun initialize() {
         repository.seedDefaultAlarmsIfEmpty()
-        repository.getEnabledAlarms().forEach(scheduler::schedule)
+        val plan = reconcilePlan(
+            alarms = repository.getAllAlarmsIncludingDeleted(),
+            mirroredIds = directBootStore.ids()
+        )
+        // Arm the live alarms before dropping anything: if the process is killed
+        // part-way through, the failure mode is a stale alarm rather than a
+        // missed one.
+        plan.toSchedule.forEach(scheduler::schedule)
+        plan.toCancel.forEach(scheduler::cancel)
+        plan.orphanIds.forEach(scheduler::cancelById)
     }
+}
+
+/**
+ * @param toSchedule alarms that should be armed.
+ * @param toCancel alarms whose row still exists but which must not ring.
+ * @param orphanIds mirrored alarm ids with no row left at all.
+ */
+internal data class AlarmReconcilePlan(
+    val toSchedule: List<Alarm>,
+    val toCancel: List<Alarm>,
+    val orphanIds: List<Long>
+)
+
+/**
+ * Decides what AlarmManager should hold, given the whole alarms table
+ * (tombstones included) and the ids in the direct-boot mirror.
+ *
+ * [orphanIds] is the repair path for ghost alarms. Most ways of removing an
+ * alarm leave a tombstone, which keeps it visible here long enough to cancel —
+ * but retiring the seeded starter alarms is a hard delete, so those rows vanish
+ * while their pending intents stay armed. Nothing in the table can point at them
+ * afterwards; the mirror is the only remaining record that they were ever
+ * scheduled, and an id in the mirror with no row behind it is exactly that ghost.
+ */
+internal fun reconcilePlan(alarms: List<Alarm>, mirroredIds: Set<Long>): AlarmReconcilePlan {
+    val (live, dead) = alarms.partition { it.enabled && !it.deleted }
+    return AlarmReconcilePlan(
+        toSchedule = live,
+        toCancel = dead,
+        orphanIds = (mirroredIds - alarms.map { it.id }.toSet()).sorted()
+    )
 }

@@ -26,20 +26,47 @@ class AlarmReceiver : BroadcastReceiver() {
         val alarmId = intent.getLongExtra(EXTRA_ALARM_ID, -1L)
         if (alarmId == -1L) return
 
-        AlarmRingingService.start(context, alarmId)
-
-        if (intent.getBooleanExtra(EXTRA_TEST_FIRE, false)) return
-        // Before the first unlock Room (credential-encrypted) is unreadable;
-        // fall back to the device-protected mirror for the daily reschedule.
+        // Before the first unlock Room (credential-encrypted) is unreadable, so the
+        // device-protected mirror is the only account of the schedule there is:
+        // ring on its word, and reschedule from it. A test fire answers to nothing
+        // but itself and never touches the daily schedule.
+        val testFire = intent.getBooleanExtra(EXTRA_TEST_FIRE, false)
         val unlocked = context.getSystemService(UserManager::class.java).isUserUnlocked
+        if (testFire || !unlocked) {
+            AlarmRingingService.start(context, alarmId)
+            if (testFire) return
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.Default).launch {
+                try {
+                    directBootStore.get(alarmId)?.let(scheduler::schedule)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
+            return
+        }
+
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.Default).launch {
             try {
-                if (unlocked) {
-                    repository.getAlarm(alarmId)?.takeIf { it.enabled }?.let(scheduler::schedule)
-                } else {
-                    directBootStore.get(alarmId)?.let(scheduler::schedule)
+                val alarm = runCatching { repository.getAlarm(alarmId) }
+                    .getOrElse {
+                        // Storage unreadable for some other reason. An alarm clock that
+                        // is unsure must still wake the user, so ring and leave the
+                        // schedule alone.
+                        AlarmRingingService.start(context, alarmId)
+                        return@launch
+                    }
+                if (alarm == null || !alarm.enabled) {
+                    // Deleted, switched off, or a starter alarm retired by sync — yet
+                    // AlarmManager still had this armed. Ringing it now would be a
+                    // ghost: no row means no row to silence, so no screen in the app
+                    // can turn it off. Drop the schedule instead of waking anyone.
+                    scheduler.cancelById(alarmId)
+                    return@launch
                 }
+                AlarmRingingService.start(context, alarmId)
+                scheduler.schedule(alarm)
             } finally {
                 pendingResult.finish()
             }

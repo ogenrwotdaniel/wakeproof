@@ -27,6 +27,8 @@ class AlarmRepository @Inject constructor(
 
     suspend fun getEnabledAlarms(): List<Alarm> = dao.getEnabled()
 
+    suspend fun getAllAlarmsIncludingDeleted(): List<Alarm> = dao.getAllIncludingDeleted()
+
     suspend fun firstAlarmOfType(type: AlarmType): Alarm? = dao.getFirstByType(type)
 
     /**

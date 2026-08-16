@@ -222,7 +222,13 @@ Everything in steps 1–4 is one-time. An update is only this:
 
 1. **Bump the version** in `app/build.gradle.kts`. `versionCode` must increase
    by at least 1 or Play rejects the upload outright; `versionName` is the
-   string testers see. 1.1.0 is already at `versionCode = 2`.
+   string testers see. 1.1.0 ships as `versionCode = 3`.
+
+   > A `versionCode` is spent the moment Play accepts an upload — including one
+   > you never rolled out, and including a draft release you discarded. It can
+   > never be reused, and Play only tells you at upload time. 1.1.0 was built at
+   > 2 and rejected on that basis on 2026-08-17, so it went out as 3 with the
+   > same `versionName`. Bump the code and rebuild; do not chase the name.
 2. **Build and check:**
    ```bash
    ./gradlew testDebugUnitTest lintDebug bundleRelease
@@ -232,11 +238,41 @@ Everything in steps 1–4 is one-time. An update is only this:
    silently ships **without cloud sync**, and Gradle only warns.
 3. **Upload:** Play Console → Test and release → Testing → **Closed testing →
    Alpha → Create new release** → drop the `.aab` in.
-   Release name is internal (`1.1.0 (2)`); release notes are the public bit —
+   Release name is internal (`1.1.0 (3)`); release notes are the public bit —
    copy the block from `docs/STORE_LISTING.md` §Closed testing — 1.1.0.
 4. **Review the release** → **Start rollout to Closed testing**. Testers get the
    update through Play automatically (usually within a few hours; they can force
    it from the Play Store app's My apps page).
+
+### Adding the watch bundle to the same release
+
+`:wear` is a second artifact in the **same** Play app (it shares the
+`applicationId`), so it goes into the same release — drop both `.aab` files into
+one "Create new release" form. Play works out which device gets which from the
+manifest. Build them together:
+
+```bash
+./gradlew :app:bundleRelease :wear:bundleRelease
+# → app/build/outputs/bundle/release/app-release.aab     versionCode 3
+# → wear/build/outputs/bundle/release/wear-release.aab   versionCode 1003
+```
+
+Two things had to be true before that upload could work, both fixed on
+2026-08-17:
+
+- **Unique versionCode.** Codes are unique per *app*, not per module, so the
+  watch cannot also be 3. It is offset a thousand (`1000 + phone code`) so the
+  two sequences can never collide as the phone keeps bumping.
+- **Same signing key.** `:wear` had no `signingConfig` at all, so
+  `bundleRelease` produced an **unsigned** bundle — Play refuses those, and it is
+  not visible from the build log. It now reads the same `keystore.properties` as
+  `:app`; both bundles verify as `40:28:6E:CA:…`, the upload key.
+
+⚠️ **Unverified:** `:wear` is still `targetSdk 34`. Wear OS has historically had
+its own target-API deadline, separate from the phone's 36-by-31-Aug-2026, and
+which one Play enforces here has not been checked. If the upload is rejected on
+target API, that is why — and raising it means re-testing the tile and the
+Ongoing Activity on the physical watch, not just changing the number.
 
 A closed-testing update does **not** restart the 14-day clock — that counts
 continuous tester opt-in, not builds. Uploading a fresh build mid-test is

@@ -1,5 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
+}
+
+// Same untracked keystore.properties the phone module reads. The watch bundle goes
+// into the SAME Play app as the phone one, so it has to be signed with the same
+// upload key — an unsigned or debug-signed artifact is rejected at upload.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -12,8 +22,24 @@ android {
         applicationId = "com.ogenrwotdaniel.wakeproof"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // Offset by 1000 from the phone's versionCode (3), deliberately, rather than
+        // simply the next free number. Both artifacts live in the same Play app and
+        // every versionCode there must be unique forever, so picking 4 would collide
+        // with the phone's second-next upload. The offset keeps the two sequences
+        // from ever meeting: phone N, watch 1000 + N.
+        versionCode = 1003
+        versionName = "1.1.0"
+    }
+
+    signingConfigs {
+        if (keystoreProperties.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -23,6 +49,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // findByName, not getByName: a fresh clone with no keystore.properties
+            // has no release config and must still build (unsigned).
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {

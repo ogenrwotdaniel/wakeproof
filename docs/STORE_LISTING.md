@@ -100,7 +100,7 @@ Fallback if even that is refused — 170 chars:
 First closed test of WakeProof 1.0.0. Try an alarm dismissed by pushups or water, a Pomodoro session, flashcards, and a daily app limit. Bugs to ogenrwotdaniel@gmail.com.
 ```
 
-### Closed testing — 1.1.0 (versionCode 2), 251 chars
+### Closed testing — 1.1.0 (versionCode 3), 251 chars
 
 The first feedback build. Name the fixes in the testers' own words — they
 reported "the alarm went off in the morning when I set it for the evening" and
@@ -112,7 +112,12 @@ nothing.
 WakeProof 1.1.0, from your feedback. Fixed: alarms set for the wrong half of the day on 12-hour phones, alarms that rang with no way to stop them, and sign-in failing after a sign-out. New: snooze, 5 minutes, 3 a day. Bugs to ogenrwotdaniel@gmail.com.
 ```
 
-Release name field (internal, 50 chars): `1.1.0 (2)`
+Release name field (internal, 50 chars): `1.1.0 (3)`
+
+The version *name* stays 1.1.0 — it is the same build, and the testers' notes
+above are unchanged. Only the code moved, because 2 was already spent on an
+upload Play is holding and a `versionCode` can never be reused. Play compares
+codes, not names, so two releases sharing a name is fine.
 
 ### Production — 1.0.0, 300 chars
 

@@ -4,10 +4,12 @@ import android.app.Activity
 import android.content.Context
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -85,12 +87,21 @@ class AccountRepository @Inject constructor(
                 .addCredentialOption(googleIdOption)
                 .build()
 
+            val credentialManager = CredentialManager.create(context)
             val response = try {
-                CredentialManager.create(context).getCredential(activity, request)
+                credentialManager.getCredential(activity, request)
             } catch (e: GetCredentialCancellationException) {
-                throw SignInCancelled("Sign-in cancelled.")
+                // Not necessarily the user: after a sign-out, Google's one-tap sheet
+                // enters a cool-down and answers instantly with a cancellation
+                // instead of showing anything. That is why sign-in works on a fresh
+                // device, then refuses on the one that signed out and tried again.
+                // The explicit "Sign in with Google" flow is not rate-limited, so
+                // fall back to it before believing the cancellation.
+                explicitSignIn(credentialManager, activity, clientId)
+                    ?: throw SignInCancelled("Sign-in cancelled.")
             } catch (e: NoCredentialException) {
-                throw SignInCancelled("No Google account is available on this device.")
+                explicitSignIn(credentialManager, activity, clientId)
+                    ?: throw SignInCancelled("No Google account is available on this device.")
             } catch (e: GetCredentialException) {
                 // Everything else from Credential Manager, and the reason this is not
                 // folded into the NoCredentialException branch: an unregistered signing
@@ -117,6 +128,28 @@ class AccountRepository @Inject constructor(
             if (previousUid != null && previousUid != user.uid) syncPreferences.clearCursors()
             syncPreferences.setEnabled(true)
             user.toAccount()
+        }
+    }
+
+    /**
+     * The account-picker flow behind the "Sign in with Google" button, used when
+     * the one-tap sheet declines to appear.
+     *
+     * Returns null if this one is cancelled too — that cancellation is the user's,
+     * since this flow always draws something to cancel.
+     */
+    private suspend fun explicitSignIn(
+        credentialManager: CredentialManager,
+        activity: Activity,
+        clientId: String
+    ): GetCredentialResponse? {
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(GetSignInWithGoogleOption.Builder(clientId).build())
+            .build()
+        return try {
+            credentialManager.getCredential(activity, request)
+        } catch (e: GetCredentialException) {
+            null
         }
     }
 

@@ -216,6 +216,67 @@ README there for specs, the regeneration commands, and the screenshot recipe:
 **Tester instructions to send out:** open opt-in link → accept → install from
 Play → keep installed and open it a few times over the 14 days.
 
+## Step 5b — Shipping an update to an existing track
+
+Everything in steps 1–4 is one-time. An update is only this:
+
+1. **Bump the version** in `app/build.gradle.kts`. `versionCode` must increase
+   by at least 1 or Play rejects the upload outright; `versionName` is the
+   string testers see. 1.1.0 is already at `versionCode = 2`.
+2. **Build and check:**
+   ```bash
+   ./gradlew testDebugUnitTest lintDebug bundleRelease
+   # → app/build/outputs/bundle/release/app-release.aab
+   ```
+   Confirm `app/google-services.json` exists first — without it the build
+   silently ships **without cloud sync**, and Gradle only warns.
+3. **Upload:** Play Console → Test and release → Testing → **Closed testing →
+   Alpha → Create new release** → drop the `.aab` in.
+   Release name is internal (`1.1.0 (2)`); release notes are the public bit —
+   copy the block from `docs/STORE_LISTING.md` §Closed testing — 1.1.0.
+4. **Review the release** → **Start rollout to Closed testing**. Testers get the
+   update through Play automatically (usually within a few hours; they can force
+   it from the Play Store app's My apps page).
+
+A closed-testing update does **not** restart the 14-day clock — that counts
+continuous tester opt-in, not builds. Uploading a fresh build mid-test is
+expected and is what the feedback loop is for.
+
+### Does the SHA-1 need updating?
+
+**Not for a routine update — it is already done.** The fingerprint is tied to
+the signing certificate, not the build, so it is registered once and survives
+every upload. `app/google-services.json` currently carries all three:
+
+```
+5e6e0d3d…  debug (sideloading from this machine)
+40286eca…  release upload key (wakeproof-release.keystore)
+8f72b7bd…  Play App Signing key (Google's re-signing key)
+```
+
+Re-check it only when one of these is true:
+
+- **A new certificate enters the picture** — a new machine's debug key, a rotated
+  upload key, or a second Firebase/Play app. Add that SHA-1 and re-download
+  `google-services.json`.
+- **You publish from a track that was never Play-signed before.** Play App
+  Signing uses the same key across internal/closed/production for one app, so
+  promoting between tracks changes nothing.
+- **Sign-in starts failing only on Play installs.** The symptom lies: the app
+  says *"No Google account is available on this device"*. The truth is in
+  logcat — `Developer console is not set up correctly` — and the fix is a
+  missing fingerprint, not the device's accounts.
+
+To add one: Play Console → Test and release → **Setup → App signing** → copy the
+**App signing key certificate** SHA-1 → Firebase console → Project settings →
+Your apps → **Add fingerprint** → re-download `google-services.json` into `app/`.
+No rebuild and no `versionCode` bump is needed for the registration itself, since
+it is server-side and `WEB_CLIENT_ID` does not change.
+
+To verify what actually signed an installed build rather than trusting a console
+page, see `docs/CLOUD_SYNC.md` step 3 (`apksigner verify --print-certs`, read the
+**V3.0 Signer**).
+
 ## Step 6 — Production (after the 14-day test)
 
 1. Play Console shows "Apply for production access" once you meet the

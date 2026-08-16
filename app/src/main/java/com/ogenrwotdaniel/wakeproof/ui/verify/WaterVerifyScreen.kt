@@ -45,6 +45,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService
+import com.ogenrwotdaniel.wakeproof.alarm.SnoozeStore
 import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
 
 /**
@@ -53,12 +54,18 @@ import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
  * target is covered (see [WaterVerifyViewModel]). No printed ml scale needed. The
  * alarm keeps ringing, ducked while the wizard runs. Offline/no-key falls back to
  * a 30s honor-mode hold.
+ *
+ * [onSnooze] is offered from the first second, unlike the emergency dismiss which
+ * stays hidden until its gates open — see [com.ogenrwotdaniel.wakeproof.ui.verify.PushupVerifyScreen].
+ * [snoozesLeft] runs the button down to nothing.
  */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun WaterVerifyScreen(
     onVerified: () -> Unit,
     onEmergencyDismiss: () -> Unit,
+    snoozesLeft: Int,
+    onSnooze: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: WaterVerifyViewModel = hiltViewModel()
 ) {
@@ -229,6 +236,15 @@ fun WaterVerifyScreen(
                 }
             }
 
+            if (snoozesLeft > 0 && state.step != WaterVerifyViewModel.Step.SUCCESS) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onSnooze,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Snooze ${SnoozeStore.SNOOZE_MINUTES} min ($snoozesLeft left today)")
+                }
+            }
             if (state.emergencyAvailable && state.step != WaterVerifyViewModel.Step.SUCCESS) {
                 Spacer(Modifier.height(12.dp))
                 HoldToDismissButton(

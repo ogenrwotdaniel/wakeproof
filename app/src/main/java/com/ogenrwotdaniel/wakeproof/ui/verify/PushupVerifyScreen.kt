@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.ogenrwotdaniel.wakeproof.alarm.SnoozeStore
 import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
 import com.ogenrwotdaniel.wakeproof.verify.pushup.PoseAnalyzer
 import com.ogenrwotdaniel.wakeproof.verify.pushup.PushupCounter
@@ -52,12 +54,19 @@ import java.util.concurrent.Executors
  * detection with a live rep counter. Completes via [onVerified] only when the
  * target rep count is reached, or [onEmergencyDismiss] after the escape-hatch
  * gates open (3 resets / 5 minutes / no camera) and a long hold.
+ *
+ * [onSnooze] is the third way out, and unlike the other two it is offered from
+ * the first second: the emergency dismiss stays hidden until its gates open, so
+ * before then the screen looked like it had no exit at all and testers were
+ * rebooting to escape it. [snoozesLeft] runs the button down to nothing.
  */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun PushupVerifyScreen(
     onVerified: () -> Unit,
     onEmergencyDismiss: () -> Unit,
+    snoozesLeft: Int,
+    onSnooze: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PushupVerifyViewModel = hiltViewModel()
 ) {
@@ -103,8 +112,20 @@ fun PushupVerifyScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (snoozesLeft > 0 && !state.verified) {
+                    OutlinedButton(
+                        onClick = onSnooze,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Snooze ${SnoozeStore.SNOOZE_MINUTES} min " +
+                                "($snoozesLeft left today)"
+                        )
+                    }
+                }
                 if (state.emergencyAvailable && !state.verified) {
                     HoldToDismissButton(
                         label = "Emergency dismiss — hold ${state.emergencyHoldSeconds}s (logged as skipped)",

@@ -32,6 +32,12 @@ import kotlinx.coroutines.delay
 /**
  * The ringing screen. Deliberately has NO dismiss button — the single exit is
  * starting the verification for this alarm's type. Back presses are swallowed.
+ *
+ * The snooze deliberately is NOT offered here: it lives one screen in, on the
+ * verify screens, so taking it costs a tap towards the thing being avoided.
+ * This screen never needed it anyway — it already shows a way forward, whereas
+ * the verify screens hide the emergency dismiss until its gates open and so read
+ * as having no exit at all.
  */
 @Composable
 fun AlarmRingingScreen(
@@ -87,7 +93,7 @@ fun AlarmRingingScreen(
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "No dismiss button. Verification is the only way out.",
+                text = "No dismiss button. Verification is the way out; a snooze only delays it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

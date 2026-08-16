@@ -44,8 +44,8 @@ class AlarmScheduler @Inject constructor(
     fun cancel(alarm: Alarm) = cancelById(alarm.id)
 
     /**
-     * Drops every schedule belonging to [alarmId] — daily and test — and forgets
-     * it in the mirror.
+     * Drops every schedule belonging to [alarmId] — daily, snoozed and test —
+     * and forgets it in the mirror.
      *
      * Takes an id rather than an [Alarm] because the callers that need it most
      * have no row to pass: an alarm hard-deleted from the table still has its
@@ -54,10 +54,26 @@ class AlarmScheduler @Inject constructor(
     fun cancelById(alarmId: Long) {
         val requestCode = alarmId.toInt()
         alarmManager.cancel(fireIntent(alarmId, requestCode))
+        alarmManager.cancel(fireIntent(alarmId, requestCode + SNOOZE_REQUEST_CODE_OFFSET))
         alarmManager.cancel(
             fireIntent(alarmId, requestCode + TEST_REQUEST_CODE_OFFSET, testFire = true)
         )
         directBootStore.remove(alarmId)
+    }
+
+    /**
+     * Rings [alarmId] again in [minutes], without touching its daily schedule —
+     * a distinct request code keeps the two apart, so a snooze taken at 05:03
+     * cannot displace tomorrow's 05:00.
+     */
+    fun scheduleSnooze(alarmId: Long, minutes: Int) {
+        alarmManager.setAlarmClock(
+            AlarmManager.AlarmClockInfo(
+                System.currentTimeMillis() + minutes * 60_000L,
+                showAlarmsIntent()
+            ),
+            fireIntent(alarmId, requestCode = alarmId.toInt() + SNOOZE_REQUEST_CODE_OFFSET)
+        )
     }
 
     /**
@@ -106,5 +122,6 @@ class AlarmScheduler @Inject constructor(
 
     private companion object {
         const val TEST_REQUEST_CODE_OFFSET = 10_000
+        const val SNOOZE_REQUEST_CODE_OFFSET = 20_000
     }
 }

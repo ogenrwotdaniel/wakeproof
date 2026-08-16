@@ -45,6 +45,12 @@ class AlarmRingingActivity : ComponentActivity() {
                     onEmergencyDismiss = {
                         AlarmRingingService.stop(this)
                         finishAndRemoveTask()
+                    },
+                    // The view model has already booked the re-fire; this only has
+                    // to stop the noise and get out of the way.
+                    onSnooze = {
+                        AlarmRingingService.stop(this)
+                        finishAndRemoveTask()
                     }
                 )
             }

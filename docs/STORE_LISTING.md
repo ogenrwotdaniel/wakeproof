@@ -100,6 +100,20 @@ Fallback if even that is refused — 170 chars:
 First closed test of WakeProof 1.0.0. Try an alarm dismissed by pushups or water, a Pomodoro session, flashcards, and a daily app limit. Bugs to ogenrwotdaniel@gmail.com.
 ```
 
+### Closed testing — 1.1.0 (versionCode 2), 251 chars
+
+The first feedback build. Name the fixes in the testers' own words — they
+reported "the alarm went off in the morning when I set it for the evening" and
+"it kept ringing and I had to restart the phone", not "12-hour clock" and
+"ghost alarm" — otherwise nobody recognises their own bug and they retest
+nothing.
+
+```
+WakeProof 1.1.0, from your feedback. Fixed: alarms set for the wrong half of the day on 12-hour phones, alarms that rang with no way to stop them, and sign-in failing after a sign-out. New: snooze, 5 minutes, 3 a day. Bugs to ogenrwotdaniel@gmail.com.
+```
+
+Release name field (internal, 50 chars): `1.1.0 (2)`
+
 ### Production — 1.0.0, 300 chars
 
 ```

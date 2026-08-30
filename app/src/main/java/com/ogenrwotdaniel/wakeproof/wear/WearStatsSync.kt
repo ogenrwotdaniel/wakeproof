@@ -34,6 +34,28 @@ object WearContract {
     const val KEY_TIMER_PHASE = "t_phase"
     const val KEY_TIMER_REMAINING = "t_remaining"
     const val KEY_TIMER_FINISH_AT = "t_finish_at"
+
+    /**
+     * Watch -> phone commands, carried on the MessageClient rather than the
+     * DataClient.
+     *
+     * The distinction is load-bearing. A DataItem is *state*: writing the same
+     * value twice changes nothing and fires no event, so "pause" tapped twice
+     * after a resume would be silently swallowed. A command is an *event*, and
+     * MessageClient delivers every one of them.
+     *
+     * The timer is the only thing the watch may drive. Snoozing or dismissing
+     * an alarm from the wrist is deliberately NOT here: the app's whole promise
+     * is an alarm you cannot escape without getting up, and a wrist control
+     * hands the sleeper an escape without leaving the bed. It would also route
+     * the one thing that must not fail through a Bluetooth link that is
+     * regularly out of range or flat.
+     */
+    const val COMMAND_PATH = "/wakeproof/command"
+    const val CMD_TIMER_START = "timer_start"
+    const val CMD_TIMER_PAUSE = "timer_pause"
+    const val CMD_TIMER_RESUME = "timer_resume"
+    const val CMD_TIMER_STOP = "timer_stop"
 }
 
 /**

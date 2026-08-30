@@ -91,7 +91,7 @@ Tester-facing: it has to say what to exercise and set expectations about the
 API key, or you get "the water thing didn't work" as your only feedback.
 
 ```
-Closed test of WakeProof 1.0.0. Please try an alarm dismissed by pushups or water, a Pomodoro session, a few flashcards, and a daily limit on one app. Water checks need your own free Gemini key (Settings, AI provider); without one there is a 30-second honour hold instead. Bugs to ogenrwotdaniel@gmail.com.
+Closed test of WakeProof 1.0.0. Please try an alarm dismissed by pushups or water, a Pomodoro session, a few flashcards, and a daily limit on one app. Water checks now run on the device and need no key; add a free Gemini key (Settings, AI provider) if you want flashcard drafting and the study chat too. Bugs to ogenrwotdaniel@gmail.com.
 ```
 
 Fallback if even that is refused — 170 chars:
@@ -149,7 +149,7 @@ Play Console → Policy → App content → Data safety. Answer the wizard as be
 | Personal info → Email address | Yes | No | No | **Optional** | App functionality (account for sync) |
 | Personal info → Name | Yes | No | No | **Optional** | App functionality (account for sync) |
 | Personal info → User IDs | Yes | No | No | **Optional** | App functionality (account for sync) |
-| Photos | Yes | Yes | **Yes** | **Optional** | App functionality (water verification — sent to the AI provider you configure, not retained by WakeProof) |
+| Photos | Yes | Yes | **Yes** | **Optional** | App functionality (water verification runs on-device; a pair is sent to the AI provider you configure only for a second opinion when the on-device check did not accept it, and is not retained by WakeProof) |
 | App activity → Other user-generated content | Yes | No | No | **Optional** | App functionality (alarms, streak history, flashcards, exams, parked thoughts — synced only if you sign in; plus the notes text you paste for flashcard drafting and the messages you type in the study chat, which go to the AI provider you configure) |
 
 ### Do NOT declare
@@ -158,7 +158,9 @@ These are read on-device and never transmitted — declaring them would be wrong
 and invites questions you would then have to walk back:
 
 - **Camera / pushup video** — pose detection is fully on-device; no frame leaves
-  the phone. (The *water photos* are declared above, because those do.)
+  the phone. (The *water photos* are declared above, because those still can —
+  the on-device reader handles them by default, but a pair it does not accept is
+  sent for a second opinion when a key is configured.)
 - **Calendar events** — read for the agenda, never transmitted.
 - **App usage / screen time** — read for the usage screen and app limits,
   processed on-device. Nothing derived from it leaves the phone: the weekly

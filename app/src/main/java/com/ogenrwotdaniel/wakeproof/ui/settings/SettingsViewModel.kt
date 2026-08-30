@@ -4,6 +4,9 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmDays
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityChecker
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
@@ -19,6 +22,8 @@ import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.ogenrwotdaniel.wakeproof.data.backup.BackupRepository
+import com.ogenrwotdaniel.wakeproof.data.backup.backupFilename
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
 import javax.inject.Inject
@@ -42,9 +47,12 @@ class SettingsViewModel @Inject constructor(
     private val kimiRepository: KimiRepository,
     private val alarmRepository: AlarmRepository,
     private val alarmScheduler: AlarmScheduler,
+    private val alarmDevicePolicy: AlarmDevicePolicy,
+    private val alarmInitializer: AlarmInitializer,
     private val settingsRepository: SettingsRepository,
     private val completionRepository: CompletionRepository,
     private val reliabilityChecker: ReliabilityChecker,
+    private val backupRepository: BackupRepository,
     spotifyController: SpotifyController
 ) : ViewModel() {
 
@@ -85,6 +93,58 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Writes a whole-app backup to [uri].
+     *
+     * Separate from the CSV export, which is a *report* — human-readable
+     * history for reading elsewhere, deliberately lossy, and no use at all for
+     * putting the app back. This one is the restorable copy.
+     */
+    fun exportBackup(uri: Uri) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val document = backupRepository.export()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        it.write(document.toByteArray())
+                    } ?: error("Could not open the selected file")
+                }
+                document
+            }
+            _exportMessage.value = result.fold(
+                onSuccess = { "Exported backup (${it.length / 1024} KB)." },
+                onFailure = { "Backup failed: ${it.message}" }
+            )
+        }
+    }
+
+    /**
+     * Restores a backup from [uri], merging it over what is already here.
+     *
+     * Failure is reported rather than thrown: the likeliest causes are a file
+     * that is not a backup at all and one written by a much newer build, and
+     * neither should take the app down while the user is trying to recover it.
+     */
+    fun importBackup(uri: Uri) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val document = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().toString(Charsets.UTF_8)
+                    } ?: error("Could not open the selected file")
+                }
+                backupRepository.import(document)
+            }
+            _exportMessage.value = result.fold(
+                onSuccess = { "Restored ${it.totalRows} rows. Alarms rescheduled." },
+                onFailure = { "Restore failed: ${it.message}" }
+            )
+        }
+    }
+
+    /** Today's date, for the suggested backup filename. */
+    fun suggestedBackupName(): String = backupFilename(LocalDate.now().toString())
+
     data class KeyUiState(
         val provider: AiProvider = AiProvider.GEMINI,
         val hasKey: Boolean = false,
@@ -94,6 +154,19 @@ class SettingsViewModel @Inject constructor(
 
     val alarms: StateFlow<List<Alarm>> = alarmRepository.observeAlarms()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether this device is the one that rings. See [AlarmDevicePolicy]. */
+    val ringsAlarms: StateFlow<Boolean> = alarmDevicePolicy.ringsAlarmsFlow
+
+    /**
+     * Switching the role re-runs the initializer, which is what turns the
+     * setting into actual armed or cancelled intents — flipping the flag alone
+     * would leave whatever AlarmManager already holds exactly where it was.
+     */
+    fun setRingsAlarms(value: Boolean) {
+        alarmDevicePolicy.setRingsAlarms(value)
+        viewModelScope.launch { alarmInitializer.initialize() }
+    }
 
     val settings: StateFlow<WakeProofSettings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WakeProofSettings())
@@ -127,9 +200,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Adds a pushup or water alarm at the chosen time. */
-    fun addAlarm(type: AlarmType, hour: Int, minute: Int, label: String) {
-        viewModelScope.launch { alarmRepository.addAlarm(type, hour, minute, label) }
+    /** Changing which days an alarm repeats on reschedules it for the next one. */
+    fun setAlarmDays(alarm: Alarm, daysMask: Int) {
+        viewModelScope.launch {
+            val updated = alarm.copy(daysMask = AlarmDays.normalise(daysMask))
+            alarmRepository.updateAlarm(updated)
+            if (updated.enabled) alarmScheduler.schedule(updated) else alarmScheduler.cancel(updated)
+        }
+    }
+
+    /** Adds a pushup or water alarm at the chosen time, on the chosen days. */
+    fun addAlarm(type: AlarmType, hour: Int, minute: Int, label: String, daysMask: Int) {
+        viewModelScope.launch { alarmRepository.addAlarm(type, hour, minute, label, daysMask) }
     }
 
     /**
@@ -138,6 +220,10 @@ class SettingsViewModel @Inject constructor(
      */
     fun deleteAlarm(alarm: Alarm) {
         viewModelScope.launch { alarmRepository.deleteAlarm(alarm) }
+    }
+
+    fun setOfflineWaterVerification(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setOfflineWaterVerification(value) }
     }
 
     fun setPushupTarget(value: Int) {

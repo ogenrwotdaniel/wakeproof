@@ -58,8 +58,10 @@ fun ApiKeySection(
             text = if (hasKey) {
                 "A ${provider.label} key is saved (stored encrypted on-device)."
             } else {
-                "Paste your key from ${provider.keySource}. Water verification and the " +
-                    "AI coach stay disabled without it."
+                "Paste your key from ${provider.keySource}. Flashcard drafting and the " +
+                    "study chat stay disabled without it. Water verification does not " +
+                    "need it — that runs on the device — but a key lets it ask for a " +
+                    "second opinion before rejecting a photo."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

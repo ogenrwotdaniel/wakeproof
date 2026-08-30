@@ -19,3 +19,10 @@ google-services.json
 # Private working documents — never commit
 CLAUDE.md
 docs/TESTER_EMAIL.md
+
+# Water-verification corpus: bottle photographs. The privacy policy promises
+# these are not retained, so they must never enter the repository.
+# See tools/water/README.md.
+tools/water/corpus/
+tools/water/**/__pycache__/
+tools/water/.pytest_cache/

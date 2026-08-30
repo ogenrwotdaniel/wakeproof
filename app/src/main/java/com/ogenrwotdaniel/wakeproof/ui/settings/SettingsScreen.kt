@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -28,6 +29,7 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,9 +45,11 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.BuildConfig
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmDays
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import java.time.DayOfWeek
 
 /**
  * Settings: alarm times + enable switches (rescheduled immediately), goal
@@ -62,6 +66,7 @@ fun SettingsScreen(
     val keyState by viewModel.keyState.collectAsStateWithLifecycle()
     val reliability by viewModel.reliability.collectAsStateWithLifecycle()
     val exportMessage by viewModel.exportMessage.collectAsStateWithLifecycle()
+    val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
     var deletingAlarm by remember { mutableStateOf<Alarm?>(null) }
     var addingAlarm by remember { mutableStateOf(false) }
@@ -83,6 +88,24 @@ fun SettingsScreen(
             Text(text = "Settings", style = MaterialTheme.typography.headlineMedium)
 
             Text(text = "Alarms", style = MaterialTheme.typography.titleMedium)
+            SwitchSetting(
+                label = "Ring alarms on this device",
+                description = "Alarms are shared across your devices, but only the ones with " +
+                    "this switch on actually ring. Leave it off on a tablet so a single " +
+                    "05:00 alarm does not go off twice in the same room. Off here means " +
+                    "nothing is armed at all — the alarms still list, and editing them still " +
+                    "reaches your phone.",
+                checked = ringsAlarms,
+                onCheckedChange = viewModel::setRingsAlarms
+            )
+            if (!ringsAlarms) {
+                Text(
+                    text = "This device is a companion: it shows the schedule and the stats, " +
+                        "and rings nothing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             alarms.forEach { alarm ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -97,7 +120,8 @@ fun SettingsScreen(
                             )
                         }
                         Text(
-                            text = alarm.label.ifBlank { alarm.type.name.lowercase() },
+                            text = alarm.label.ifBlank { alarm.type.name.lowercase() } +
+                                " · " + AlarmDays.label(alarm.daysMask),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 12.dp)
@@ -119,6 +143,12 @@ fun SettingsScreen(
                         }
                     }
                 }
+                DayOfWeekChips(
+                    daysMask = alarm.daysMask,
+                    onToggle = { day ->
+                        viewModel.setAlarmDays(alarm, AlarmDays.toggle(alarm.daysMask, day))
+                    }
+                )
             }
             OutlinedButton(
                 onClick = { addingAlarm = true },
@@ -155,6 +185,18 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            SwitchSetting(
+                label = "Read the water level on this device",
+                description = "Finds the water line with on-device computer vision: no API " +
+                    "key, no network, no waiting at 06:00, and the photos never leave the " +
+                    "phone. A vision model is still asked for a second opinion before any " +
+                    "rejection is shown, if you have a key. Turn this off to send every " +
+                    "pair to the model instead — worth trying if your own bottle is " +
+                    "misread. Verification needs a translucent bottle either way; a steel " +
+                    "flask has no visible line at any price.",
+                checked = settings.offlineWaterVerification,
+                onCheckedChange = viewModel::setOfflineWaterVerification
+            )
             SliderSetting(
                 label = "Emergency hold",
                 value = settings.emergencyHoldSeconds,
@@ -185,15 +227,18 @@ fun SettingsScreen(
                 SliderSetting(
                     label = "Sound fade in / out",
                     value = settings.soundFadeSeconds,
-                    range = 0f..15f,
+                    range = 0f..60f,
                     unit = "s",
                     onCommit = viewModel::setSoundFadeSeconds
                 )
                 Text(
                     text = "The ambient loop eases up from silence when a phase starts and " +
                         "back down before it ends, instead of snapping on and off. " +
-                        "0 turns fading off. Spotify is controlled with media keys, which " +
-                        "carry no volume, so it is unaffected.",
+                        "0 turns fading off. The fade-out starts this many seconds " +
+                        "before the phase ends, so a long fade wants a long phase — " +
+                        "60 s on a 5 min break spends a fifth of it easing away. " +
+                        "Spotify is controlled with media keys, which carry no " +
+                        "volume, so it is unaffected.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -287,6 +332,33 @@ fun SettingsScreen(
                 onClick = { csvLauncher.launch("wakeproof-history.csv") },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Export history as CSV") }
+
+            // The CSV above is a report. This is the restorable copy — and the
+            // only one there is: allowBackup is false, the app is not installed
+            // from Play, and cloud sync replicates deletions rather than
+            // guarding against them.
+            val backupLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("application/json")
+            ) { uri -> uri?.let(viewModel::exportBackup) }
+            OutlinedButton(
+                onClick = { backupLauncher.launch(viewModel.suggestedBackupName()) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Back up everything to a file") }
+
+            val restoreLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri -> uri?.let(viewModel::importBackup) }
+            OutlinedButton(
+                onClick = { restoreLauncher.launch(arrayOf("application/json", "*/*")) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Restore from a backup file") }
+            Text(
+                text = "A restore merges the file over what is on this device: rows in " +
+                    "both take the file's version, and anything only on this device is " +
+                    "kept. Alarms are rescheduled afterwards.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             exportMessage?.let {
                 Text(
                     text = it,
@@ -318,8 +390,8 @@ fun SettingsScreen(
 
     if (addingAlarm) {
         AddAlarmDialog(
-            onConfirm = { type, hour, minute, label ->
-                viewModel.addAlarm(type, hour, minute, label)
+            onConfirm = { type, hour, minute, label, daysMask ->
+                viewModel.addAlarm(type, hour, minute, label, daysMask)
                 addingAlarm = false
             },
             onDismiss = { addingAlarm = false }
@@ -523,11 +595,12 @@ private fun SliderSetting(
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun AddAlarmDialog(
-    onConfirm: (AlarmType, Int, Int, String) -> Unit,
+    onConfirm: (AlarmType, Int, Int, String, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     var type by rememberSaveable { mutableStateOf(AlarmType.PUSHUP) }
     var label by rememberSaveable { mutableStateOf("") }
+    var daysMask by rememberSaveable { mutableIntStateOf(AlarmDays.EVERY_DAY) }
     val state = rememberTimePickerState(
         initialHour = 6,
         initialMinute = 0,
@@ -560,15 +633,48 @@ private fun AddAlarmDialog(
                     singleLine = true
                 )
                 TimePicker(state = state)
+                Text(text = "Repeats", style = MaterialTheme.typography.bodyMedium)
+                DayOfWeekChips(
+                    daysMask = daysMask,
+                    onToggle = { day -> daysMask = AlarmDays.toggle(daysMask, day) }
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(type, state.hour, state.minute, label) }) {
+            TextButton(onClick = { onConfirm(type, state.hour, state.minute, label, daysMask) }) {
                 Text("Add")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+/**
+ * The seven repeat chips.
+ *
+ * Deselecting the last remaining day is refused rather than allowed and then
+ * quietly reinterpreted — an alarm set to no days is either a mistake or a
+ * silent alarm, and neither is worth offering. See [AlarmDays.toggle].
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun DayOfWeekChips(
+    daysMask: Int,
+    onToggle: (DayOfWeek) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FlowRow(
+        modifier = modifier.fillMaxWidth().padding(start = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        AlarmDays.ORDER.forEach { day ->
+            FilterChip(
+                selected = AlarmDays.contains(daysMask, day),
+                onClick = { onToggle(day) },
+                label = { Text(AlarmDays.shortName(day)) }
+            )
+        }
+    }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)

@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.data.db
 
+import kotlinx.serialization.Serializable
+
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
@@ -7,6 +9,7 @@ import androidx.room.PrimaryKey
 import java.util.UUID
 
 /** Which daily goal a log entry belongs to. */
+@Serializable
 enum class GoalKind { PUSHUP, WATER, FOCUS }
 
 /**
@@ -14,6 +17,7 @@ enum class GoalKind { PUSHUP, WATER, FOCUS }
  * honor-mode fallback (counts, shown with an asterisk), SKIPPED = emergency
  * dismiss (breaks the streak).
  */
+@Serializable
 enum class CompletionStatus { VERIFIED, UNVERIFIED, SKIPPED }
 
 /**
@@ -25,6 +29,7 @@ enum class CompletionStatus { VERIFIED, UNVERIFIED, SKIPPED }
     tableName = "completion_logs",
     indices = [Index(value = ["syncId"], unique = true)]
 )
+@Serializable
 data class CompletionLog(
     @PrimaryKey(autoGenerate = true) override val id: Long = 0,
     val epochDay: Long,

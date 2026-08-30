@@ -81,7 +81,7 @@ What is sent, per feature, over an encrypted connection (HTTPS):
 
 | Feature | Data sent |
 |---|---|
-| Water-drinking verification | The two photos you take of your water container |
+| Water-drinking verification — **second opinion only** | The two photos you take of your water container, and only when the on-device check did not accept the pair and you have configured a key |
 | Flashcard drafting | The notes text you paste, or the notes photo you pick |
 | Study coach chat | The messages you type in the chat |
 
@@ -89,6 +89,14 @@ That is the whole list. In particular your **weekly report** and the
 **motivational lines** after an alarm are written on your device from your own
 numbers; no statistics, screen-time totals or app names are sent to an AI
 provider, with or without a key.
+
+**Water photos now stay on the device by default.** The water line is read by
+computer vision running on your phone — no key, no network, no upload. A photo
+pair leaves the device only if that on-device check did not accept it *and* you
+have configured an API key, in which case the model is asked for a second
+opinion before you are shown a rejection. Turning off "Read the water level on
+this device" in Settings sends every pair instead. Either way, WakeProof stores
+no photograph: they are held in memory for the comparison and discarded.
 
 WakeProof sends this data directly from your phone to the provider you chose;
 the developer of WakeProof never receives, stores or sees any of it. The
@@ -98,8 +106,7 @@ wouldn't share with that provider (e.g. avoid photographing notes containing
 other people's personal data).
 
 If you never add an API key and never sign in for sync, the app makes **no
-network requests at all**, and water verification falls back to an on-device
-honor mode.
+network requests at all** — and water verification still works, on the device.
 
 ## Permissions summary
 

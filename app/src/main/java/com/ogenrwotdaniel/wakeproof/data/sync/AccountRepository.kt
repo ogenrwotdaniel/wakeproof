@@ -13,6 +13,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -149,6 +150,11 @@ class AccountRepository @Inject constructor(
         return try {
             credentialManager.getCredential(activity, request)
         } catch (e: GetCredentialException) {
+            // Log the exception so device-specific failures (Samsung one-tap / Play
+            // Services issues) are visible in adb logcat for debugging. The flow
+            // treats a failure here as a user cancellation, but we still want to
+            // record the reason when debugging why sign-in refused to show.
+            Log.w(TAG, "explicitSignIn GetCredentialException: ${e.type} - ${e.message}", e)
             null
         }
     }
@@ -169,4 +175,8 @@ class AccountRepository @Inject constructor(
         } else {
             SyncAccount.SignedIn(uid = uid, email = email, displayName = displayName)
         }
+
+    private companion object {
+        const val TAG = "AccountRepository"
+    }
 }

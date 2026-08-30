@@ -8,6 +8,7 @@ import com.ogenrwotdaniel.wakeproof.data.remote.KimiMessage
 import com.ogenrwotdaniel.wakeproof.data.remote.imagesWithTextContent
 import com.ogenrwotdaniel.wakeproof.data.remote.textContent
 import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
+import com.ogenrwotdaniel.wakeproof.verify.water.WaterVerdictRules
 import java.io.IOException
 import java.util.Base64
 import javax.inject.Inject
@@ -87,7 +88,7 @@ class KimiRepository @Inject constructor(
      * observations. A pair is [WaterVerdict.accepted] when it is the same bottle,
      * the water line is readable in both shots, nothing was refilled, and the
      * level fell far enough to be a real gulp rather than reading noise
-     * ([MIN_FILL_DROP] of the bottle, or a legible ml reading). It does NOT have
+     * ([WaterVerdictRules.MIN_FILL_DROP] of the bottle, or a legible ml reading). It does NOT have
      * to cover the whole per-alarm target — the caller keeps asking for more
      * photos until the accepted amounts add up, which is what makes a single
      * mouthful count instead of being rejected outright.
@@ -123,24 +124,11 @@ class KimiRepository @Inject constructor(
             )
         )
         return call(request) { content ->
-            val verdict = json.decodeFromString<WaterVerdict>(stripMarkdownFences(content))
-            val capacity = bottleCapacityMl.coerceAtLeast(MIN_BOTTLE_CAPACITY_ML)
-            val fillDrop = verdict.beforeFill.coerceIn(0.0, 1.0) - verdict.afterFill.coerceIn(0.0, 1.0)
-            val scaleDrop = verdict.beforeLevelMl - verdict.afterLevelMl
-            // Printed marks win when legible and consistent; otherwise the drop in
-            // fill fraction against the declared capacity.
-            val measured =
-                if (verdict.scaleMlReadable && scaleDrop > 0) scaleDrop
-                else (fillDrop * capacity).toInt()
-            // Floor to 10 ml: under-crediting is fairer than inventing millilitres.
-            val consumed = (measured / ROUND_TO_ML * ROUND_TO_ML).coerceIn(0, capacity)
-            verdict.copy(
-                consumedMl = consumed,
-                accepted = verdict.sameContainer &&
-                    verdict.levelReadable &&
-                    !verdict.refilled &&
-                    consumed >= MIN_CONSUMED_ML &&
-                    (verdict.scaleMlReadable && scaleDrop > 0 || fillDrop >= MIN_FILL_DROP)
+            // The model supplies observations only; the verdict is recomputed
+            // here, from rules the on-device observer shares verbatim.
+            WaterVerdictRules.decide(
+                json.decodeFromString<WaterVerdict>(stripMarkdownFences(content)),
+                bottleCapacityMl
             )
         }
     }
@@ -272,15 +260,6 @@ class KimiRepository @Inject constructor(
         // printed ml marks — stay legible to the vision model.
         const val WATER_IMAGE_DIMENSION = 1600
         const val WATER_JPEG_QUALITY = 88
-
-        /** Credited amounts are floored to this, so no ml is ever invented. */
-        const val ROUND_TO_ML = 10
-        /** Below this the level difference is reading noise, not a drink. */
-        const val MIN_CONSUMED_ML = 30
-        /** …and the same guard in fill-fraction terms (5 % of the bottle). */
-        const val MIN_FILL_DROP = 0.05
-        /** Guards against a nonsense capacity making the maths degenerate. */
-        const val MIN_BOTTLE_CAPACITY_ML = 100
 
         val FLASHCARD_SYSTEM_PROMPT = """
             You turn study notes (text or a photo of notes) into concise flashcards for

@@ -1,6 +1,54 @@
 # Offline water verification — plan
 
-Status: **plan only, nothing built.** Written 2026-08-10.
+Status: **shipped.** Phase 1 is ported to Kotlin and bound as the default
+observer; Phase 3's cutover is done and the `KimiResult.NoKey` honour-mode hold
+is gone. Written 2026-08-10, updated 2026-08-30.
+
+**Still never run against a real photograph.** The debug build now carries a
+capture tool for the depth corpus (Home -> Developer testing -> Water corpus
+capture, `verify/water/corpus/`), which writes the `shots.csv` manifest
+`sequences.py` expands — so what remains is shooting, not tooling.
+
+**Still never run against a real photograph.** Everything measured below is
+synthetic, which tests "did I break the algorithm", not "does the algorithm
+work". Shooting the depth corpus (`tools/water/README.md`) and clearing the gate
+in `evaluate.py` remains the outstanding work, and until it is done the Settings
+switch "Read the water level on this device" is the escape hatch back to the
+cloud path.
+
+## What shipped (2026-08-30)
+
+| Piece | Where |
+|---|---|
+| The detector | `verify/water/WaterLineDetector.kt` — port of `detect.py` |
+| Same-bottle check | `verify/water/ContainerMatch.kt` — port of `same_container` |
+| The verdict, shared by both observers | `verify/water/WaterVerdictRules.kt` |
+| Decode / rotate / resample | `verify/water/WaterImageSampler.kt` |
+| The binding | `verify/water/WaterObserver.kt` — `LocalFirstWaterObserver` |
+
+The port is held to the Python original by a **cross-language fixture**: a
+renderer with an explicit LCG exists in both languages
+(`tools/water/waterline/portable_synth.py` and `PortableScene.kt`), so the same
+pixels go through both implementations and `WaterLineDetectorTest` asserts the
+same numbers come out. Property tests alone would not catch a slipped variance
+or a half-lost band search. Regenerate the expected constants with
+`python -m waterline.portable_synth` whenever `detect.py` changes.
+
+Two things this document got wrong, both now measured — see
+`tools/water/README.md` for the numbers:
+
+1. **Phase 1's step 3 below is wrong.** The water line is NOT reliably the
+   largest step in a row profile. Averaging across the bottle's width destroys
+   the cue that identifies it: a blotchy background seen through a clear bottle
+   produces row-profile steps *larger* than the water line's own. What separates
+   them is geometry, not photometry — a water line is horizontal across the whole
+   bottle because gravity makes it so. Measuring across-column *coherence* of the
+   vertical gradient instead cut fill error 11× (MAE 0.043 → 0.0039).
+2. **Phase 0 is much cheaper than described.** Shoot sequences and label with a
+   measuring jug, not single pairs labelled by the cloud model — `n` shots yield
+   `n(n-1)/2` pairs, and the truth is exact instead of ±5%. 120 photographs
+   gives 400+ pairs. `tools/water/sequences.py` does the expansion. Shooting the
+   corpus is now the only thing blocking this work.
 
 Water verification is the last feature that genuinely needs a model and is worth
 keeping. Flashcard drafting can fall back to ML Kit Text Recognition plus
@@ -119,10 +167,19 @@ Baseline, in order:
    the general case.
 2. Collapse the bottle crop to a **1-D column profile**: for each row, mean
    intensity + mean saturation across the bottle's width.
-3. The water line is the row with the largest step in that profile, found by
-   convolving with a step kernel. Confidence = step magnitude relative to the
-   profile's noise floor. **This is what drives `levelReadable`** — a weak step
-   means "can't see the line", which is exactly the honest answer.
+3. ~~The water line is the row with the largest step in that profile.~~
+   **SUPERSEDED — measured and rejected, see the status note above.** A
+   background boundary seen through the bottle beats the water line on step
+   magnitude. Instead, for each row take the vertical gradient across every
+   column and measure whether the columns *agree*:
+   `t[y] = mean_x(g[y]) · √W / std_x(g[y])`. A water line is horizontal, so the
+   columns agree and `t` is large; arbitrary background structure disagrees, so
+   the mean cancels against a large spread. Then damp edges that pair with an
+   opposite-signed edge nearby (a label is a *band*; water is a *half-space*),
+   and gate on the two-region split from step 2. Confidence is that `t`, so a
+   weak peak means "can't see the line" — **this is what drives `levelReadable`**,
+   which is exactly the honest answer. Implemented in
+   `tools/water/waterline/detect.py`.
 4. `beforeFill` / `afterFill` = (bottleBottom − line) / (bottleBottom − bottleTop).
 5. `sameContainer`: compare a cheap descriptor of the two crops — aspect ratio,
    dominant hue of the cap region, colour histogram correlation. Threshold it.
@@ -156,18 +213,24 @@ line, or busy backgrounds:
   committing to it.
 - Same-bottle check can stay classic (Phase 1 step 5) — don't spend a model on it.
 
-## Phase 3 — Cutover
+## Phase 3 — Cutover ✅ done 2026-08-30
 
-1. Bind `OnDeviceWaterObserver` as the default `WaterObserver`.
-2. If it returns low confidence (`levelReadable = false`) **and** a key is
-   configured, retry once against `CloudWaterObserver` before showing a
-   rejection. Best of both, and it degrades to today's behaviour exactly.
-3. With no key, low confidence is just a normal rejection with the existing
-   "try better light and an angle where the level shows" message — and after
-   three, the existing emergency dismiss. **The 30 s honor-mode hold for
-   `KimiResult.NoKey` disappears**, which is the actual goal of this document.
-4. Update `CLAUDE.md`, the privacy policy (photos now never leave the device on
-   the default path — a strictly better claim), and the Play Data safety answers.
+1. ~~Bind `OnDeviceWaterObserver` as the default `WaterObserver`.~~ Done, via
+   `LocalFirstWaterObserver`.
+2. The cloud retry is triggered by **any non-acceptance**, not only low
+   confidence. Broader than planned, and deliberately so: the mistake that
+   annoys someone at 06:00 is a rejection, so every user-visible rejection gets
+   the stronger opinion first when a key exists. A confident *acceptance* is
+   answered on-device with no network at all.
+3. ~~The 30 s honor-mode hold for `KimiResult.NoKey` disappears.~~ Done. It is
+   now reachable only when the photos cannot be decoded at all, or when the
+   Settings switch has forced the cloud path and the network is down.
+4. ~~Update `CLAUDE.md`, the privacy policy, the Play Data safety answers.~~ Done.
+
+One thing this does **not** do, still: printed ml marks (`scaleMlReadable`).
+That is ML Kit Text Recognition's job, on-device and free, and the app already
+falls back to the fill fraction when marks are not legible — so reporting
+`false` unconditionally is safe, just not free millilitres.
 
 ## Risks and non-goals
 

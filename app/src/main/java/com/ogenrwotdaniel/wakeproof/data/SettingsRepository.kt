@@ -24,6 +24,18 @@ data class WakeProofSettings(
     /** Full capacity of the bottle you drink from; converts a level drop into ml. */
     val bottleCapacityMl: Int = 750,
     val emergencyHoldSeconds: Int = 60,
+    /**
+     * Read the water line on the device instead of sending the photos to a
+     * vision model. On by default: it needs no API key, no network and no round
+     * trip at 06:00, and it is what removes the honour-mode hold that used to
+     * stand in for verification whenever no key was configured.
+     *
+     * The cloud is still consulted as a second opinion before any rejection is
+     * shown, when a key exists. Turning this off forces the cloud path for
+     * everything — the escape hatch if the on-device detector misreads your own
+     * bottle, which has never been checked against a real photograph.
+     */
+    val offlineWaterVerification: Boolean = true,
     val focusMinutes: Int = 25,
     val shortBreakMinutes: Int = 5,
     val longBreakMinutes: Int = 15,
@@ -31,7 +43,13 @@ data class WakeProofSettings(
     val breakMusicEnabled: Boolean = false,
     /**
      * Seconds the bundled study loop takes to ease up from silence when a phase
-     * starts, and to ease back down before it ends. 0 = snap on and off.
+     * starts, and to ease back down before it ends. 0 = snap on and off; the
+     * settings slider runs to 60.
+     *
+     * The fade-out is pre-rolled, so this is also how long before the phase
+     * boundary the loop starts receding — a 60 s fade only makes sense on a
+     * phase comfortably longer than a minute.
+     *
      * Spotify is driven by media keys, which carry no volume, so it is unaffected.
      */
     val soundFadeSeconds: Int = 5,
@@ -64,6 +82,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             waterAmountMl = prefs[WATER_AMOUNT_ML] ?: 500,
             bottleCapacityMl = prefs[BOTTLE_CAPACITY_ML] ?: 750,
             emergencyHoldSeconds = prefs[EMERGENCY_HOLD_SECONDS] ?: 60,
+            offlineWaterVerification = prefs[OFFLINE_WATER_VERIFICATION] ?: true,
             focusMinutes = prefs[FOCUS_MINUTES] ?: 25,
             shortBreakMinutes = prefs[SHORT_BREAK_MINUTES] ?: 5,
             longBreakMinutes = prefs[LONG_BREAK_MINUTES] ?: 15,
@@ -86,6 +105,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun setWaterAmountMl(value: Int) = dataStore.edit { it[WATER_AMOUNT_ML] = value }
     suspend fun setBottleCapacityMl(value: Int) = dataStore.edit { it[BOTTLE_CAPACITY_ML] = value }
     suspend fun setEmergencyHoldSeconds(value: Int) = dataStore.edit { it[EMERGENCY_HOLD_SECONDS] = value }
+    suspend fun setOfflineWaterVerification(value: Boolean) =
+        dataStore.edit { it[OFFLINE_WATER_VERIFICATION] = value }
     suspend fun setFocusMinutes(value: Int) = dataStore.edit { it[FOCUS_MINUTES] = value }
     suspend fun setShortBreakMinutes(value: Int) = dataStore.edit { it[SHORT_BREAK_MINUTES] = value }
     suspend fun setLongBreakMinutes(value: Int) = dataStore.edit { it[LONG_BREAK_MINUTES] = value }
@@ -126,6 +147,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val WATER_AMOUNT_ML = intPreferencesKey("water_amount_ml")
         val BOTTLE_CAPACITY_ML = intPreferencesKey("bottle_capacity_ml")
         val EMERGENCY_HOLD_SECONDS = intPreferencesKey("emergency_hold_seconds")
+        val OFFLINE_WATER_VERIFICATION = booleanPreferencesKey("offline_water_verification")
         val FOCUS_MINUTES = intPreferencesKey("focus_minutes")
         val SHORT_BREAK_MINUTES = intPreferencesKey("short_break_minutes")
         val LONG_BREAK_MINUTES = intPreferencesKey("long_break_minutes")

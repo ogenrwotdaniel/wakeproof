@@ -1,0 +1,11 @@
+# One row per PHOTOGRAPH. sequences.py expands this into every labelled pair.
+# poured_total_ml is CUMULATIVE millilitres removed since shot 0 of that sequence.
+# Mark an opaque flask sequence with unreadable=1 -- it is the reject class.
+sequence,bottle,capacity_ml,lighting,filename,poured_total_ml,crop,unreadable
+s1,clear-750,750,daylight,IMG_2001.jpg,0,,
+s1,clear-750,750,daylight,IMG_2002.jpg,100,,
+s1,clear-750,750,daylight,IMG_2003.jpg,220,,
+s2,clear-750,750,dim,IMG_2101.jpg,0,,
+s2,clear-750,750,dim,IMG_2102.jpg,120,,
+s3,steel-flask,600,daylight,IMG_2201.jpg,0,,1
+s3,steel-flask,600,daylight,IMG_2202.jpg,150,,1

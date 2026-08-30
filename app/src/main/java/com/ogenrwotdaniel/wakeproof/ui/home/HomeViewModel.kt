@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
@@ -31,6 +32,7 @@ class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
+    alarmDevicePolicy: AlarmDevicePolicy,
     private val examDao: ExamDao,
     statsRepository: StatsRepository,
     settingsRepository: SettingsRepository
@@ -67,6 +69,16 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StreakInfo())
 
     /** Next enabled pushup alarm, in the device's clock format, or null when none. */
+    /**
+     * Whether this device is the one that rings.
+     *
+     * Home lists the alarms on every device, because the schedule is shared —
+     * but on a companion device none of them will ever go off, and a list of
+     * alarms that silently does nothing is indistinguishable from a broken
+     * alarm clock. Saying so on the dashboard is the difference.
+     */
+    val ringsAlarms: StateFlow<Boolean> = alarmDevicePolicy.ringsAlarmsFlow
+
     val nextPushupAlarm: StateFlow<String?> = repository.observeAlarms()
         .map { list ->
             list.filter { it.type == AlarmType.PUSHUP && it.enabled }

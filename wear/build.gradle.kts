@@ -22,13 +22,13 @@ android {
         applicationId = "com.ogenrwotdaniel.wakeproof"
         minSdk = 30
         targetSdk = 34
-        // Offset by 1000 from the phone's versionCode (3), deliberately, rather than
+        // Offset by 1000 from the phone's versionCode (4), deliberately, rather than
         // simply the next free number. Both artifacts live in the same Play app and
         // every versionCode there must be unique forever, so picking 4 would collide
         // with the phone's second-next upload. The offset keeps the two sequences
         // from ever meeting: phone N, watch 1000 + N.
-        versionCode = 1003
-        versionName = "1.1.0"
+        versionCode = 1004
+        versionName = "1.2.0"
     }
 
     signingConfigs {

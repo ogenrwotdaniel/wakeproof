@@ -3,7 +3,6 @@ package com.ogenrwotdaniel.wakeproof.ui.verify
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
-import com.ogenrwotdaniel.wakeproof.data.KimiRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiResult
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.WaterVerdict
@@ -11,6 +10,7 @@ import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import com.ogenrwotdaniel.wakeproof.verify.Achievement
 import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
+import com.ogenrwotdaniel.wakeproof.verify.water.WaterObserver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,12 +29,17 @@ import kotlinx.coroutines.launch
  *
  * Rejections are reserved for genuine failures — a different bottle, an
  * unreadable water line, a refill, no measurable drop — and three of them open
- * the emergency dismiss (logged SKIPPED). An unreachable/unconfigured API drops
- * to the 30 s honor-mode hold (logged UNVERIFIED).
+ * the emergency dismiss (logged SKIPPED).
+ *
+ * The comparison itself comes from a [WaterObserver], which reads the level on
+ * the device and only consults a vision model for a second opinion before
+ * showing a rejection. The 30 s honor-mode hold (logged UNVERIFIED) is now
+ * reached only when the photos cannot be decoded at all, or when on-device
+ * verification has been switched off in Settings and the cloud is unreachable.
  */
 @HiltViewModel
 class WaterVerifyViewModel @Inject constructor(
-    private val kimiRepository: KimiRepository,
+    private val waterObserver: WaterObserver,
     private val completionRepository: CompletionRepository,
     private val motivationSource: MotivationSource,
     settingsRepository: SettingsRepository
@@ -112,13 +117,16 @@ class WaterVerifyViewModel @Inject constructor(
         }
         _uiState.update { it.copy(step = Step.UPLOADING, rejectionReason = null, progressNote = null) }
         viewModelScope.launch {
-            val result = kimiRepository.verifyWater(before, bytes, _uiState.value.bottleCapacityMl)
+            val result = waterObserver.observe(before, bytes, _uiState.value.bottleCapacityMl)
             when (result) {
                 is KimiResult.Success -> {
                     val verdict = result.value
                     if (verdict.accepted) onSipAccepted(verdict, afterPhoto = bytes)
                     else onVerdictRejected(verdict)
                 }
+                // Only reachable with on-device verification switched off: the
+                // default path answers from the device and never needs a key,
+                // which is what retired the honour-mode hold.
                 KimiResult.NoKey -> enterFallback("No AI provider key configured.")
                 KimiResult.NetworkError -> enterFallback("No network connection.")
                 is KimiResult.ApiError -> enterFallback("Verifier error: ${result.message}")

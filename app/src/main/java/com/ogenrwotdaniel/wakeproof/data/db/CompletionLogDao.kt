@@ -2,6 +2,7 @@ package com.ogenrwotdaniel.wakeproof.data.db
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
@@ -11,6 +12,21 @@ data class SubjectMinutes(val subject: String?, val minutes: Int)
 /** Room access to [CompletionLog]. */
 @Dao
 interface CompletionLogDao : SyncDao<CompletionLog> {
+    /**
+     * Every row, tombstones included.
+     *
+     * Filtering `deleted = 0` here would be a quiet data-loss bug rather
+     * than a tidy-up: a restored device that has forgotten its tombstones
+     * cannot tell "deleted" from "never seen", so the next sync would
+     * resurrect every item the user had removed.
+     */
+    @Query("SELECT * FROM completion_logs")
+    suspend fun backupAll(): List<CompletionLog>
+
+    /** Restores rows verbatim, ids included, so references between tables survive. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun restoreAll(rows: List<CompletionLog>)
+
     @Query(
         "SELECT subject, SUM(amount) AS minutes FROM completion_logs " +
             "WHERE kind = 'FOCUS' AND epochDay >= :fromEpochDay AND deleted = 0 " +

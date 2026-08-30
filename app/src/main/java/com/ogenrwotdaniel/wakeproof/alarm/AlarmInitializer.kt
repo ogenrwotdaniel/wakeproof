@@ -9,19 +9,22 @@ import javax.inject.Singleton
  * Brings AlarmManager in sync with the database: seeds the default alarms on
  * first launch, (re)schedules every live alarm, and drops the schedule of every
  * alarm that is no longer live. Safe to call repeatedly — rescheduling replaces
- * the existing PendingIntent. Called from app startup and from [BootReceiver].
+ * the existing PendingIntent. Called from app startup, from [BootReceiver], and
+ * whenever the device's alarm role is switched.
  */
 @Singleton
 class AlarmInitializer @Inject constructor(
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
-    private val directBootStore: DirectBootAlarmStore
+    private val directBootStore: DirectBootAlarmStore,
+    private val devicePolicy: AlarmDevicePolicy
 ) {
     suspend fun initialize() {
         repository.seedDefaultAlarmsIfEmpty()
         val plan = reconcilePlan(
             alarms = repository.getAllAlarmsIncludingDeleted(),
-            mirroredIds = directBootStore.ids()
+            mirroredIds = directBootStore.ids(),
+            ringsAlarms = devicePolicy.ringsAlarms
         )
         // Arm the live alarms before dropping anything: if the process is killed
         // part-way through, the failure mode is a stale alarm rather than a
@@ -54,11 +57,19 @@ internal data class AlarmReconcilePlan(
  * afterwards; the mirror is the only remaining record that they were ever
  * scheduled, and an id in the mirror with no row behind it is exactly that ghost.
  */
-internal fun reconcilePlan(alarms: List<Alarm>, mirroredIds: Set<Long>): AlarmReconcilePlan {
+internal fun reconcilePlan(
+    alarms: List<Alarm>,
+    mirroredIds: Set<Long>,
+    ringsAlarms: Boolean = true
+): AlarmReconcilePlan {
     val (live, dead) = alarms.partition { it.enabled && !it.deleted }
     return AlarmReconcilePlan(
-        toSchedule = live,
-        toCancel = dead,
+        // A companion device arms nothing and disarms everything, so switching
+        // the role off is a real disarm rather than a promise not to ring: the
+        // pending intents actually go, and so does the direct-boot mirror that
+        // would otherwise re-register them on the next reboot.
+        toSchedule = if (ringsAlarms) live else emptyList(),
+        toCancel = if (ringsAlarms) dead else alarms,
         orphanIds = (mirroredIds - alarms.map { it.id }.toSet()).sorted()
     )
 }

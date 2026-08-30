@@ -21,10 +21,20 @@ class AlarmReceiver : BroadcastReceiver() {
     @Inject lateinit var repository: AlarmRepository
     @Inject lateinit var scheduler: AlarmScheduler
     @Inject lateinit var directBootStore: DirectBootAlarmStore
+    @Inject lateinit var devicePolicy: AlarmDevicePolicy
 
     override fun onReceive(context: Context, intent: Intent) {
         val alarmId = intent.getLongExtra(EXTRA_ALARM_ID, -1L)
         if (alarmId == -1L) return
+
+        // A companion device never rings, even for an intent that survived the
+        // role being switched off — a stale PendingIntent outlives the setting
+        // that armed it. The role lives in device-protected storage precisely so
+        // this check works here, before the first unlock, where Room does not.
+        if (!devicePolicy.ringsAlarms) {
+            scheduler.cancelById(alarmId)
+            return
+        }
 
         // Before the first unlock Room (credential-encrypted) is unreadable, so the
         // device-protected mirror is the only account of the schedule there is:

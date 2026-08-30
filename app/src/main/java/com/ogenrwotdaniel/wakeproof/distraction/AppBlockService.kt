@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.app.Service
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.telecom.TelecomManager
@@ -97,6 +98,8 @@ class AppBlockService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
+    private val powerManager by lazy { getSystemService(PowerManager::class.java) }
+
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
@@ -112,6 +115,18 @@ class AppBlockService : Service() {
             if (limits.isEmpty() || !usageRepository.hasAccess()) {
                 stopSelf()
                 return
+            }
+
+            // Nothing can be opened while the screen is off, so there is nothing
+            // to catch. This is the single largest saving in the loop: a night's
+            // sleep was ~19,000 foreground queries that could only ever answer
+            // "no one is using anything".
+            if (!powerManager.isInteractive) {
+                // Force a fresh measurement on wake rather than extrapolating
+                // across the whole time the phone was down.
+                baselineFor = null
+                delay(SCREEN_OFF_POLL_MILLIS)
+                continue
             }
 
             usageRepository.foregroundPackage()?.let { foregroundPackage = it }
@@ -134,8 +149,12 @@ class AppBlockService : Service() {
             }
             val usedMillis = baselineMillis + (SystemClock.elapsedRealtime() - baselineTakenAt)
 
-            if (usedMillis >= limit.minutes * 60_000L) block(current, usedMillis, limit.minutes)
-            delay(POLL_MILLIS)
+            if (usedMillis >= limit.minutes * 60_000L) {
+                block(current, usedMillis, limit.minutes)
+                delay(POLL_MILLIS)
+            } else {
+                delay(pollDelayMillis(limit.minutes * 60_000L - usedMillis))
+            }
         }
     }
 
@@ -207,6 +226,18 @@ class AppBlockService : Service() {
 
         /** How long an extrapolated usage figure is trusted before re-measuring. */
         private const val BASELINE_REFRESH_MILLIS = 30_000L
+
+        /**
+         * Cadence while the screen is off. Nothing can be launched then, so this
+         * only has to notice the screen coming back on — and [PowerManager.isInteractive]
+         * is a field read, not a usage query.
+         *
+         * A screen-on broadcast would let this drop to zero wakeups, but it
+         * trades a bounded, obviously-correct poll for receiver lifecycle that
+         * has to survive the service being restarted. 60 s is 97% of the saving
+         * for none of that risk.
+         */
+        private const val SCREEN_OFF_POLL_MILLIS = 60_000L
 
         /**
          * Grace after throwing up the wall, covering only the tick or two where

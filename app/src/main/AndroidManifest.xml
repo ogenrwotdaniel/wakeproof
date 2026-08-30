@@ -146,6 +146,20 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/wakeproof_widget_info" />
         </receiver>
+
+        <!-- Receives timer commands from the paired watch. Path-filtered to
+             /wakeproof so it is never woken for another app's messages. -->
+        <service
+            android:name=".wear.PhoneCommandListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/wakeproof" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -25,7 +25,9 @@ class DirectBootAlarmStore @Inject constructor(
         .getSharedPreferences("alarm_schedule_mirror", Context.MODE_PRIVATE)
 
     fun put(alarm: Alarm) {
-        prefs.edit().putString(alarm.id.toString(), "${alarm.hour}:${alarm.minute}").apply()
+        prefs.edit()
+            .putString(alarm.id.toString(), "${alarm.hour}:${alarm.minute}:${alarm.daysMask}")
+            .apply()
     }
 
     fun remove(alarmId: Long) {
@@ -35,7 +37,7 @@ class DirectBootAlarmStore @Inject constructor(
     fun get(alarmId: Long): Alarm? =
         decode(alarmId.toString(), prefs.getString(alarmId.toString(), null))
 
-    /** Schedule stubs for every mirrored alarm; only id/hour/minute are meaningful. */
+    /** Schedule stubs for every mirrored alarm; only id/time/days are meaningful. */
     fun all(): List<Alarm> = prefs.all.mapNotNull { (key, value) -> decode(key, value as? String) }
 
     /**
@@ -44,11 +46,23 @@ class DirectBootAlarmStore @Inject constructor(
      */
     fun ids(): Set<Long> = prefs.all.keys.mapNotNullTo(mutableSetOf()) { it.toLongOrNull() }
 
+    /**
+     * The repeat mask is the third field and may be missing: entries written
+     * before v5 carry only `hour:minute`. An absent mask reads as every day,
+     * which is what those alarms actually did.
+     */
     private fun decode(key: String, value: String?): Alarm? {
         val id = key.toLongOrNull() ?: return null
         val parts = value?.split(":") ?: return null
         val hour = parts.getOrNull(0)?.toIntOrNull() ?: return null
         val minute = parts.getOrNull(1)?.toIntOrNull() ?: return null
-        return Alarm(id = id, type = AlarmType.CUSTOM, hour = hour, minute = minute)
+        val daysMask = parts.getOrNull(2)?.toIntOrNull() ?: AlarmDays.EVERY_DAY
+        return Alarm(
+            id = id,
+            type = AlarmType.CUSTOM,
+            hour = hour,
+            minute = minute,
+            daysMask = AlarmDays.normalise(daysMask)
+        )
     }
 }

@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Exam::class,
         ParkedThought::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class WakeProofDatabase : RoomDatabase() {
@@ -73,6 +73,20 @@ abstract class WakeProofDatabase : RoomDatabase() {
                 // Local-only, alarms only. Existing alarms are the user's real ones
                 // by definition, so they default to 0 (not seeded) and do sync.
                 db.execSQL("ALTER TABLE `alarms` ADD COLUMN `seeded` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * v5 (day-of-week alarms): alarms gain a repeat mask.
+         *
+         * Defaults to 127 — every day — which is exactly what every existing
+         * alarm already did, so the migration changes no behaviour.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `alarms` ADD COLUMN `daysMask` INTEGER NOT NULL DEFAULT 127"
+                )
             }
         }
 

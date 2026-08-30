@@ -9,6 +9,10 @@ import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiKeyStore
 import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
 import com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation
+import com.ogenrwotdaniel.wakeproof.verify.water.AndroidWaterImageSampler
+import com.ogenrwotdaniel.wakeproof.verify.water.LocalFirstWaterObserver
+import com.ogenrwotdaniel.wakeproof.verify.water.WaterImageSampler
+import com.ogenrwotdaniel.wakeproof.verify.water.WaterObserver
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -76,4 +80,18 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideMotivationSource(offline: OfflineMotivation): MotivationSource = offline
+
+    @Provides
+    @Singleton
+    fun provideWaterImageSampler(sampler: AndroidWaterImageSampler): WaterImageSampler = sampler
+
+    /**
+     * On-device first, cloud as a second opinion — see [LocalFirstWaterObserver].
+     * Unlike motivation the cloud path is deliberately kept: the detector has
+     * never been run against a real photograph, and this is what turns a
+     * rejection into a question rather than a verdict.
+     */
+    @Provides
+    @Singleton
+    fun provideWaterObserver(observer: LocalFirstWaterObserver): WaterObserver = observer
 }

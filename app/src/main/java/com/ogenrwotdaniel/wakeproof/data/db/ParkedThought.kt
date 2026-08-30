@@ -1,10 +1,13 @@
 package com.ogenrwotdaniel.wakeproof.data.db
 
+import kotlinx.serialization.Serializable
+
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import java.util.UUID
@@ -18,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
     tableName = "parked_thoughts",
     indices = [Index(value = ["syncId"], unique = true)]
 )
+@Serializable
 data class ParkedThought(
     @PrimaryKey(autoGenerate = true) override val id: Long = 0,
     val text: String,
@@ -36,6 +40,21 @@ data class ParkedThought(
 /** Room access to [ParkedThought]. */
 @Dao
 interface ParkedThoughtDao : SyncDao<ParkedThought> {
+    /**
+     * Every row, tombstones included.
+     *
+     * Filtering `deleted = 0` here would be a quiet data-loss bug rather
+     * than a tidy-up: a restored device that has forgotten its tombstones
+     * cannot tell "deleted" from "never seen", so the next sync would
+     * resurrect every item the user had removed.
+     */
+    @Query("SELECT * FROM parked_thoughts")
+    suspend fun backupAll(): List<ParkedThought>
+
+    /** Restores rows verbatim, ids included, so references between tables survive. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun restoreAll(rows: List<ParkedThought>)
+
     @Insert
     suspend fun insert(thought: ParkedThought)
 

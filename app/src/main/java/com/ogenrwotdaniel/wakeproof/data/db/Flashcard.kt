@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.data.db
 
+import kotlinx.serialization.Serializable
+
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
@@ -14,6 +16,7 @@ import java.util.UUID
     tableName = "flashcards",
     indices = [Index(value = ["syncId"], unique = true)]
 )
+@Serializable
 data class Flashcard(
     @PrimaryKey(autoGenerate = true) override val id: Long = 0,
     val subject: String,

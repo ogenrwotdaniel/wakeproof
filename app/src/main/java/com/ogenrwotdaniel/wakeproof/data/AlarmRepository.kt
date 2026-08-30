@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.data
 
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmDays
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
@@ -57,11 +58,18 @@ class AlarmRepository @Inject constructor(
      * tablet are two different alarms and neither can overwrite the other. Only
      * edits to the *same* alarm are ever resolved by last-write-wins.
      */
-    suspend fun addAlarm(type: AlarmType, hour: Int, minute: Int, label: String) {
+    suspend fun addAlarm(
+        type: AlarmType,
+        hour: Int,
+        minute: Int,
+        label: String,
+        daysMask: Int = AlarmDays.EVERY_DAY
+    ) {
         val alarm = Alarm(
             type = type,
             hour = hour,
             minute = minute,
+            daysMask = AlarmDays.normalise(daysMask),
             label = label.trim(),
             // Deliberately not `seeded`: this one the user asked for, so it syncs.
             seeded = false

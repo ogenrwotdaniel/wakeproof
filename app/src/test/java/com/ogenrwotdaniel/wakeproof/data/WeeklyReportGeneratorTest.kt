@@ -17,8 +17,10 @@ class WeeklyReportGeneratorTest {
         focusPerDay.mapIndexed { index, minutes ->
             DayStat(
                 epochDay = monday + index,
-                pushupDone = false,
+                pushupCount = 0,
+                pushupTarget = 1,
                 waterCount = 0,
+                waterTarget = 3,
                 focusMinutes = minutes,
                 skipped = index in skipped
             )
@@ -76,7 +78,7 @@ class WeeklyReportGeneratorTest {
     fun `a week of pushups and no focus is not called empty`() {
         val text = generator.report(
             WeekStats(
-                days = week(List(7) { 0 }).map { it.copy(pushupDone = true) },
+                days = week(List(7) { 0 }).map { it.copy(pushupCount = 1) },
                 focusBySubject = emptyList(),
                 dailyGoalMinutes = 120
             )

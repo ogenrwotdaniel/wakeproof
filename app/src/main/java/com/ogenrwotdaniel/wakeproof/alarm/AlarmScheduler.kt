@@ -25,15 +25,28 @@ import javax.inject.Singleton
 @Singleton
 class AlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val directBootStore: DirectBootAlarmStore
+    private val directBootStore: DirectBootAlarmStore,
+    private val devicePolicy: AlarmDevicePolicy
 ) {
     private val alarmManager: AlarmManager = context.getSystemService(AlarmManager::class.java)
 
-    /** (Re)schedules the next occurrence of [alarm]'s daily wall-clock time. */
+    /**
+     * (Re)schedules the next occurrence of [alarm] on a day its
+     * [Alarm.daysMask] allows.
+     *
+     * On a companion device this cancels instead of arming. Every path that
+     * arms an alarm funnels through here — startup, sync, the settings screen,
+     * a snooze, the receiver rescheduling tomorrow — so one check here is what
+     * makes "alarms ring on the phone only" true rather than mostly true.
+     */
     fun schedule(alarm: Alarm) {
+        if (!devicePolicy.ringsAlarms) {
+            cancelById(alarm.id)
+            return
+        }
         alarmManager.setAlarmClock(
             AlarmManager.AlarmClockInfo(
-                nextTriggerAtMillis(alarm.hour, alarm.minute),
+                nextTriggerAtMillis(alarm.hour, alarm.minute, alarm.daysMask),
                 showAlarmsIntent()
             ),
             fireIntent(alarm.id, requestCode = alarm.id.toInt())
@@ -67,6 +80,7 @@ class AlarmScheduler @Inject constructor(
      * cannot displace tomorrow's 05:00.
      */
     fun scheduleSnooze(alarmId: Long, minutes: Int) {
+        if (!devicePolicy.ringsAlarms) return
         alarmManager.setAlarmClock(
             AlarmManager.AlarmClockInfo(
                 System.currentTimeMillis() + minutes * 60_000L,
@@ -82,6 +96,7 @@ class AlarmScheduler @Inject constructor(
      * its daily schedule — a distinct request code keeps the PendingIntents apart.
      */
     fun scheduleTestFire(alarm: Alarm, delaySeconds: Int) {
+        if (!devicePolicy.ringsAlarms) return
         alarmManager.setAlarmClock(
             AlarmManager.AlarmClockInfo(
                 System.currentTimeMillis() + delaySeconds * 1000L,
@@ -113,12 +128,11 @@ class AlarmScheduler @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-    private fun nextTriggerAtMillis(hour: Int, minute: Int): Long {
-        val now = LocalDateTime.now()
-        var next = now.toLocalDate().atTime(hour, minute)
-        if (!next.isAfter(now)) next = next.plusDays(1)
-        return next.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-    }
+    private fun nextTriggerAtMillis(hour: Int, minute: Int, daysMask: Int): Long =
+        nextAlarmTrigger(LocalDateTime.now(), hour, minute, daysMask)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
 
     private companion object {
         const val TEST_REQUEST_CODE_OFFSET = 10_000

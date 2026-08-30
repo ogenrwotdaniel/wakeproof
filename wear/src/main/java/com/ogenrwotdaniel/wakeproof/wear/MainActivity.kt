@@ -8,7 +8,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import com.google.android.gms.wearable.DataClient
+import com.google.android.gms.wearable.DataEventBuffer
+import com.google.android.gms.wearable.Wearable
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -18,29 +25,79 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Minimal launcher screen for the watch app. When a Pomodoro is running on the
- * phone it shows the live countdown (self-ticking from the pushed finish time,
- * so it stays smooth with no per-second sync); otherwise it shows the same
- * progress snapshot as the tile. Kept dependency-light (plain [Activity] + a
- * [TextView]) — the Tile is the primary surface.
+ * Launcher screen for the watch app: the live Pomodoro countdown when one is
+ * running on the phone (self-ticking from the pushed finish time, so it stays
+ * smooth with no per-second sync), otherwise the same progress snapshot as the
+ * tile.
+ *
+ * It also *drives* the timer now. The watch used to be a pure display, which
+ * meant starting a focus block required picking up the phone — the exact thing
+ * a focus block exists to avoid. Commands go out over [TimerCommands]; the
+ * phone remains the only place the timer actually runs, and this screen shows
+ * whatever the phone pushes back.
+ *
+ * The alarm is deliberately not controllable from here. See the note on
+ * `WearContract.COMMAND_PATH`: an alarm you can silence from your wrist is one
+ * you can silence without getting up, which is the whole thing the app exists
+ * to prevent.
+ *
+ * Kept dependency-light (plain [Activity] and framework views, no Compose) —
+ * the Tile is still the primary glanceable surface.
  */
 class MainActivity : Activity() {
 
     private val scope = MainScope()
     private var renderJob: Job? = null
     private lateinit var textView: TextView
+    private lateinit var buttons: LinearLayout
+
+    /**
+     * Re-renders when the phone pushes new timer or stats state, so a command
+     * sent from here visibly lands rather than needing the screen reopened.
+     * Registered only while resumed — a watch screen that listens in the
+     * background is a battery cost with nothing to show for it.
+     */
+    private val dataListener = DataClient.OnDataChangedListener { events: DataEventBuffer ->
+        val relevant = events.any { it.dataItem.uri.path?.startsWith("/wakeproof") == true }
+        events.release()
+        if (relevant) render()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         textView = TextView(this).apply {
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#0F1417"))
             textSize = 16f
-            setPadding(24, 24, 24, 24)
             text = getString(R.string.app_name)
         }
-        setContentView(textView)
+        buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(24, 24, 24, 24)
+            addView(textView)
+            addView(buttons)
+        }
+        // Round watch faces clip the corners, and the button row can push the
+        // content past the bottom on a small face; scrolling is what keeps the
+        // last control reachable rather than merely drawn.
+        val root = ScrollView(this).apply {
+            setBackgroundColor(BACKGROUND)
+            isFillViewport = true
+            addView(
+                column,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        setContentView(root)
 
         // Needed so the timer Ongoing Activity can be posted on the watch face.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -52,20 +109,84 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Wearable.getDataClient(this).addListener(dataListener)
+        render()
+    }
+
+    override fun onPause() {
+        Wearable.getDataClient(this).removeListener(dataListener)
+        renderJob?.cancel()
+        super.onPause()
+    }
+
+    private fun render() {
         renderJob?.cancel()
         renderJob = scope.launch {
             val timer = TimerSnapshot.read(applicationContext)
-            if (timer != null) {
-                renderTimer(timer)
-            } else {
-                renderStats()
+            showControlsFor(timer)
+            if (timer != null) renderTimer(timer) else renderStats()
+        }
+    }
+
+    /**
+     * The controls that make sense for the state the phone reports.
+     *
+     * Offering only the applicable ones — rather than greying out the rest — is
+     * what keeps this legible on a 45 mm screen, where every control costs a
+     * meaningful share of the face.
+     */
+    private fun showControlsFor(timer: TimerSnapshot?) {
+        buttons.removeAllViews()
+        when {
+            timer == null -> addButton("Start focus", TimerCommands.START)
+            timer.running -> {
+                addButton("Pause", TimerCommands.PAUSE)
+                addButton("Stop", TimerCommands.STOP)
+            }
+            else -> {
+                addButton("Resume", TimerCommands.RESUME)
+                addButton("Stop", TimerCommands.STOP)
             }
         }
     }
 
-    override fun onPause() {
-        renderJob?.cancel()
-        super.onPause()
+    private fun addButton(label: String, command: String) {
+        val button = Button(this).apply {
+            text = label
+            textSize = 14f
+            isAllCaps = false
+            setOnClickListener { send(command, label) }
+        }
+        buttons.addView(
+            button,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 12 }
+        )
+    }
+
+    /**
+     * Fires a command and reports honestly if it did not land.
+     *
+     * There is no optimistic local state: the phone owns the timer, and the
+     * screen changes only when the phone pushes back. A watch that showed
+     * "paused" while the phone kept counting would be worse than one that
+     * showed nothing.
+     */
+    private fun send(command: String, label: String) {
+        scope.launch {
+            setButtonsEnabled(false)
+            val delivered = TimerCommands.send(applicationContext, command)
+            if (!delivered) {
+                textView.text = "Phone unreachable.\nCouldn't $label."
+            }
+            setButtonsEnabled(true)
+        }
+    }
+
+    private fun setButtonsEnabled(enabled: Boolean) {
+        for (i in 0 until buttons.childCount) buttons.getChildAt(i).isEnabled = enabled
     }
 
     /** Shows the live Pomodoro countdown, ticking every second while running. */
@@ -107,5 +228,9 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
+    }
+
+    private companion object {
+        val BACKGROUND = Color.parseColor("#0F1417")
     }
 }

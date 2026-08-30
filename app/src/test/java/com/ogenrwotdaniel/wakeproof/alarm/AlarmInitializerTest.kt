@@ -57,4 +57,31 @@ class AlarmInitializerTest {
         assertTrue(plan.toCancel.isEmpty())
         assertTrue(plan.orphanIds.isEmpty())
     }
+
+    @Test
+    fun `a companion device arms nothing and disarms everything`() {
+        val plan = reconcilePlan(
+            alarms = listOf(enabled, disabled, deleted),
+            mirroredIds = setOf(1L, 2L, 3L),
+            ringsAlarms = false
+        )
+
+        // Not "schedule nothing and leave the rest alone": the live alarm has to
+        // be actively cancelled, or the tablet keeps ringing whatever it already
+        // had armed when the role was switched off.
+        assertTrue(plan.toSchedule.isEmpty())
+        assertEquals(listOf(enabled, disabled, deleted), plan.toCancel)
+    }
+
+    @Test
+    fun `a companion device still cleans up orphans`() {
+        val plan = reconcilePlan(
+            alarms = listOf(enabled),
+            mirroredIds = setOf(1L, 99L),
+            ringsAlarms = false
+        )
+
+        assertEquals(listOf(99L), plan.orphanIds)
+        assertEquals(listOf(enabled), plan.toCancel)
+    }
 }

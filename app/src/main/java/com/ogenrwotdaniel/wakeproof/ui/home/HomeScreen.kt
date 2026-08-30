@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -39,8 +40,8 @@ import java.time.LocalDate
 
 /**
  * Dashboard: streak, today's goal cards, 7-day history chart (pure Canvas),
- * and navigation. A day counts toward the streak only when pushups and all
- * three waters are verified.
+ * and navigation. A day counts toward the streak when every alarm due that day
+ * was verified — the targets come from the schedule, not from a constant.
  */
 @Composable
 fun HomeScreen(
@@ -50,6 +51,7 @@ fun HomeScreen(
     onOpenUsage: () -> Unit,
     onOpenAgenda: () -> Unit,
     onOpenFlashcards: () -> Unit,
+    onOpenCorpusCapture: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -59,6 +61,7 @@ fun HomeScreen(
     val nextPushup by viewModel.nextPushupAlarm.collectAsStateWithLifecycle()
     val focusGoal by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
     val exams by viewModel.exams.collectAsStateWithLifecycle()
+    val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     var testArmed by remember { mutableStateOf(false) }
     var addingExam by remember { mutableStateOf(false) }
 
@@ -80,18 +83,53 @@ fun HomeScreen(
                 color = MaterialTheme.colorScheme.primary
             )
 
+            // A companion device holds the whole schedule and arms none of it.
+            // Without this the tablet looks exactly like a phone whose alarms
+            // have quietly stopped working.
+            if (!ringsAlarms) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Alarms don't ring on this device",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = "The schedule below is shared across your devices, but " +
+                                "only one of them wakes you. Change which in Settings.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+
             StatusCard(
                 title = "Pushups",
-                value = if (today.pushupDone) "Done ✓" else "Pending",
-                detail = nextPushup?.let { "Alarm at $it" } ?: "No alarm set",
+                value = when {
+                    today.pushupTarget == 0 -> "—"
+                    today.pushupDone -> "Done ✓"
+                    today.pushupTarget == 1 -> "Pending"
+                    else -> "${today.pushupCount}/${today.pushupTarget}"
+                },
+                detail = when {
+                    today.pushupTarget == 0 -> "No pushup alarm due today"
+                    else -> nextPushup?.let { "Alarm at $it" } ?: "No alarm set"
+                },
                 highlight = today.pushupDone
             )
             StatusCard(
                 title = "Water",
-                value = "${today.waterCount}/${today.waterTargetCount}" +
-                    if (today.anyUnverifiedWater) " *" else "",
-                detail = "${today.waterMl} ml today",
-                highlight = today.waterCount >= today.waterTargetCount
+                value = if (today.waterTargetCount == 0) "—" else
+                    "${today.waterCount}/${today.waterTargetCount}" +
+                        if (today.anyUnverifiedWater) " *" else "",
+                detail = if (today.waterTargetCount == 0) "No water alarm due today"
+                else "${today.waterMl} ml today",
+                highlight = today.waterDone
             )
             StatusCard(
                 title = "Focus",
@@ -139,6 +177,10 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                OutlinedButton(
+                    onClick = onOpenCorpusCapture,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Water corpus capture") }
                 OutlinedButton(
                     onClick = {
                         viewModel.testFire(AlarmType.PUSHUP)
@@ -303,8 +345,10 @@ private fun StatusCard(
 }
 
 /**
- * Bars = goals completed that day (pushup + up to 3 waters, max 4). Red base
- * marks a day with an emergency skip; the label is the weekday letter.
+ * Bars = the share of that day's goals that were met, where the goals are the
+ * alarms due that day (see [com.ogenrwotdaniel.wakeproof.data.dailyGoalsFrom]).
+ * A day with no alarms due draws empty rather than full. Red base marks a day
+ * with an emergency skip; the label is the weekday letter.
  */
 @Composable
 private fun WeekChart(week: List<DayStat>, modifier: Modifier = Modifier) {
@@ -323,8 +367,7 @@ private fun WeekChart(week: List<DayStat>, modifier: Modifier = Modifier) {
             val slot = size.width / week.size
             val barWidth = slot * 0.5f
             week.forEachIndexed { index, day ->
-                val goals = (if (day.pushupDone) 1 else 0) + day.waterCount.coerceAtMost(3)
-                val fraction = goals / 4f
+                val fraction = day.goalProgress
                 val left = index * slot + (slot - barWidth) / 2f
                 drawRect(
                     color = track,

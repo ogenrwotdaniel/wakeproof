@@ -1,6 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.data.sync
 
 import com.google.firebase.firestore.DocumentSnapshot
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmDays
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
@@ -93,6 +94,7 @@ fun syncTables(
                 "hour" to it.hour,
                 "minute" to it.minute,
                 "enabled" to it.enabled,
+                "daysMask" to it.daysMask,
                 "label" to it.label,
                 "lastCompletedEpochDay" to it.lastCompletedEpochDay
             )
@@ -105,6 +107,10 @@ fun syncTables(
                     hour = doc.int("hour"),
                     minute = doc.int("minute"),
                     enabled = doc.bool("enabled"),
+                    // Absent on documents written before day-of-week alarms
+                    // existed. Those alarms rang daily, so that is what the
+                    // missing field means — not "never".
+                    daysMask = doc.getLong("daysMask")?.toInt() ?: AlarmDays.EVERY_DAY,
                     label = doc.str("label"),
                     lastCompletedEpochDay = doc.getLong("lastCompletedEpochDay"),
                     syncId = meta.syncId,

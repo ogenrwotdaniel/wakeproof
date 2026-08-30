@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.data.db
 
+import kotlinx.serialization.Serializable
+
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
@@ -7,6 +9,7 @@ import androidx.room.PrimaryKey
 import java.util.UUID
 
 /** What the user must prove to dismiss an alarm. */
+@Serializable
 enum class AlarmType { PUSHUP, WATER, CUSTOM }
 
 /**
@@ -18,12 +21,19 @@ enum class AlarmType { PUSHUP, WATER, CUSTOM }
     tableName = "alarms",
     indices = [Index(value = ["syncId"], unique = true)]
 )
+@Serializable
 data class Alarm(
     @PrimaryKey(autoGenerate = true) override val id: Long = 0,
     val type: AlarmType,
     val hour: Int,
     val minute: Int,
     val enabled: Boolean = true,
+    /**
+     * Which weekdays this alarm repeats on, as an [com.ogenrwotdaniel.wakeproof.alarm.AlarmDays]
+     * bit mask. Defaults to every day, which is what alarms did before v5.
+     */
+    @ColumnInfo(defaultValue = "127")
+    val daysMask: Int = 127,
     val label: String = "",
     val lastCompletedEpochDay: Long? = null,
     @ColumnInfo(defaultValue = "''")

@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +45,9 @@ private data class ShellDestination(
     val route: Any,
     val type: KClass<*>
 )
+
+/** Fixed width for the navigation column — wide enough for the longest label. */
+private val NAV_WIDTH = 220.dp
 
 private val SHELL_DESTINATIONS = listOf(
     ShellDestination("Today", HomeRoute, HomeRoute::class),
@@ -89,7 +94,7 @@ fun AdaptiveShell(
                     current = destination,
                     onNavigate = { route -> navController.navigateTopLevel(route) }
                 )
-                ReadableColumn { content() }
+                ReadableColumn(Modifier.weight(1f)) { content() }
             }
         }
     }
@@ -111,7 +116,10 @@ private fun ShellNavigation(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxSize().widthIn(max = 240.dp)
+        // Width first, then height. `fillMaxSize()` resolves the width against
+        // the parent's constraints before any later `widthIn` can clamp it, so
+        // the cap was silently ignored and this column ate the whole window.
+        modifier = Modifier.width(NAV_WIDTH).fillMaxHeight()
     ) {
         Column(
             modifier = Modifier
@@ -143,15 +151,19 @@ private fun ShellNavigation(
  * rather than longer lines of text.
  */
 @Composable
-private fun ReadableColumn(content: @Composable () -> Unit) {
+private fun ReadableColumn(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxHeight(),
         contentAlignment = Alignment.TopCenter
     ) {
         Box(
+            // widthIn BEFORE fillMaxWidth, for the same reason as the nav
+            // column above: fillMaxWidth pins minWidth to the parent's width,
+            // and a later widthIn cannot shrink below its own minimum. Reversed,
+            // widthIn caps maxWidth first and fillMaxWidth then fills that cap.
             modifier = Modifier
-                .fillMaxWidth()
                 .widthIn(max = READABLE_MAX_WIDTH_DP.dp)
+                .fillMaxWidth()
         ) {
             content()
         }

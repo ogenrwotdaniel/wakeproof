@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.ogenrwotdaniel.wakeproof.ui.deviceUses24HourClock
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
+import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -211,9 +212,18 @@ fun SettingsScreen(
             SliderSetting(
                 label = "Daily focus goal",
                 value = settings.dailyFocusGoalMinutes,
-                range = 30f..480f,
+                range = SettingsViewModel.MIN_DAILY_FOCUS_GOAL_MINUTES.toFloat()..
+                    SettingsViewModel.MAX_DAILY_FOCUS_GOAL_MINUTES.toFloat(),
                 unit = "min",
+                steps = SettingsViewModel.DAILY_FOCUS_GOAL_STEPS,
+                valueText = ::formatDurationMinutes,
                 onCommit = viewModel::setDailyFocusGoalMinutes
+            )
+            Text(
+                text = "How much focused time a day counts as a full day — the goal on " +
+                    "Home, the widget and the watch. Up to 12 hours, in quarter-hour steps.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             SwitchSetting(
                 label = "Study sound",
@@ -227,7 +237,7 @@ fun SettingsScreen(
                 SliderSetting(
                     label = "Sound fade in / out",
                     value = settings.soundFadeSeconds,
-                    range = 0f..60f,
+                    range = 0f..SettingsViewModel.MAX_SOUND_FADE_SECONDS.toFloat(),
                     unit = "s",
                     onCommit = viewModel::setSoundFadeSeconds
                 )
@@ -253,9 +263,17 @@ fun SettingsScreen(
                 onCheckedChange = viewModel::setSessionKeepScreenOn
             )
             SwitchSetting(
-                label = "Lock phone during focus",
-                description = "Pins the phone to WakeProof while a focus timer runs; " +
-                    "unlocks on breaks.",
+                label = "Full-screen timer while focusing",
+                description = "During a focus block the app shows the countdown and " +
+                    "nothing else — no chat, no sound picker, no other screens — " +
+                    "until the break. Pause and end stay available.",
+                checked = settings.focusImmersiveTimer,
+                onCheckedChange = viewModel::setFocusImmersiveTimer
+            )
+            SwitchSetting(
+                label = "Lock phone during the session",
+                description = "Pins the phone to WakeProof for the whole session, " +
+                    "breaks included. Pausing or ending the session unpins it.",
                 checked = settings.focusLockPhone,
                 onCheckedChange = viewModel::setFocusLockPhone
             )
@@ -568,19 +586,25 @@ private fun SliderSetting(
     range: ClosedFloatingPointRange<Float>,
     unit: String,
     onCommit: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Discrete stops between the ends; 0 (the default) leaves the slider free. */
+    steps: Int = 0,
+    /** Reading for the current value; the default is "<n> <unit>". */
+    valueText: ((Int) -> String)? = null
 ) {
     var sliderValue by remember(value) { mutableFloatStateOf(value.toFloat()) }
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "$label: ${sliderValue.toInt()} $unit",
+            text = "$label: " + (valueText?.invoke(sliderValue.toInt())
+                ?: "${sliderValue.toInt()} $unit"),
             style = MaterialTheme.typography.bodyLarge
         )
         Slider(
             value = sliderValue,
             onValueChange = { sliderValue = it },
             onValueChangeFinished = { onCommit(sliderValue.toInt()) },
-            valueRange = range
+            valueRange = range,
+            steps = steps
         )
     }
 }

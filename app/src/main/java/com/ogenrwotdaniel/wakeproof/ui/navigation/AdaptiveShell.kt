@@ -75,6 +75,7 @@ private val SHELL_DESTINATIONS = listOf(
 fun AdaptiveShell(
     navController: NavHostController,
     modifier: Modifier = Modifier,
+    immersiveFocus: Boolean = false,
     content: @Composable () -> Unit
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -86,7 +87,11 @@ fun AdaptiveShell(
         // offer a way out to a half-configured app.
         val onboarding = destination?.hasRoute(OnboardingRoute::class) == true
 
-        if (mode == PaneMode.COMPACT || onboarding) {
+        // A focus block owns it for the opposite reason — the point of the
+        // full-screen timer is that there is nothing else to go and look at,
+        // and a permanent list of six other screens is exactly something else
+        // to go and look at.
+        if (mode == PaneMode.COMPACT || onboarding || immersiveFocus) {
             content()
         } else {
             Row(Modifier.fillMaxSize()) {

@@ -62,6 +62,7 @@ fun HomeScreen(
     val focusGoal by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
     val exams by viewModel.exams.collectAsStateWithLifecycle()
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
+    val timer by viewModel.timer.collectAsStateWithLifecycle()
     var testArmed by remember { mutableStateOf(false) }
     var addingExam by remember { mutableStateOf(false) }
 
@@ -82,6 +83,18 @@ fun HomeScreen(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
+
+            // A countdown running in the foreground service, surfaced where the
+            // app opens. Above the goal cards because it is the only thing on
+            // this screen that is happening *now*.
+            if (timer.active) {
+                RunningSessionCard(
+                    phaseLabel = timer.phase.label,
+                    remainingSeconds = timer.remainingSeconds,
+                    running = timer.running,
+                    onOpen = onOpenPomodoro
+                )
+            }
 
             // A companion device holds the whole schedule and arms none of it.
             // Without this the tablet looks exactly like a phone whose alarms
@@ -152,24 +165,18 @@ fun HomeScreen(
             )
             WeekChart(week = week)
 
+            // Six identical filled buttons stacked full-width gave every
+            // destination the same weight, so the screen ended in a wall with
+            // no shape to it. Starting a study session is the one thing this
+            // dashboard is for; the rest is navigation and reads as a list.
             Button(onClick = onOpenPomodoro, modifier = Modifier.fillMaxWidth()) {
-                Text("Pomodoro study mode")
+                Text(if (timer.active) "Back to the timer" else "Start a study session")
             }
-            Button(onClick = onOpenFlashcards, modifier = Modifier.fillMaxWidth()) {
-                Text("Flashcards")
-            }
-            Button(onClick = onOpenAgenda, modifier = Modifier.fillMaxWidth()) {
-                Text("Agenda — calendar events")
-            }
-            Button(onClick = onOpenUsage, modifier = Modifier.fillMaxWidth()) {
-                Text("Phone usage")
-            }
-            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Settings")
-            }
-            OutlinedButton(onClick = onOpenOnboarding, modifier = Modifier.fillMaxWidth()) {
-                Text("Onboarding")
-            }
+            NavigationRow("Flashcards", "Review what's due today", onOpenFlashcards)
+            NavigationRow("Agenda", "Today's calendar events", onOpenAgenda)
+            NavigationRow("Screen time", "Usage and daily app limits", onOpenUsage)
+            NavigationRow("Settings", "Alarms, focus, sync, data", onOpenSettings)
+            NavigationRow("Setup check", "Permissions and reliability", onOpenOnboarding)
 
             if (BuildConfig.DEBUG) {
                 Text(
@@ -214,6 +221,84 @@ fun HomeScreen(
             },
             onDismiss = { addingExam = false }
         )
+    }
+}
+
+/**
+ * "There is a session running" — the countdown, and a way back into it.
+ *
+ * Tinted rather than outlined so it reads as live state instead of as one more
+ * thing to tap; the whole card is the tap target, because on a dashboard the
+ * thing you want after seeing a countdown is the countdown.
+ */
+@Composable
+private fun RunningSessionCard(
+    phaseLabel: String,
+    remainingSeconds: Int,
+    running: Boolean,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        onClick = onOpen,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = if (running) phaseLabel else "$phaseLabel (paused)",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    text = "Tap to open the timer",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            Text(
+                text = "%d:%02d".format(remainingSeconds / 60, remainingSeconds % 60),
+                style = MaterialTheme.typography.headlineMedium
+            )
+        }
+    }
+}
+
+/**
+ * One destination in the list below the dashboard.
+ *
+ * A row with a subtitle rather than a button: it says what is behind the name,
+ * which a one-word button cannot, and it stops six destinations competing with
+ * the one action on the screen.
+ */
+@Composable
+private fun NavigationRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(text = title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

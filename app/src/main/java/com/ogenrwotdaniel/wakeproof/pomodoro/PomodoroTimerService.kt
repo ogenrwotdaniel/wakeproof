@@ -184,10 +184,12 @@ class PomodoroTimerService : Service() {
                     shortBreakSeconds = settings.shortBreakMinutes * 60
                     longBreakSeconds = settings.longBreakMinutes * 60
                     // A "1 h" session with 25+5 settings = 2 focus blocks; "2 h" = 4.
-                    val cycleMinutes = settings.focusMinutes + settings.shortBreakMinutes
-                    val target =
-                        if (sessionMinutes <= 0) 0
-                        else (sessionMinutes / cycleMinutes).coerceAtLeast(1)
+                    // See focusBlocksForSession for why this is not a division.
+                    val target = focusBlocksForSession(
+                        sessionMinutes = sessionMinutes,
+                        focusMinutes = settings.focusMinutes,
+                        breakMinutes = settings.shortBreakMinutes
+                    )
                     _state.value = PomodoroState(
                         active = true,
                         running = true,
@@ -260,8 +262,14 @@ class PomodoroTimerService : Service() {
         super.onDestroy()
     }
 
-    /** Loudness the loop settles at once faded in. */
-    private fun peakVolumeOf(sound: FocusSound) = (MUSIC_VOLUME * sound.gain).coerceAtMost(1f)
+    /**
+     * Loudness the loop settles at once faded in.
+     *
+     * One number for every sound: the loops are levelled to a matched loudness
+     * when they are generated (see `tools/sounds/README.md`), so there is
+     * nothing left here to trim per sound.
+     */
+    private fun peakVolumeOf(@Suppress("UNUSED_PARAMETER") sound: FocusSound) = MUSIC_VOLUME
 
     private fun MediaPlayer.applyVolume(v: Float) {
         musicVolume = v
@@ -277,7 +285,14 @@ class PomodoroTimerService : Service() {
      */
     private suspend fun ramp(player: MediaPlayer, to: Float, seconds: Int) {
         val from = musicVolume
-        if (seconds <= 0 || from == to) {
+        // A ramp that has nowhere to go is done immediately. The tolerance
+        // matters at the phase boundary: the pre-rolled fade-out has already
+        // walked the volume to within a rounding error of silence, and the
+        // boundary then asks for the same fade again. Comparing exactly, that
+        // second request spends the whole fade length crawling from 0.0001 to
+        // 0 — inaudible, but it holds the player open for a minute after the
+        // sound has gone, and at a 60 s fade that is most of a break.
+        if (seconds <= 0 || kotlin.math.abs(from - to) < 0.001f) {
             runCatching { player.applyVolume(to) }
             return
         }
@@ -580,7 +595,13 @@ class PomodoroTimerService : Service() {
         private const val NOTIFICATION_ID = 2
         private const val SESSION_DONE_NOTIFICATION_ID = 3
         private const val SESSIONS_PER_LONG_BREAK = 4
-        private const val MUSIC_VOLUME = 0.55f
+        /**
+         * Playback level for the bundled loops. Raised from 0.55 when the assets
+         * were regenerated at a matched -14 LUFS: the old set averaged louder in
+         * the file, so holding 0.55 would have made every sound quieter than the
+         * one the user had got used to.
+         */
+        private const val MUSIC_VOLUME = 0.7f
 
         /** Ramp resolution. 20 Hz is well under the threshold where steps are audible. */
         private const val FADE_STEPS_PER_SECOND = 20

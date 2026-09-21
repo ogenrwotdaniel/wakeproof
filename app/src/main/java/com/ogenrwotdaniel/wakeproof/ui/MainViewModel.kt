@@ -23,13 +23,37 @@ class MainViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /**
-     * True while the phone should be pinned to this app: a focus countdown is
-     * running and the "lock phone during focus" setting is on. Breaks, pause
-     * and stop release the pin.
+     * True while the phone should be pinned to this app: a session is running
+     * and the "lock phone during sessions" setting is on — **any** phase, breaks
+     * included, so the pin lasts the whole session rather than one block. A
+     * break used to hand the phone back every 25 minutes, which is how a
+     * pomodoro turns into an hour of scrolling; the five minutes off are meant
+     * to be five minutes off the work, not off the phone. Only pause and stop
+     * release it, exactly like [keepScreenOnActive].
+     *
+     * [immersiveFocusActive] is deliberately NOT widened the same way. The pin
+     * decides whether you can leave WakeProof; the full-screen timer decides
+     * what WakeProof shows you, and a break with nothing on screen but a
+     * countdown is a break in name only.
      */
     val focusLockActive: StateFlow<Boolean> =
         combine(PomodoroTimerService.state, settingsRepository.settings) { timer, cfg ->
-            cfg.focusLockPhone && timer.active && timer.running &&
+            cfg.focusLockPhone && timer.active && timer.running
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * True while the app should show the focus countdown and nothing else.
+     *
+     * Same condition as [focusLockActive] but its own setting, because the two
+     * locks answer different complaints: the pin stops you leaving WakeProof,
+     * this stops WakeProof itself offering you a study chat, a sound picker and
+     * five other screens to go and reorganise mid-block. Drives the navigation
+     * column as well as the Pomodoro screen, so a tablet does not keep a menu
+     * on display through a countdown that is supposed to have hidden it.
+     */
+    val immersiveFocusActive: StateFlow<Boolean> =
+        combine(PomodoroTimerService.state, settingsRepository.settings) { timer, cfg ->
+            cfg.focusImmersiveTimer && timer.active && timer.running &&
                 timer.phase == PomodoroPhase.FOCUS
         }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 

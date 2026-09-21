@@ -21,9 +21,10 @@ import com.ogenrwotdaniel.wakeproof.ui.usage.UsageScreen
 @Composable
 fun WakeProofNavGraph(
     startDestination: Any = HomeRoute,
-    navController: NavHostController = rememberNavController()
+    navController: NavHostController = rememberNavController(),
+    immersiveFocus: Boolean = false
 ) {
-    AdaptiveShell(navController = navController) {
+    AdaptiveShell(navController = navController, immersiveFocus = immersiveFocus) {
         NavHost(navController = navController, startDestination = startDestination) {
             composable<HomeRoute> {
                 HomeScreen(

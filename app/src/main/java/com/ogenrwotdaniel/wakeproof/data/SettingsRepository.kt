@@ -58,7 +58,20 @@ data class WakeProofSettings(
      * id, or `spotify` to let Spotify be the sound instead of a bundled loop.
      */
     val focusSoundId: String = "focus_ambient",
+    /**
+     * Pin the phone to WakeProof (screen pinning) while a session runs — focus
+     * *and* break phases, released only by pause or stop. The break is part of
+     * the session, so handing the phone back for it defeated the lock.
+     */
     val focusLockPhone: Boolean = true,
+    /**
+     * While a focus countdown runs, the app shows the timer and nothing else:
+     * no chat, no sound picker, no navigation, no way on to another screen
+     * until the break. The phone-level pin ([focusLockPhone]) stops you leaving
+     * the app; this stops you fiddling inside it, which is the distraction the
+     * app itself was adding.
+     */
+    val focusImmersiveTimer: Boolean = true,
     val focusFloatingTimer: Boolean = true,
     /** Screen never times out while a session runs — focus *and* break phases. */
     val sessionKeepScreenOn: Boolean = true,
@@ -91,6 +104,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             soundFadeSeconds = prefs[SOUND_FADE_SECONDS] ?: 5,
             focusSoundId = prefs[FOCUS_SOUND_ID] ?: "focus_ambient",
             focusLockPhone = prefs[FOCUS_LOCK_PHONE] ?: true,
+            focusImmersiveTimer = prefs[FOCUS_IMMERSIVE_TIMER] ?: true,
             focusFloatingTimer = prefs[FOCUS_FLOATING_TIMER] ?: true,
             sessionKeepScreenOn = prefs[SESSION_KEEP_SCREEN_ON] ?: true,
             spotifyPlaylistUri = prefs[SPOTIFY_PLAYLIST_URI] ?: "",
@@ -115,6 +129,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun setSoundFadeSeconds(value: Int) = dataStore.edit { it[SOUND_FADE_SECONDS] = value }
     suspend fun setFocusSoundId(value: String) = dataStore.edit { it[FOCUS_SOUND_ID] = value }
     suspend fun setFocusLockPhone(value: Boolean) = dataStore.edit { it[FOCUS_LOCK_PHONE] = value }
+    suspend fun setFocusImmersiveTimer(value: Boolean) =
+        dataStore.edit { it[FOCUS_IMMERSIVE_TIMER] = value }
     suspend fun setFocusFloatingTimer(value: Boolean) = dataStore.edit { it[FOCUS_FLOATING_TIMER] = value }
     suspend fun setSessionKeepScreenOn(value: Boolean) =
         dataStore.edit { it[SESSION_KEEP_SCREEN_ON] = value }
@@ -154,6 +170,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val FOCUS_MUSIC_ENABLED = booleanPreferencesKey("focus_music_enabled")
         val BREAK_MUSIC_ENABLED = booleanPreferencesKey("break_music_enabled")
         val SOUND_FADE_SECONDS = intPreferencesKey("sound_fade_seconds")
+        val FOCUS_IMMERSIVE_TIMER = booleanPreferencesKey("focus_immersive_timer")
         val FOCUS_SOUND_ID = stringPreferencesKey("focus_sound_id")
         val FOCUS_LOCK_PHONE = booleanPreferencesKey("focus_lock_phone")
         val FOCUS_FLOATING_TIMER = booleanPreferencesKey("focus_floating_timer")

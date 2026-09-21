@@ -77,8 +77,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // "Can't use the phone during focus": pin the app (lock task / screen
-        // pinning) while a focus countdown runs, release it on break/pause/stop.
+        // "Can't use the phone during a session": pin the app (lock task / screen
+        // pinning) while a countdown runs — breaks included — and release it only
+        // on pause/stop.
         // Only while RESUMED — startLockTask() is a no-op for background tasks.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -107,9 +108,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             WakeProofTheme {
                 val onboardingComplete by viewModel.onboardingComplete.collectAsStateWithLifecycle()
+                val immersiveFocus by viewModel.immersiveFocusActive.collectAsStateWithLifecycle()
                 when (onboardingComplete) {
                     null -> Unit // settings still loading; theme background shows
-                    true -> WakeProofNavGraph(startDestination = HomeRoute)
+                    true -> WakeProofNavGraph(
+                        startDestination = HomeRoute,
+                        immersiveFocus = immersiveFocus
+                    )
                     false -> WakeProofNavGraph(startDestination = OnboardingRoute)
                 }
             }

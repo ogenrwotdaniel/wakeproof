@@ -20,9 +20,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -46,17 +49,27 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroPhase
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
+import com.ogenrwotdaniel.wakeproof.ui.theme.BreakGreen
+import java.util.Calendar
 
 /**
  * Pomodoro study mode: 25/5 cycles with a long break every 4th, running in a
  * foreground service. The AI study chat (needs a Kimi key) is deliberately
  * locked during focus phases — that's the point of the app.
+ *
+ * While a focus block is counting down the screen collapses to [FocusMode]:
+ * the timer, and nothing else, until the break. See
+ * `WakeProofSettings.focusImmersiveTimer`.
  */
 @Composable
 fun PomodoroScreen(
@@ -74,14 +87,38 @@ fun PomodoroScreen(
     val chatAllowed = viewModel.hasKimiKey && (!timer.active || !timer.running ||
         timer.phase != PomodoroPhase.FOCUS)
 
+    // Same condition MainViewModel uses to hide the tablet's navigation column,
+    // evaluated here from the same two sources rather than passed down: this
+    // screen already collects both, and a parameter would be a second way for
+    // the two halves of one decision to disagree.
+    val immersive = settings.focusImmersiveTimer && timer.active && timer.running &&
+        timer.phase == PomodoroPhase.FOCUS
+
     // Keeping the screen awake during focus is owned by MainActivity (window-wide,
     // every screen), not by this composable — see MainViewModel.keepScreenOnActive.
 
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
+        if (immersive) {
+            FocusMode(
+                timer = timer,
+                subject = settings.activeSubject,
+                onPark = viewModel::parkThought,
+                onPause = { PomodoroTimerService.pause(context) },
+                onStop = { PomodoroTimerService.stop(context) },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                // Scrolls, because this screen is a stack of eight sections and
+                // on a phone the last of them used to be simply unreachable —
+                // laid out past the bottom of the window with no way to get to it.
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -101,49 +138,7 @@ fun PomodoroScreen(
             }
             Spacer(Modifier.height(16.dp))
 
-            // Arc eases between ticks; while running it also "breathes" softly.
-            val fraction by animateFloatAsState(
-                targetValue = if (timer.totalSeconds == 0) 0f
-                else timer.remainingSeconds.toFloat() / timer.totalSeconds,
-                animationSpec = tween(durationMillis = 600),
-                label = "arcFraction"
-            )
-            val breath by rememberInfiniteTransition(label = "breath").animateFloat(
-                initialValue = 0.65f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(tween(2_400), RepeatMode.Reverse),
-                label = "breathAlpha"
-            )
-            val arcAlpha = if (timer.active && timer.running) breath else 1f
-            val arcColor by animateColorAsState(
-                targetValue = if (timer.active && timer.phase != PomodoroPhase.FOCUS) {
-                    Color(0xFF81C784) // green while on a break
-                } else {
-                    Color(0xFF4FD1C5)
-                },
-                animationSpec = tween(800),
-                label = "arcColor"
-            )
-            Box(contentAlignment = Alignment.Center) {
-                Canvas(modifier = Modifier.size(220.dp)) {
-                    drawArc(
-                        color = Color.White.copy(alpha = 0.15f),
-                        startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                        style = Stroke(width = 20f, cap = StrokeCap.Round)
-                    )
-                    drawArc(
-                        color = arcColor.copy(alpha = arcAlpha),
-                        startAngle = -90f,
-                        sweepAngle = 360f * fraction,
-                        useCenter = false,
-                        style = Stroke(width = 20f, cap = StrokeCap.Round)
-                    )
-                }
-                Text(
-                    text = "%d:%02d".format(timer.remainingSeconds / 60, timer.remainingSeconds % 60),
-                    style = MaterialTheme.typography.displayMedium
-                )
-            }
+            CountdownRing(timer = timer, size = 220.dp)
 
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -183,12 +178,16 @@ fun PomodoroScreen(
             if (!timer.active) {
                 // Timed sessions auto-loop focus/break cycles and stop themselves;
                 // "Free" keeps looping until stopped.
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { PomodoroTimerService.start(context, 60) }) {
-                        Text("1 h session")
-                    }
-                    Button(onClick = { PomodoroTimerService.start(context, 120) }) {
-                        Text("2 h session")
+                // FlowRow, not Row: four buttons of these labels do not fit
+                // across a phone, and a Row would simply cut the last one off.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SESSION_LENGTHS.forEach { (label, minutes) ->
+                        Button(onClick = { PomodoroTimerService.start(context, minutes) }) {
+                            Text(label)
+                        }
                     }
                     OutlinedButton(onClick = { PomodoroTimerService.start(context) }) {
                         Text("Free")
@@ -196,9 +195,11 @@ fun PomodoroScreen(
                 }
                 Text(
                     text = "${settings.focusMinutes} min focus · ${settings.shortBreakMinutes} min " +
-                        "break · loops automatically",
+                        "break · loops automatically. A timed session runs whole " +
+                        "pomodoros and stops itself; Free keeps cycling until you stop it.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
                 )
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -244,10 +245,11 @@ fun PomodoroScreen(
             )
             if (settings.focusLockPhone) {
                 Text(
-                    text = if (timer.active && timer.running && timer.phase == PomodoroPhase.FOCUS) {
-                        "🔒 Phone is pinned to WakeProof until the break"
+                    text = if (timer.active && timer.running) {
+                        "🔒 Phone is pinned to WakeProof until the session ends"
                     } else {
-                        "🔒 Phone locks to WakeProof while focusing (Settings)"
+                        "🔒 Phone locks to WakeProof for a whole session, breaks " +
+                            "included (Settings)"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -263,11 +265,13 @@ fun PomodoroScreen(
                     error = chat.error,
                     enabled = chatAllowed,
                     onSend = viewModel::sendChat,
-                    modifier = Modifier.weight(1f)
+                    // A fixed height, not weight(1f): inside a scrolling column
+                    // the available height is infinite, so a weight is a crash
+                    // and an unbounded LazyColumn would be one too.
+                    modifier = Modifier.height(340.dp)
                 )
-            } else {
-                Spacer(Modifier.weight(1f))
             }
+            Spacer(Modifier.height(16.dp))
 
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
                 Text("Back")
@@ -275,6 +279,208 @@ fun PomodoroScreen(
         }
     }
 }
+
+
+/**
+ * The screen during a focus block: the countdown, and as close to nothing else
+ * as the app can honestly get away with.
+ *
+ * "Lock phone during focus" already stops you leaving WakeProof. That left the
+ * app itself as the last thing to fiddle with mid-block — a study chat, a sound
+ * picker, a subject list, five other screens — so a pinned phone became a phone
+ * pinned to a menu. This is the other half of that lock.
+ *
+ * What survives, and why:
+ *
+ * * **Parking a thought.** The one interaction that exists *because* you are
+ *   mid-focus: it is how a distraction gets written down in two taps instead of
+ *   being chased. Removing it would push people back to the thing it replaces.
+ * * **Pause and stop.** Deliberately plain text, at the bottom, with no colour
+ *   drawing the eye — an alarm clock app should make quitting possible and
+ *   unappealing, not impossible. A phone call, a person at the door, and a real
+ *   emergency all outrank a pomodoro.
+ *
+ * Everything else comes back by itself at the break.
+ */
+@Composable
+private fun FocusMode(
+    timer: PomodoroState,
+    subject: String,
+    onPark: (String) -> Unit,
+    onPause: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var parking by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }
+    val context = LocalContext.current
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = subject.uppercase(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (timer.targetFocusBlocks > 0) {
+            Text(
+                text = "Pomodoro ${
+                    (timer.completedFocusSessions + 1).coerceIn(1, timer.targetFocusBlocks)
+                } of ${timer.targetFocusBlocks}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(Modifier.height(32.dp))
+        CountdownRing(timer = timer, size = 300.dp)
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            text = "Break at ${finishTimeLabel(context, timer.remainingSeconds)}",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(40.dp))
+        if (parking) {
+            Row(
+                modifier = Modifier.widthIn(max = 420.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Park it for later…") },
+                    singleLine = true
+                )
+                Spacer(Modifier.size(8.dp))
+                Button(
+                    onClick = {
+                        onPark(input)
+                        input = ""
+                        parking = false
+                    },
+                    enabled = input.isNotBlank()
+                ) { Text("Park") }
+            }
+        } else {
+            TextButton(onClick = { parking = true }) { Text("💭 Park a thought") }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            TextButton(onClick = onPause) { Text("Pause") }
+            TextButton(onClick = onStop) { Text("End session") }
+        }
+        Text(
+            text = "Everything else is back at the break.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * Wall-clock time [remainingSeconds] from now, in the phone's own 12/24-hour
+ * format — "break at 14:32" is a far easier thing to hold in your head than
+ * "18:04 remaining", and it is the number you compare against the rest of the
+ * day.
+ */
+private fun finishTimeLabel(context: android.content.Context, remainingSeconds: Int): String {
+    val end = Calendar.getInstance().apply { add(Calendar.SECOND, remainingSeconds) }
+    return formatAlarmTime(context, end.get(Calendar.HOUR_OF_DAY), end.get(Calendar.MINUTE))
+}
+
+/**
+ * The countdown itself: a ring that empties as the phase runs down.
+ *
+ * Shared by the normal screen and [FocusMode] so there is one countdown in the
+ * app rather than two that drift apart — the arc's easing, its colours and the
+ * "breathing" while running all have to read the same in both.
+ *
+ * The arc eases between ticks rather than stepping, and pulses gently while
+ * running: a timer that is visibly alive is the difference between glancing at
+ * it and checking whether it is still going.
+ */
+@Composable
+private fun CountdownRing(
+    timer: PomodoroState,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    val fraction by animateFloatAsState(
+        targetValue = if (timer.totalSeconds == 0) 0f
+        else timer.remainingSeconds.toFloat() / timer.totalSeconds,
+        animationSpec = tween(durationMillis = 600),
+        label = "arcFraction"
+    )
+    val breath by rememberInfiniteTransition(label = "breath").animateFloat(
+        initialValue = 0.65f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2_400), RepeatMode.Reverse),
+        label = "breathAlpha"
+    )
+    val arcAlpha = if (timer.active && timer.running) breath else 1f
+    // Focus follows the scheme's primary; a break is the app's fixed green.
+    // The focus colour used to be a hardcoded teal that matched the palette in
+    // theme/Color.kt — which the theme was not actually using.
+    val focusColor = MaterialTheme.colorScheme.primary
+    val arcColor by animateColorAsState(
+        targetValue = if (timer.active && timer.phase != PomodoroPhase.FOCUS) BreakGreen
+        else focusColor,
+        animationSpec = tween(800),
+        label = "arcColor"
+    )
+    val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(size)) {
+            // Stroke scales with the ring: the full-screen ring drawn with the
+            // inline ring's fixed 20 px stroke looks like a hairline.
+            val stroke = Stroke(width = this.size.minDimension * 0.045f, cap = StrokeCap.Round)
+            drawArc(
+                color = trackColor,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                style = stroke
+            )
+            drawArc(
+                color = arcColor.copy(alpha = arcAlpha),
+                startAngle = -90f,
+                sweepAngle = 360f * fraction,
+                useCenter = false,
+                style = stroke
+            )
+        }
+        Text(
+            text = "%d:%02d".format(timer.remainingSeconds / 60, timer.remainingSeconds % 60),
+            style = if (size >= 280.dp) MaterialTheme.typography.displayLarge
+            else MaterialTheme.typography.displayMedium
+        )
+    }
+}
+
+/**
+ * Timed-session lengths offered before a session starts.
+ *
+ * The service turns minutes into whole focus blocks at the user's own
+ * focus/break lengths, so these are targets rather than promises: 90 minutes
+ * at 25+5 is three pomodoros, which is the nearest whole number of blocks that
+ * fits. 1 h 30 exists because two pomodoros is short for real work and four is
+ * more than most sittings — it was the length people were building by hand out
+ * of a Free session and a clock.
+ */
+private val SESSION_LENGTHS = listOf(
+    "1 h" to 60,
+    "1 h 30" to 90,
+    "2 h" to 120
+)
 
 /**
  * What-am-I-studying picker: chips for the user's subjects (long-press-free —
@@ -477,6 +683,18 @@ private fun MusicControls(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            } else {
+                // Seven chips of two words each say nothing about what they
+                // sound like, and there is no auditioning a loop without
+                // starting a session. One line under the picker is the cheapest
+                // honest answer to "which of these do I want?".
+                FocusSound.fromId(soundId)?.let { picked ->
+                    Text(
+                        text = picked.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

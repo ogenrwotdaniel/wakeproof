@@ -182,6 +182,8 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
         }, ContextCompat.getMainExecutor(context))
     }
 
+    // Read outside the Canvas: a draw lambda is not a composable scope.
+    val skeletonColor = MaterialTheme.colorScheme.primary
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -200,7 +202,7 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
                 val mapped = p.x * scale + dx
                 val x = if (useFrontCamera) size.width - mapped else mapped
                 val y = p.y * scale + dy
-                drawCircle(Color(0xFF4FD1C5), radius = 8f, center = Offset(x, y))
+                drawCircle(skeletonColor, radius = 8f, center = Offset(x, y))
             }
         }
         FlipCameraButton(
@@ -219,6 +221,7 @@ private fun CounterOverlay(
     status: PushupCounter.Status,
     modifier: Modifier = Modifier
 ) {
+    val skeletonColor = MaterialTheme.colorScheme.primary
     Column(
         modifier = modifier.padding(top = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -231,7 +234,7 @@ private fun CounterOverlay(
                     style = Stroke(width = 16f, cap = StrokeCap.Round)
                 )
                 drawArc(
-                    color = Color(0xFF4FD1C5),
+                    color = skeletonColor,
                     startAngle = -90f,
                     sweepAngle = 360f * (reps.toFloat() / target).coerceIn(0f, 1f),
                     useCenter = false,

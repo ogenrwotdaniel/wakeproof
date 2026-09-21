@@ -17,6 +17,8 @@ import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.data.db.Exam
 import com.ogenrwotdaniel.wakeproof.data.db.ExamDao
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import java.time.LocalDate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -50,6 +52,16 @@ class HomeViewModel @Inject constructor(
     fun deleteExam(exam: Exam) {
         viewModelScope.launch { examDao.softDelete(exam.id) }
     }
+
+    /**
+     * The shared Pomodoro timer, so Home can say a session is running.
+     *
+     * Home is where the app opens, and a running countdown was invisible from
+     * it: the timer lives in a foreground service and survives leaving the
+     * Pomodoro screen, so "am I still in a focus block?" was a question the
+     * dashboard could not answer.
+     */
+    val timer: StateFlow<PomodoroState> = PomodoroTimerService.state
 
     /** Daily focus goal in minutes, for the Focus card's progress. */
     val focusGoalMinutes: StateFlow<Int> = settingsRepository.settings

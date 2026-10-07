@@ -64,6 +64,7 @@ import java.util.concurrent.Executors
 @Composable
 fun PushupVerifyScreen(
     onVerified: () -> Unit,
+    onFinish: () -> Unit,
     onEmergencyDismiss: () -> Unit,
     snoozesLeft: Int,
     onSnooze: () -> Unit,
@@ -75,6 +76,11 @@ fun PushupVerifyScreen(
 
     LaunchedEffect(Unit) {
         if (!cameraPermission.status.isGranted) cameraPermission.launchPermissionRequest()
+    }
+    // Silence the alarm the moment the last rep lands, not when someone gets
+    // round to tapping a button; the success screen then closes on its own.
+    LaunchedEffect(state.verified) {
+        if (state.verified) onVerified()
     }
     LaunchedEffect(cameraPermission.status.isGranted) {
         if (!cameraPermission.status.isGranted) viewModel.onCameraUnavailable()
@@ -139,7 +145,7 @@ fun PushupVerifyScreen(
                 SuccessOverlay(
                     target = state.target,
                     motivation = state.motivation,
-                    onContinue = onVerified
+                    onFinish = onFinish
                 )
             }
         }
@@ -269,7 +275,7 @@ private fun CounterOverlay(
 private fun SuccessOverlay(
     target: Int,
     motivation: String?,
-    onContinue: () -> Unit,
+    onFinish: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -296,9 +302,7 @@ private fun SuccessOverlay(
                 )
             }
             Spacer(Modifier.height(32.dp))
-            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
-                Text("Silence the alarm")
-            }
+            AutoReturnFooter(onFinish = onFinish)
         }
     }
 }

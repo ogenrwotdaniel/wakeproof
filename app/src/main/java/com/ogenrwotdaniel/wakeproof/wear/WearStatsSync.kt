@@ -19,6 +19,7 @@ import kotlinx.coroutines.tasks.await
 object WearContract {
     const val PATH = "/wakeproof/stats"
     const val KEY_STREAK = "streak"
+    /** No longer written: the streak is focus-only since 1.5, so the watch reads false. */
     const val KEY_ASTERISK = "asterisk"
     const val KEY_FOCUS = "focus_minutes"
     const val KEY_FOCUS_GOAL = "focus_goal"
@@ -78,7 +79,6 @@ class WearStatsSync @Inject constructor(
         val settings = settingsRepository.settings.first()
         val request = PutDataMapRequest.create(WearContract.PATH).apply {
             dataMap.putInt(WearContract.KEY_STREAK, streak.days)
-            dataMap.putBoolean(WearContract.KEY_ASTERISK, streak.asterisk)
             dataMap.putInt(WearContract.KEY_FOCUS, today.focusMinutes)
             dataMap.putInt(WearContract.KEY_FOCUS_GOAL, settings.dailyFocusGoalMinutes)
             dataMap.putInt(WearContract.KEY_WATER_COUNT, today.waterCount)

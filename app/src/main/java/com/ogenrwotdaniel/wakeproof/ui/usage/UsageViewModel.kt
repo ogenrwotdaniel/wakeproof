@@ -8,6 +8,7 @@ import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import android.content.Context
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
+import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.StatsRepository
 import com.ogenrwotdaniel.wakeproof.data.TodayStatus
@@ -91,6 +92,19 @@ class UsageViewModel @Inject constructor(
         val usedMinutes: Long
     )
 
+    /** One study app's minutes today, for the study-time card. */
+    data class StudyAppMinutes(val packageName: String, val label: String, val minutes: Long)
+
+    private val _studyApps = MutableStateFlow<List<StudyAppMinutes>>(emptyList())
+
+    /**
+     * Today's time in the apps marked as study apps (Settings → Study apps),
+     * plus WakeProof itself, busiest first. Shown as study rather than lumped
+     * into screen time — an evening in Samsung Notes is the opposite of the
+     * thing the screen-time number warns about.
+     */
+    val studyApps: StateFlow<List<StudyAppMinutes>> = _studyApps.asStateFlow()
+
     /** Today's measured minutes for capped apps, refreshed on each resume. */
     private val _limitUsage = MutableStateFlow<Map<String, Long>>(emptyMap())
 
@@ -124,12 +138,21 @@ class UsageViewModel @Inject constructor(
     fun canEnforceBlocks(): Boolean =
         usageStatsRepository.hasAccess() && android.provider.Settings.canDrawOverlays(context)
 
+    /** Queued loosenings, so the list can say when each one lands. */
+    val pendingChanges: StateFlow<Map<String, PendingLimitChange>> = limitRepository.pendingChanges
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Stricter changes apply now; looser ones wait out the cooling-off. */
     fun setLimit(packageName: String, minutes: Int?, mode: LimitMode = LimitMode.NUDGE) {
         viewModelScope.launch {
-            limitRepository.setLimit(packageName, minutes, mode)
+            limitRepository.requestLimit(packageName, minutes, mode)
             // Picking up (or dropping) the last blocked app starts/stops the guard.
             AppBlockService.sync(context)
         }
+    }
+
+    fun cancelPendingLimit(packageName: String) {
+        viewModelScope.launch { limitRepository.cancelPending(packageName) }
     }
 
     /** Focus minutes per subject over the last 7 days. */
@@ -148,6 +171,9 @@ class UsageViewModel @Inject constructor(
 
     /** Called on every resume: the user may have just granted usage access. */
     fun refresh() {
+        viewModelScope.launch {
+            if (limitRepository.promoteDuePending()) AppBlockService.sync(context)
+        }
         _hasAccess.value = usageStatsRepository.hasAccess()
         if (!_hasAccess.value) return
         viewModelScope.launch {
@@ -157,6 +183,12 @@ class UsageViewModel @Inject constructor(
             val capped = limitRepository.currentLimits().keys
             _limitUsage.value = usageStatsRepository.todayForegroundMillisFor(capped)
                 .mapValues { (_, millis) -> millis / 60_000 }
+            val study = settingsRepository.settings.first().studyApps + context.packageName
+            _studyApps.value = usageStatsRepository.todayForegroundMillisFor(study)
+                .map { (pkg, millis) ->
+                    StudyAppMinutes(pkg, usageStatsRepository.appLabel(pkg), millis / 60_000)
+                }
+                .sortedByDescending { it.minutes }
         }
     }
 }

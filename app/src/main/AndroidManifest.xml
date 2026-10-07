@@ -26,20 +26,20 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- The user's own music library, played by the Pomodoro timer. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
 
-    <!-- Visibility of launcher apps, needed to label screen-time entries.
-         Spotify is named explicitly so the study-music button can tell whether
-         it is installed and deep-link straight into it. -->
+    <!-- Visibility of launcher apps: labels screen-time entries, lists apps on
+         the minimalist home screen, and covers opening Samsung Music. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
-        <package android:name="com.spotify.music" />
     </queries>
 
     <!-- allowBackup=false: restoring EncryptedSharedPreferences from a backup of another
@@ -61,6 +61,26 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Opt-in minimalist home screen: inert until the user picks WakeProof as
+             the home app (Settings → Minimalist home screen, or the system's own
+             default-apps screen). Its own taskAffinity so pressing Home never
+             drags the main WakeProof task forward. -->
+        <activity
+            android:name=".launcher.LauncherActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="WakeProof Home"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:taskAffinity="com.ogenrwotdaniel.wakeproof.home"
+            android:theme="@style/Theme.WakeProof">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 

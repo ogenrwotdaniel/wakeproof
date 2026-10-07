@@ -9,9 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.VibratorManager
@@ -19,9 +22,14 @@ import com.ogenrwotdaniel.wakeproof.AppForeground
 import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
+import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
+import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
+import com.ogenrwotdaniel.wakeproof.music.MusicLibrary
+import com.ogenrwotdaniel.wakeproof.music.MusicSelection
+import com.ogenrwotdaniel.wakeproof.music.Track
 import com.ogenrwotdaniel.wakeproof.wear.WearTimerSync
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -34,6 +42,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -56,8 +65,25 @@ data class PomodoroState(
     val totalSeconds: Int = 25 * 60,
     val completedFocusSessions: Int = 0,
     /** Focus blocks in this session; 0 = keep looping until stopped. */
-    val targetFocusBlocks: Int = 0
+    val targetFocusBlocks: Int = 0,
+    /**
+     * This focus block's tree withered: the user left WakeProof for a
+     * non-study app for longer than the grace period. The block still runs to
+     * the end, but is logged as not counting. Reset at every new focus phase.
+     */
+    val treeWithered: Boolean = false,
+    /** Away in a non-study app right now and the grace period is running. */
+    val treeAtRisk: Boolean = false
 )
+
+/** What the user's own music is playing, for the Pomodoro screen. */
+data class NowPlaying(val title: String, val artist: String)
+
+/** The one sound source in play: a bundled loop, or the user's own music. */
+private sealed interface SoundSource {
+    data class Loop(val sound: FocusSound) : SoundSource
+    data class Library(val selection: String, val shuffle: Boolean) : SoundSource
+}
 
 /** What the floating bubble should be doing right now. */
 private data class OverlayTarget(
@@ -77,7 +103,8 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var completionRepository: CompletionRepository
     @Inject lateinit var wearTimerSync: WearTimerSync
-    @Inject lateinit var spotify: SpotifyController
+    @Inject lateinit var musicLibrary: MusicLibrary
+    @Inject lateinit var usageStatsRepository: UsageStatsRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
@@ -85,7 +112,10 @@ class PomodoroTimerService : Service() {
     private var shortBreakSeconds = 5 * 60
     private var longBreakSeconds = 15 * 60
     private var musicPlayer: MediaPlayer? = null
-    private var currentSound: FocusSound? = null
+    private var currentSource: SoundSource? = null
+    /** The user's music, in play order, while [currentSource] is a library. */
+    private var queue: List<Track> = emptyList()
+    private var queueIndex = 0
     /** Volume ramp in flight; cancelled whenever the target volume changes. */
     private var fadeJob: Job? = null
     /** MediaPlayer has no getVolume, so the ramp tracks where it left off. */
@@ -94,29 +124,43 @@ class PomodoroTimerService : Service() {
     private var latestSettings = WakeProofSettings()
     /** Short-lived player for the transition chime; released on completion. */
     private var chimePlayer: MediaPlayer? = null
-    /** Last play/pause we sent Spotify; null = we have never touched playback. */
-    private var spotifyPlaying: Boolean? = null
     private val overlay by lazy { FloatingTimerOverlay(this) }
 
     override fun onCreate() {
         super.onCreate()
-        // Ambient sound rides the timer: focus and break phases each have their
-        // own toggle, and switching the selected sound swaps the loop live. A
-        // null sound means Spotify is the chosen source — no loop at all.
+        // Sound rides the timer: focus and break phases each have their own
+        // toggle, and switching the source (a loop, or the user's own music)
+        // swaps it live.
         scope.launch { settingsRepository.settings.collect { latestSettings = it } }
         scope.launch {
             combine(state, settingsRepository.settings) { s, cfg ->
-                val sound = FocusSound.fromId(cfg.focusSoundId)
-                Triple(sound != null && soundWanted(s, cfg), sound, cfg.soundFadeSeconds)
-            }.distinctUntilChanged().collect { (shouldPlay, sound, fade) ->
-                if (sound != currentSound) {
+                val source: SoundSource = FocusSound.fromId(cfg.focusSoundId)
+                    ?.let { SoundSource.Loop(it) }
+                    ?: SoundSource.Library(cfg.musicSelection, cfg.musicShuffle)
+                Triple(soundWanted(s, cfg), source, cfg.soundFadeSeconds)
+            }.distinctUntilChanged().collect { (shouldPlay, source, fade) ->
+                if (source != currentSource) {
                     fadeJob?.cancel()
                     musicPlayer?.release()
                     musicPlayer = null
                     musicVolume = 0f
-                    currentSound = sound
+                    queue = emptyList()
+                    _nowPlaying.value = null
+                    currentSource = source
                 }
-                if (shouldPlay && sound != null) startMusic(sound, fade) else pauseMusic(fade)
+                if (shouldPlay) startMusic(source, fade) else pauseMusic(fade)
+            }
+        }
+        // Forest-style stakes: while a focus block runs, leaving for anything
+        // that is not a study app starts a grace period, and staying away past
+        // it withers the block's tree. collectLatest cancels the guard the
+        // moment the block ends, pauses, or the tree is already lost.
+        scope.launch {
+            combine(state, settingsRepository.settings) { s, cfg ->
+                cfg.deepFocus && s.active && s.running && s.phase == PomodoroPhase.FOCUS &&
+                    !s.treeWithered
+            }.distinctUntilChanged().collectLatest { guarding ->
+                if (guarding) guardTree() else clearTreeWarning()
             }
         }
         // Floating countdown bubble: visible whenever a timer is active but the
@@ -140,27 +184,11 @@ class PomodoroTimerService : Service() {
                 }
             }
         }
-        // Spotify picked as the study sound: it rides the timer through the very
-        // same phase toggles the loops use. Media keys only — playback resumes
-        // when the phase wants sound and pauses on break/pause/stop. We never
-        // send a pause before having sent a play, so a timer cannot silence
-        // music the user started for something else.
-        scope.launch {
-            combine(state, settingsRepository.settings) { s, cfg ->
-                cfg.focusSoundId == FocusSound.SPOTIFY_ID && soundWanted(s, cfg)
-            }.distinctUntilChanged().collect { shouldPlay ->
-                if (shouldPlay == spotifyPlaying) return@collect
-                if (spotifyPlaying == null && !shouldPlay) return@collect
-                spotifyPlaying = shouldPlay
-                if (shouldPlay) spotify.play() else spotify.pause()
-            }
-        }
     }
 
     /**
      * Whether the phase the timer sits in wants sound at all — each phase has its
-     * own toggle, and a paused or stopped timer is always silent. Shared by the
-     * bundled loops and Spotify so exactly one of them can ever be playing.
+     * own toggle, and a paused or stopped timer is always silent.
      */
     private fun soundWanted(s: PomodoroState, cfg: WakeProofSettings) =
         s.active && s.running &&
@@ -222,13 +250,17 @@ class PomodoroTimerService : Service() {
                         running = false,
                         phase = PomodoroPhase.FOCUS,
                         remainingSeconds = focusSeconds,
-                        totalSeconds = focusSeconds
+                        totalSeconds = focusSeconds,
+                        treeWithered = false,
+                        treeAtRisk = false
                     )
                 }
                 updateNotification()
                 syncWatch()
             }
             ACTION_STOP -> stopSelf()
+            ACTION_MUSIC_NEXT -> skipTrack(+1)
+            ACTION_MUSIC_PREVIOUS -> skipTrack(-1)
         }
         return START_NOT_STICKY
     }
@@ -239,11 +271,8 @@ class PomodoroTimerService : Service() {
         // that is cancelled immediately below.
         CoroutineScope(Dispatchers.IO).launch { runCatching { wearTimerSync.clear() } }
         scope.cancel()
-        // Session over: stop the music we started, but never touch playback we didn't.
-        if (spotifyPlaying == true) {
-            spotify.pause()
-            spotifyPlaying = false
-        }
+        _nowPlaying.value = null
+        clearTreeWarning()
         overlay.hide()
         // Stopping shouldn't cut the loop dead either, but [scope] is cancelled
         // above — hand the player to a detached ramp that releases it when done.
@@ -269,7 +298,12 @@ class PomodoroTimerService : Service() {
      * when they are generated (see `tools/sounds/README.md`), so there is
      * nothing left here to trim per sound.
      */
-    private fun peakVolumeOf(@Suppress("UNUSED_PARAMETER") sound: FocusSound) = MUSIC_VOLUME
+    private fun peakVolumeOf(source: SoundSource) = when (source) {
+        is SoundSource.Loop -> MUSIC_VOLUME
+        // Commercial masters already sit at a loud, consistent level; the media
+        // volume rocker is the user's own control over it.
+        is SoundSource.Library -> LIBRARY_VOLUME
+    }
 
     private fun MediaPlayer.applyVolume(v: Float) {
         musicVolume = v
@@ -308,25 +342,198 @@ class PomodoroTimerService : Service() {
         }
     }
 
-    private fun startMusic(sound: FocusSound, fadeSeconds: Int) {
+    private suspend fun startMusic(source: SoundSource, fadeSeconds: Int) {
         runCatching {
-            val player = musicPlayer ?: MediaPlayer.create(
-                this, sound.res, // seamless ambient loop, generated asset
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-                0
-            )?.apply { isLooping = true }.also { musicPlayer = it } ?: return
-            val peak = peakVolumeOf(sound)
+            val player = musicPlayer ?: when (source) {
+                is SoundSource.Loop -> createLoopPlayer(source.sound)
+                is SoundSource.Library -> createLibraryPlayer(source)
+            }?.also { musicPlayer = it } ?: return
+            val peak = peakVolumeOf(source)
             fadeJob?.cancel()
             if (!player.isPlaying) {
-                // Start from silence so the loop arrives under you rather than
+                // Start from silence so the sound arrives under you rather than
                 // snapping on at full level the instant the phase flips.
                 player.applyVolume(if (fadeSeconds > 0) 0f else peak)
                 player.start()
             }
             fadeJob = scope.launch { ramp(player, peak, fadeSeconds) }
+        }
+    }
+
+    private fun createLoopPlayer(sound: FocusSound): MediaPlayer? =
+        MediaPlayer.create(
+            this, sound.res, // seamless ambient loop, generated asset
+            MUSIC_AUDIO_ATTRIBUTES,
+            0
+        )?.apply { isLooping = true }
+
+    /**
+     * One MediaPlayer for the whole queue, reset and re-pointed at each song,
+     * rather than one player per song: the fade ramps hold a reference to the
+     * player, so swapping instances mid-fade would leave the ramp turning the
+     * volume of a released player while the new song played at the old level.
+     */
+    private suspend fun createLibraryPlayer(source: SoundSource.Library): MediaPlayer? {
+        val tracks = musicLibrary.tracksFor(MusicSelection.decode(source.selection))
+        if (tracks.isEmpty()) return null
+        queue = if (source.shuffle) tracks.shuffled() else tracks
+        val player = MediaPlayer()
+        player.setOnCompletionListener { if (loadTrack(it, queueIndex + 1)) it.start() }
+        // A file that will not play is skipped, not fatal. Returning true stops
+        // MediaPlayer from also firing onCompletion for the broken one.
+        player.setOnErrorListener { mp, _, _ ->
+            if (loadTrack(mp, queueIndex + 1)) mp.start()
+            true
+        }
+        if (!loadTrack(player, 0)) {
+            player.release()
+            return null
+        }
+        return player
+    }
+
+    /**
+     * Points [player] at the queue entry [index] (wrapping), skipping any file
+     * that will not prepare. Returns false only when no song in the queue plays.
+     */
+    private fun loadTrack(player: MediaPlayer, index: Int): Boolean {
+        if (queue.isEmpty()) return false
+        repeat(queue.size) { attempt ->
+            val i = Math.floorMod(index + attempt, queue.size)
+            val prepared = runCatching {
+                player.reset()
+                player.setAudioAttributes(MUSIC_AUDIO_ATTRIBUTES)
+                player.setDataSource(this, queue[i].uri)
+                // Local files prepare in milliseconds; prepareAsync would only
+                // add a state machine to get the same answer.
+                player.prepare()
+            }.isSuccess
+            if (prepared) {
+                queueIndex = i
+                // reset() drops the volume back to full; carry the fade's level.
+                player.setVolume(musicVolume, musicVolume)
+                _nowPlaying.value = nowPlayingFor(queue[i])
+                return true
+            }
+        }
+        _nowPlaying.value = null
+        return false
+    }
+
+    /**
+     * A song from a picked folder only knows its file name until it plays; read
+     * its tags now, one file at a time, which costs milliseconds.
+     */
+    private fun nowPlayingFor(track: Track): NowPlaying {
+        if (track.documentUri == null) return NowPlaying(track.title, track.artist)
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(this, track.uri)
+            NowPlaying(
+                title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                    ?.takeIf { it.isNotBlank() } ?: track.title,
+                artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                    ?.takeIf { it.isNotBlank() } ?: ""
+            )
+        } catch (_: Exception) {
+            NowPlaying(track.title, "")
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    /** ⏭ / ⏮ for the user's music. ⏮ past the first few seconds restarts the song. */
+    private fun skipTrack(delta: Int) {
+        val player = musicPlayer ?: return
+        if (currentSource !is SoundSource.Library || queue.isEmpty()) return
+        val wasPlaying = runCatching { player.isPlaying }.getOrDefault(false)
+        if (delta < 0 && runCatching { player.currentPosition }.getOrDefault(0) > RESTART_THRESHOLD_MS) {
+            runCatching { player.seekTo(0) }
+            return
+        }
+        if (loadTrack(player, queueIndex + delta) && wasPlaying) runCatching { player.start() }
+    }
+
+    /**
+     * Watches the foreground app for the length of a focus block. See the
+     * collector in [onCreate] for when this runs.
+     *
+     * Needs usage access; without it the guard simply never fires, which errs
+     * towards keeping trees rather than killing them for something unmeasured.
+     * The screen being off is never "away" — that is the most focused a phone
+     * can be.
+     */
+    private suspend fun guardTree() {
+        val power = getSystemService(PowerManager::class.java)
+        val essentials = essentialPackages(this)
+        var awaySince: Long? = null
+        // foregroundPackage() answers null while the user stays put in one app,
+        // so the last real answer is what is on screen — exactly as in
+        // AppBlockService. Null until the first resume is seen: unknown is safe.
+        var foreground: String? = null
+        while (true) {
+            delay(TREE_POLL_MS)
+            if (!power.isInteractive || !usageStatsRepository.hasAccess()) {
+                if (awaySince != null) clearTreeWarning()
+                awaySince = null
+                continue
+            }
+            usageStatsRepository.foregroundPackage()?.let { foreground = it }
+            val current = foreground
+            val allowed = current == null || current in essentials ||
+                current in latestSettings.studyApps
+            if (allowed) {
+                if (awaySince != null) clearTreeWarning()
+                awaySince = null
+                continue
+            }
+            val now = SystemClock.elapsedRealtime()
+            val since = awaySince ?: now.also {
+                awaySince = it
+                _state.update { s -> s.copy(treeAtRisk = true) }
+                warnTree(usageStatsRepository.appLabel(current!!))
+            }
+            if (now - since >= TREE_GRACE_MS) {
+                _state.update { it.copy(treeWithered = true, treeAtRisk = false) }
+                notifyTree(
+                    "Your tree withered 🥀",
+                    "This focus block won't count. The timer is still running — " +
+                        "come back and the next one can grow."
+                )
+                return
+            }
+        }
+    }
+
+    private fun warnTree(appLabel: String) = notifyTree(
+        "Your tree is withering 🌱",
+        "Leave $appLabel within ${TREE_GRACE_MS / 1000} s or this focus block won't count."
+    )
+
+    private fun notifyTree(title: String, text: String) {
+        val open = PendingIntent.getActivity(
+            this, 4,
+            Intent(this, com.ogenrwotdaniel.wakeproof.MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        getSystemService(NotificationManager::class.java).notify(
+            TREE_NOTIFICATION_ID,
+            Notification.Builder(this, ALERT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+        )
+    }
+
+    private fun clearTreeWarning() {
+        if (_state.value.treeAtRisk) _state.update { it.copy(treeAtRisk = false) }
+        // Only the warning is cleared; a "withered" notice is left to be read.
+        if (!_state.value.treeWithered) {
+            getSystemService(NotificationManager::class.java).cancel(TREE_NOTIFICATION_ID)
         }
     }
 
@@ -396,7 +603,11 @@ class PomodoroTimerService : Service() {
         if (current.phase == PomodoroPhase.FOCUS) {
             runCatching {
                 completionRepository.log(
-                    GoalKind.FOCUS, CompletionStatus.VERIFIED, amount = focusSeconds / 60,
+                    GoalKind.FOCUS,
+                    // A withered block is still recorded, so the forest can show
+                    // the dead tree, but SKIPPED keeps it out of focus time.
+                    if (current.treeWithered) CompletionStatus.SKIPPED else CompletionStatus.VERIFIED,
+                    amount = focusSeconds / 60,
                     subject = settingsRepository.settings.first().activeSubject
                 )
             }
@@ -432,7 +643,10 @@ class PomodoroTimerService : Service() {
                 it.copy(
                     phase = PomodoroPhase.FOCUS,
                     remainingSeconds = focusSeconds,
-                    totalSeconds = focusSeconds
+                    totalSeconds = focusSeconds,
+                    // A fresh block, a fresh seedling.
+                    treeWithered = false,
+                    treeAtRisk = false
                 )
             }
         }
@@ -585,15 +799,31 @@ class PomodoroTimerService : Service() {
         /** Process-wide observable timer state. */
         val state: StateFlow<PomodoroState> = _state.asStateFlow()
 
+        private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
+
+        /** The song playing from the user's own library; null when a loop or nothing plays. */
+        val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
+
         private const val ACTION_START = "com.ogenrwotdaniel.wakeproof.action.POMODORO_START"
         private const val ACTION_PAUSE = "com.ogenrwotdaniel.wakeproof.action.POMODORO_PAUSE"
         private const val ACTION_RESUME = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESUME"
         private const val ACTION_RESET = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESET"
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.POMODORO_STOP"
+        private const val ACTION_MUSIC_NEXT = "com.ogenrwotdaniel.wakeproof.action.MUSIC_NEXT"
+        private const val ACTION_MUSIC_PREVIOUS = "com.ogenrwotdaniel.wakeproof.action.MUSIC_PREVIOUS"
         private const val CHANNEL_ID = "wakeproof_pomodoro"
         private const val ALERT_CHANNEL_ID = "wakeproof_pomodoro_alerts"
         private const val NOTIFICATION_ID = 2
         private const val SESSION_DONE_NOTIFICATION_ID = 3
+        private const val TREE_NOTIFICATION_ID = 5
+        private const val TREE_POLL_MS = 2_000L
+        /**
+         * How long a non-study app may hold the screen before the tree withers.
+         * Long enough to dismiss a notification you tapped by accident, short
+         * enough that a "quick look" at a feed does not fit inside it.
+         */
+        private const val TREE_GRACE_MS = 10_000L
+        private const val RESTART_THRESHOLD_MS = 3_000
         private const val SESSIONS_PER_LONG_BREAK = 4
         /**
          * Playback level for the bundled loops. Raised from 0.55 when the assets
@@ -602,6 +832,12 @@ class PomodoroTimerService : Service() {
          * one the user had got used to.
          */
         private const val MUSIC_VOLUME = 0.7f
+        private const val LIBRARY_VOLUME = 0.85f
+
+        private val MUSIC_AUDIO_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
 
         /** Ramp resolution. 20 Hz is well under the threshold where steps are audible. */
         private const val FADE_STEPS_PER_SECOND = 20
@@ -621,6 +857,9 @@ class PomodoroTimerService : Service() {
         fun resume(context: Context) = context.startService(intent(context, ACTION_RESUME))
         fun reset(context: Context) = context.startService(intent(context, ACTION_RESET))
         fun stop(context: Context) = context.startService(intent(context, ACTION_STOP))
+        fun nextTrack(context: Context) = context.startService(intent(context, ACTION_MUSIC_NEXT))
+        fun previousTrack(context: Context) =
+            context.startService(intent(context, ACTION_MUSIC_PREVIOUS))
 
         private fun intent(context: Context, action: String) =
             Intent(context, PomodoroTimerService::class.java).setAction(action)

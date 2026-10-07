@@ -29,7 +29,7 @@ interface CompletionLogDao : SyncDao<CompletionLog> {
 
     @Query(
         "SELECT subject, SUM(amount) AS minutes FROM completion_logs " +
-            "WHERE kind = 'FOCUS' AND epochDay >= :fromEpochDay AND deleted = 0 " +
+            "WHERE kind = 'FOCUS' AND status = 'VERIFIED' AND epochDay >= :fromEpochDay AND deleted = 0 " +
             "GROUP BY subject ORDER BY minutes DESC"
     )
     fun observeFocusBySubject(fromEpochDay: Long): Flow<List<SubjectMinutes>>

@@ -7,8 +7,10 @@ import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.Source
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
+import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.SYNC_BATCH
 import com.ogenrwotdaniel.wakeproof.data.db.SyncableEntity
@@ -52,7 +54,8 @@ class SyncEngine @Inject constructor(
     private val preferences: SyncPreferences,
     private val tables: List<@JvmSuppressWildcards SyncTable<out SyncableEntity>>,
     private val alarms: AlarmDao,
-    private val scheduler: AlarmScheduler
+    private val scheduler: AlarmScheduler,
+    private val settings: SettingsRepository
 ) {
 
     /** One pass at a time: the periodic worker and a "Sync now" tap can overlap. */
@@ -82,6 +85,7 @@ class SyncEngine @Inject constructor(
             // and until it is told, an alarm added on the phone would show on the
             // tablet's list without ever ringing there.
             if (retireSeededAlarms() || alarmsChanged) reconcileAlarmSchedule()
+            if (syncSharedSettings(db, uid)) changed++
             preferences.recordSuccess(System.currentTimeMillis())
             SyncResult.Success(changed)
         } catch (e: Exception) {
@@ -124,6 +128,50 @@ class SyncEngine @Inject constructor(
         alarms.getAllIncludingDeleted().forEach { alarm ->
             if (alarm.enabled && !alarm.deleted) scheduler.schedule(alarm)
             else scheduler.cancel(alarm)
+        }
+    }
+
+    /**
+     * The settings that must agree across devices, kept in one document at
+     * `users/{uid}/settings/shared`. Only the daily focus goal for now: the
+     * streak is scored against it, and per-device goals meant the phone showed a
+     * 1-day streak while the tablet showed 0 for the same day. Everything else
+     * in settings is still deliberately per-device.
+     *
+     * One document read per pass, resolved by [sharedSettingAction].
+     *
+     * @return true when the local goal changed.
+     */
+    private suspend fun syncSharedSettings(db: FirebaseFirestore, uid: String): Boolean {
+        val doc = collection(db, uid, SETTINGS).document(SHARED_SETTINGS)
+        val remote = doc.get(Source.SERVER).await()
+        val remoteGoal = remote.getLong(FOCUS_GOAL)?.toInt()
+        val remoteStamp = remote.getLong(FOCUS_GOAL_UPDATED_AT)?.takeIf { remoteGoal != null }
+        val (localGoal, localStamp) = settings.focusGoalStamp()
+
+        return when (sharedSettingAction(localStamp, remoteStamp)) {
+            SharedSettingAction.PUSH -> {
+                // A device seeding the cloud with a never-edited goal stamps it now,
+                // so it reads as a real value from here on.
+                val stamp = localStamp.takeIf { it > 0 } ?: System.currentTimeMillis()
+                doc.set(
+                    mapOf(
+                        FOCUS_GOAL to localGoal,
+                        FOCUS_GOAL_UPDATED_AT to stamp,
+                        SERVER_UPDATED_AT to FieldValue.serverTimestamp()
+                    ),
+                    SetOptions.merge()
+                ).await()
+                if (stamp != localStamp) settings.applySyncedFocusGoal(localGoal, stamp)
+                false
+            }
+
+            SharedSettingAction.PULL -> {
+                settings.applySyncedFocusGoal(remoteGoal!!, remoteStamp!!)
+                remoteGoal != localGoal
+            }
+
+            SharedSettingAction.NONE -> false
         }
     }
 
@@ -233,6 +281,10 @@ class SyncEngine @Inject constructor(
         const val TAG = "SyncEngine"
         const val USERS = "users"
         const val ALARMS = "alarms"
+        const val SETTINGS = "settings"
+        const val SHARED_SETTINGS = "shared"
+        const val FOCUS_GOAL = "dailyFocusGoalMinutes"
+        const val FOCUS_GOAL_UPDATED_AT = "dailyFocusGoalUpdatedAt"
 
         /** Server-clock stamp, used only to order reads. */
         const val SERVER_UPDATED_AT = "serverUpdatedAt"

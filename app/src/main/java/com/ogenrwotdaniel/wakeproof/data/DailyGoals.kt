@@ -90,6 +90,25 @@ fun dayOutcome(dayLogs: List<CompletionLog>, goals: DailyGoals): DayOutcome = wh
 }
 
 /**
+ * Scores one day for the STREAK, which since 2026-10-07 is about focus time
+ * alone: a day counts once the daily focus goal is reached.
+ *
+ * Alarms used to decide it. That measured whether you got up, not whether you
+ * studied, and the streak is the number the dashboard leads with — so it was
+ * leading with the wrong thing. Alarm verifications are still logged and still
+ * shown on their own cards; they just no longer make or break a day.
+ *
+ * Like [dailyGoalsFrom], past days are scored against the goal as it stands now,
+ * since no history of the setting is stored. A goal of zero asks for nothing,
+ * which is [DayOutcome.NO_GOALS] rather than a free win every day.
+ */
+fun focusDayOutcome(focusMinutes: Int, goalMinutes: Int): DayOutcome = when {
+    goalMinutes <= 0 -> DayOutcome.NO_GOALS
+    focusMinutes >= goalMinutes -> DayOutcome.MET
+    else -> DayOutcome.MISSED
+}
+
+/**
  * Positions in [outcomes] — newest day first — of the days making up the current
  * streak.
  *
@@ -98,9 +117,8 @@ fun dayOutcome(dayLogs: List<CompletionLog>, goals: DailyGoals): DayOutcome = wh
  * every Saturday. A run of nothing but NO_GOALS is a streak of zero, which is the
  * right answer for a schedule that currently asks for nothing.
  *
- * Returns the positions rather than just a count because the caller needs to
- * look the days back up — the honor-mode asterisk is a property of which days
- * are in the streak, not of how many.
+ * Returns the positions rather than just a count so a caller can look the
+ * days back up.
  */
 fun streakDayIndices(outcomes: List<DayOutcome>): List<Int> =
     outcomes.asSequence()
@@ -112,6 +130,24 @@ fun streakDayIndices(outcomes: List<DayOutcome>): List<Int> =
 
 /** How many days the current streak runs to. See [streakDayIndices]. */
 fun streakLength(outcomes: List<DayOutcome>): Int = streakDayIndices(outcomes).size
+
+/**
+ * The longest run of [DayOutcome.MET] days anywhere in [outcomes], with
+ * [DayOutcome.NO_GOALS] stepped over exactly as [streakDayIndices] does.
+ * Direction does not matter.
+ */
+fun longestStreak(outcomes: List<DayOutcome>): Int {
+    var best = 0
+    var run = 0
+    for (outcome in outcomes) {
+        when (outcome) {
+            DayOutcome.MET -> { run++; if (run > best) best = run }
+            DayOutcome.MISSED -> run = 0
+            DayOutcome.NO_GOALS -> Unit
+        }
+    }
+    return best
+}
 
 /** Today's [DayOfWeek], extracted so callers can pass a fixed date in tests. */
 internal fun dayOfWeekFor(epochDay: Long): DayOfWeek = LocalDate.ofEpochDay(epochDay).dayOfWeek

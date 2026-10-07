@@ -1,6 +1,6 @@
 # WakeProof Privacy Policy
 
-**Effective date:** 11 August 2026
+**Effective date:** 7 October 2026
 **Developer:** Ogenrwot Daniel
 **Contact:** ogenrwotdaniel@gmail.com
 
@@ -26,6 +26,22 @@ app:
   to act on the daily limits you set — either a notification, or blocking the
   app from opening for the rest of the day, whichever you chose for that app.
   These statistics are processed on-device only.
+- **Your music.** If you choose to play your own songs during focus sessions,
+  WakeProof reads music files stored on your phone and plays them on the phone.
+  You can give it one folder through Android's folder picker — it can then read
+  that folder (and its subfolders) and nothing else — or allow access to the
+  music on your device to choose by album or artist. WakeProof reads song files
+  and their title/artist tags only to play them. It never uploads, copies,
+  modifies or deletes your music, and never sends song names anywhere. A copy
+  of your library kept in Google Drive or elsewhere is never accessed. You can
+  withdraw access at any time in Android Settings → Apps → WakeProof →
+  Permissions (or by picking a different folder).
+- **Your installed apps.** WakeProof reads the list of apps installed on your
+  phone to let you set daily limits, choose study apps, and — if you make
+  WakeProof your home screen — show your apps. During a focus session with
+  "Grow a tree" on, it checks which app is on screen (using Usage access) to
+  tell whether you left for a distracting app. None of this is stored beyond
+  your own settings or sent anywhere.
 - **Calendar events.** With your permission, WakeProof reads event titles and
   times from your device calendar to show your agenda. It never modifies your
   calendar and never transmits calendar data.
@@ -117,6 +133,8 @@ network requests at all** — and water verification still works, on the device.
 | Usage access (special) | Showing you your own screen-time stats, and applying the daily app limits you set (notify, or block for the rest of the day) |
 | Display over other apps (special) | The floating Pomodoro timer bubble, the block screen for an app that has hit its limit, and opening the alarm screen while you use other apps |
 | Calendar (read) | Showing your agenda so you can tick events off |
+| Music and audio (read) | Optional: browsing all the music on your phone by album or artist for focus sessions. Not needed if you pick a single music folder instead |
+| Home app (role, optional) | Only if you choose WakeProof as your home screen in Settings; switch back any time in Android's default-apps settings |
 | Internet | Only for the optional cloud sync and AI features above |
 
 Every permission is optional except notifications/alarms (the app's core); the
@@ -149,6 +167,11 @@ personal information from children.
 ## Changes to this policy
 
 Material changes will be posted at this URL with an updated effective date.
+
+**7 October 2026** — added music playback from your own phone (a folder you
+pick, or your device's music library), which stays entirely on the device;
+noted the installed-app list used for limits, study apps and the optional
+home screen; noted the on-screen-app check used by the focus tree.
 
 **11 August 2026** — added the optional cloud sync section (Google sign-in and
 Firebase, off until you sign in); removed the weekly report from the list of

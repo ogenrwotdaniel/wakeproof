@@ -167,4 +167,33 @@ class DailyGoalsTest {
         assertEquals(0, streakLength(emptyList()))
         assertTrue(streakDayIndices(emptyList()).isEmpty())
     }
+
+    @Test
+    fun `focus day is met only once the goal is reached`() {
+        assertEquals(DayOutcome.MET, focusDayOutcome(focusMinutes = 120, goalMinutes = 120))
+        assertEquals(DayOutcome.MET, focusDayOutcome(focusMinutes = 300, goalMinutes = 120))
+        assertEquals(DayOutcome.MISSED, focusDayOutcome(focusMinutes = 119, goalMinutes = 120))
+    }
+
+    @Test
+    fun `a zero focus goal asks for nothing rather than handing out free days`() {
+        assertEquals(DayOutcome.NO_GOALS, focusDayOutcome(focusMinutes = 0, goalMinutes = 0))
+        assertEquals(DayOutcome.NO_GOALS, focusDayOutcome(focusMinutes = 50, goalMinutes = 0))
+    }
+
+    @Test
+    fun `longest streak finds the best run anywhere and steps over empty days`() {
+        val outcomes = listOf(
+            DayOutcome.MISSED,
+            DayOutcome.MET,
+            DayOutcome.MET,
+            DayOutcome.NO_GOALS,
+            DayOutcome.MET,
+            DayOutcome.MISSED,
+            DayOutcome.MET
+        )
+        assertEquals(3, longestStreak(outcomes))
+        assertEquals(0, streakLength(outcomes))
+        assertEquals(0, longestStreak(emptyList()))
+    }
 }

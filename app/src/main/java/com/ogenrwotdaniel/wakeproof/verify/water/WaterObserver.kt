@@ -10,6 +10,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Compares one before/after pair of bottle photos and reports how much was
@@ -131,9 +132,17 @@ class LocalFirstWaterObserver @Inject constructor(
 
         // Second opinion. A cloud failure must not turn a usable local answer
         // into an honour-mode hold, so the local result is what falls through.
-        return when (val remote = cloud.observe(before, after, bottleCapacityMl)) {
-            is KimiResult.Success -> remote
-            else -> local
+        // Bounded: the HTTP client allows 30 s per phase, and a thinking model
+        // on a weak morning connection used it — a minute of spinner with an
+        // alarm going, to be told what the device already knew. Past the cap
+        // the device's answer stands.
+        val remote = withTimeoutOrNull(CLOUD_SECOND_OPINION_TIMEOUT_MS) {
+            cloud.observe(before, after, bottleCapacityMl)
         }
+        return if (remote is KimiResult.Success) remote else local
+    }
+
+    private companion object {
+        const val CLOUD_SECOND_OPINION_TIMEOUT_MS = 8_000L
     }
 }

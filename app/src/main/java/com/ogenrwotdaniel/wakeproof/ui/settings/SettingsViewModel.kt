@@ -14,13 +14,14 @@ import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiRepository
 import com.ogenrwotdaniel.wakeproof.data.KimiResult
+import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
+import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
-import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.ogenrwotdaniel.wakeproof.data.backup.BackupRepository
 import com.ogenrwotdaniel.wakeproof.data.backup.backupFilename
@@ -32,6 +33,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -53,7 +55,7 @@ class SettingsViewModel @Inject constructor(
     private val completionRepository: CompletionRepository,
     private val reliabilityChecker: ReliabilityChecker,
     private val backupRepository: BackupRepository,
-    spotifyController: SpotifyController
+    private val usageStatsRepository: UsageStatsRepository
 ) : ViewModel() {
 
     private val _exportMessage = MutableStateFlow<String?>(null)
@@ -274,11 +276,32 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setSessionKeepScreenOn(value) }
     }
 
-    /** True when the Spotify app is present, so the UI can adapt its wording. */
-    val spotifyInstalled: Boolean = spotifyController.isInstalled()
+    fun setFocusQuotes(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setFocusQuotes(value) }
+    }
 
-    fun setSpotifyPlaylistUri(value: String) {
-        viewModelScope.launch { settingsRepository.setSpotifyPlaylistUri(value) }
+    fun setDeepFocus(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setDeepFocus(value) }
+    }
+
+    /** Every launchable app, for the study-app picker. Loaded on first use. */
+    private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+    val installedApps: StateFlow<List<InstalledApp>> = _installedApps
+
+    fun loadInstalledApps() {
+        if (_installedApps.value.isNotEmpty()) return
+        viewModelScope.launch { _installedApps.value = usageStatsRepository.installedApps() }
+    }
+
+    fun appLabel(packageName: String): String = usageStatsRepository.appLabel(packageName)
+
+    fun toggleStudyApp(packageName: String) {
+        viewModelScope.launch {
+            val current = settingsRepository.settings.first().studyApps
+            settingsRepository.setStudyApps(
+                if (packageName in current) current - packageName else current + packageName
+            )
+        }
     }
 
     /**

@@ -2,7 +2,6 @@ package com.ogenrwotdaniel.wakeproof.ui.usage
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,8 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,8 +44,15 @@ import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.AppUsage
 import com.ogenrwotdaniel.wakeproof.data.DayUsage
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
+import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
-import java.time.DayOfWeek
+import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
+import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
+import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
+import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
+import com.ogenrwotdaniel.wakeproof.ui.components.LabeledBarChart
+import com.ogenrwotdaniel.wakeproof.ui.components.chartDayLabel
+import com.ogenrwotdaniel.wakeproof.ui.formatCompactDuration
 import java.time.LocalDate
 
 /**
@@ -67,6 +71,8 @@ fun UsageScreen(
     val subjectMinutes by viewModel.subjectMinutes.collectAsStateWithLifecycle()
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
+    val pendingChanges by viewModel.pendingChanges.collectAsStateWithLifecycle()
+    val studyApps by viewModel.studyApps.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val report by viewModel.report.collectAsStateWithLifecycle()
     val reportUi by viewModel.reportUi.collectAsStateWithLifecycle()
@@ -123,8 +129,10 @@ fun UsageScreen(
                         }
                     }
 
+                    StudyTimeCard(studyApps = studyApps)
+
                     Text(
-                        text = "Last 7 days",
+                        text = "Screen time — last 7 days",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -178,7 +186,8 @@ fun UsageScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = app.label,
+                                    text = (if (studyApps.any { it.packageName == app.packageName }) "📚 " else "") +
+                                        app.label,
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -250,6 +259,18 @@ fun UsageScreen(
                                         MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                pendingChanges[capped.packageName]?.let { change ->
+                                    Text(
+                                        text = pendingLabel(context, change),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
+                            }
+                            if (capped.packageName in pendingChanges) {
+                                TextButton(
+                                    onClick = { viewModel.cancelPendingLimit(capped.packageName) }
+                                ) { Text("Keep") }
                             }
                             TextButton(
                                 onClick = {
@@ -323,6 +344,7 @@ fun UsageScreen(
         LimitDialog(
             app = app,
             currentLimit = limits[app.packageName],
+            pending = pendingChanges[app.packageName],
             canEnforceBlocks = viewModel.canEnforceBlocks(),
             onSet = { minutes, mode ->
                 viewModel.setLimit(app.packageName, minutes, mode)
@@ -333,9 +355,13 @@ fun UsageScreen(
     }
 
     if (showAppPicker) {
+        // Any installed app, not just today's top list — capping something
+        // before it eats a day is the point.
         AppPickerDialog(
+            title = "Limit an app",
             apps = installedApps,
-            limited = limits.keys,
+            marked = limits.keys,
+            markLabel = "(capped)",
             onPick = { app ->
                 showAppPicker = false
                 limitDialogFor = app
@@ -346,74 +372,34 @@ fun UsageScreen(
 }
 
 /**
- * Picks any installed app to cap, not just the handful that happen to be in
- * today's top-usage list — capping something *before* it eats a day is the
- * point. Searchable, because the list runs to a few hundred entries.
+ * "Becomes 60 min · Nudge on Thu 09:12" — when a queued loosening lands, in the
+ * phone's own clock format.
  */
-@Composable
-private fun AppPickerDialog(
-    apps: List<InstalledApp>,
-    limited: Set<String>,
-    onPick: (InstalledApp) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var query by remember { mutableStateOf("") }
-    val shown = remember(apps, query) {
-        if (query.isBlank()) apps
-        else apps.filter { it.label.contains(query, ignoreCase = true) }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Limit an app") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (apps.isEmpty()) {
-                    Text(
-                        text = "Reading the app list…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 12.dp)
-                    )
-                }
-                LazyColumn(modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .padding(top = 8.dp)
-                ) {
-                    items(shown, key = { it.packageName }) { app ->
-                        TextButton(
-                            onClick = { onPick(app) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = app.label + if (app.packageName in limited) "  (capped)" else "",
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Start
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
-    )
+private fun pendingLabel(context: android.content.Context, change: PendingLimitChange): String {
+    val at = java.time.Instant.ofEpochMilli(change.effectiveAtMillis)
+        .atZone(java.time.ZoneId.systemDefault())
+    val day = at.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+    val time = formatAlarmTime(context, at.hour, at.minute)
+    val what = change.limit?.let {
+        "becomes ${it.minutes} min · ${it.mode.name.lowercase().replaceFirstChar(Char::uppercase)}"
+    } ?: "limit removed"
+    return "⌛ ${what.replaceFirstChar(Char::uppercase)} on $day $time"
 }
 
-/** Slider dialog for one app's daily cap; "Remove" clears it. */
+/**
+ * Slider dialog for one app's daily cap. Tightening applies now; loosening or
+ * removing it is queued for 24 hours — see [DistractionLimitRepository.requestLimit].
+ */
 @Composable
 private fun LimitDialog(
     app: InstalledApp,
     currentLimit: AppLimit?,
+    pending: PendingLimitChange?,
     canEnforceBlocks: Boolean,
     onSet: (Int?, LimitMode) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var minutes by remember { mutableFloatStateOf((currentLimit?.minutes ?: 30).toFloat()) }
     var mode by remember { mutableStateOf(currentLimit?.mode ?: LimitMode.NUDGE) }
     AlertDialog(
@@ -454,6 +440,28 @@ private fun LimitDialog(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
                 )
+                val loosening = DistractionLimitRepository.isLoosening(
+                    currentLimit, AppLimit(minutes.toInt(), mode)
+                )
+                if (loosening || pending != null) {
+                    Text(
+                        text = buildString {
+                            if (loosening) {
+                                append("This loosens the limit, so it waits 24 hours before it ")
+                                append("takes effect. Until then the current ")
+                                append("${currentLimit?.minutes} min cap keeps applying. ")
+                                append("Tightening a limit always applies at once.")
+                            }
+                            if (pending != null) {
+                                if (loosening) append("\n\n")
+                                append("Already queued: ${pendingLabel(context, pending)}.")
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
                 if (!canEnforceBlocks) {
                     Text(
                         text = "Blocking needs both usage access and “display over other " +
@@ -466,12 +474,17 @@ private fun LimitDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSet(minutes.toInt(), mode) }) { Text("Set") }
+            val loosening = DistractionLimitRepository.isLoosening(
+                currentLimit, AppLimit(minutes.toInt(), mode)
+            )
+            TextButton(onClick = { onSet(minutes.toInt(), mode) }) {
+                Text(if (loosening) "Set in 24 h" else "Set")
+            }
         },
         dismissButton = {
             Row {
                 if (currentLimit != null) {
-                    TextButton(onClick = { onSet(null, mode) }) { Text("Remove") }
+                    TextButton(onClick = { onSet(null, mode) }) { Text("Remove in 24 h") }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
@@ -488,52 +501,61 @@ private fun focusSummary(focusMinutes: Int, screenMinutes: Long): String {
     return "🎯 $focusMinutes min focused — $percent% of screen time was deep work"
 }
 
-/** Daily screen-time bars scaled to the busiest day; label = weekday letter. */
+/**
+ * Time in study apps today, credited by name. Mostly so that an afternoon
+ * writing in Samsung Notes shows up as what it was rather than as anonymous
+ * screen time; the focus streak itself is driven by the Pomodoro timer, which
+ * keeps counting whichever app is on screen.
+ */
 @Composable
-private fun UsageWeekChart(week: List<DayUsage>, modifier: Modifier = Modifier) {
-    val primary = MaterialTheme.colorScheme.primary
-    val track = MaterialTheme.colorScheme.surfaceVariant
-    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val max = (week.maxOfOrNull { it.minutes } ?: 0).coerceAtLeast(1)
-
-    Column(modifier = modifier.fillMaxWidth()) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(96.dp)
-        ) {
-            if (week.isEmpty()) return@Canvas
-            val slot = size.width / week.size
-            val barWidth = slot * 0.5f
-            week.forEachIndexed { index, day ->
-                val fraction = day.minutes.toFloat() / max
-                val left = index * slot + (slot - barWidth) / 2f
-                drawRect(
-                    color = track,
-                    topLeft = Offset(left, 0f),
-                    size = Size(barWidth, size.height)
-                )
-                if (fraction > 0f) {
-                    drawRect(
-                        color = primary,
-                        topLeft = Offset(left, size.height * (1f - fraction)),
-                        size = Size(barWidth, size.height * fraction)
+private fun StudyTimeCard(
+    studyApps: List<UsageViewModel.StudyAppMinutes>,
+    modifier: Modifier = Modifier
+) {
+    val total = studyApps.sumOf { it.minutes }
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "📚 ${formatMinutes(total)} in study apps today",
+                style = MaterialTheme.typography.titleMedium
+            )
+            studyApps.filter { it.minutes > 0 }.forEach { app ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = app.label, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = formatMinutes(app.minutes),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            week.forEach { day ->
-                val letter = DayOfWeek.from(LocalDate.ofEpochDay(day.epochDay))
-                    .name.first().toString()
-                Text(
-                    text = letter,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = labelColor,
-                    textAlign = TextAlign.Center
-                )
-            }
+            Text(
+                text = "Choose which apps count in Settings → Study apps. A running focus " +
+                    "timer counts toward your goal whichever app you study in.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
+}
+
+/** Daily screen time, each bar labelled with its own total; today in bold. */
+@Composable
+private fun UsageWeekChart(week: List<DayUsage>, modifier: Modifier = Modifier) {
+    val today = LocalDate.now().toEpochDay()
+    LabeledBarChart(
+        bars = week.map { day ->
+            ChartBar(
+                label = chartDayLabel(day.epochDay, today),
+                value = day.minutes.toFloat(),
+                valueLabel = if (day.minutes > 0) formatCompactDuration(day.minutes.toInt()) else "",
+                emphasized = day.epochDay == today,
+                reached = true
+            )
+        },
+        modifier = modifier
+    )
 }

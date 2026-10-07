@@ -34,6 +34,8 @@ class DistractionLimitWorker(
     override suspend fun doWork(): Result {
         val limitsRepository = DistractionLimitRepository(applicationContext)
         val usageRepository = UsageStatsRepository(applicationContext)
+        // Land any loosening whose 24 h cooling-off has run out.
+        limitsRepository.promoteDuePending()
 
         // Blocked apps get a wall instead, so a nudge for them would only be a
         // notification about something the user has already been shown.

@@ -37,3 +37,34 @@ fun mergeDecision(
     remoteUpdatedAt > localUpdatedAt -> MergeDecision.UPDATE
     else -> MergeDecision.IGNORE
 }
+
+/** What to do with one setting shared across devices (see [sharedSettingAction]). */
+enum class SharedSettingAction {
+    /** Upload this device's value. */
+    PUSH,
+
+    /** Adopt the cloud's value. */
+    PULL,
+
+    /** Already in agreement. */
+    NONE
+}
+
+/**
+ * Last write wins for a single shared setting — today only the daily focus goal.
+ *
+ * Settings predate sync, so every existing install starts with a timestamp of 0
+ * ("never changed here since sync began"). That case PULLS whenever the cloud
+ * has anything, so a second device adopts the first one's goal instead of the
+ * two sitting at 6 h and 9 h forever with equal, meaningless timestamps. The
+ * first device to sync with nothing in the cloud seeds it.
+ *
+ * @param remoteUpdatedAt null when the cloud holds no value yet.
+ */
+fun sharedSettingAction(localUpdatedAt: Long, remoteUpdatedAt: Long?): SharedSettingAction = when {
+    remoteUpdatedAt == null -> SharedSettingAction.PUSH
+    localUpdatedAt == 0L -> SharedSettingAction.PULL
+    remoteUpdatedAt > localUpdatedAt -> SharedSettingAction.PULL
+    localUpdatedAt > remoteUpdatedAt -> SharedSettingAction.PUSH
+    else -> SharedSettingAction.NONE
+}

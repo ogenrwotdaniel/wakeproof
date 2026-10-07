@@ -35,11 +35,16 @@ class AlarmRingingActivity : ComponentActivity() {
             WakeProofTheme {
                 AlarmFlowNavGraph(
                     viewModel = viewModel,
+                    // Silence now; the success screen counts down and then
+                    // calls onFinish, so nobody has to tap to get their phone back.
                     onVerified = {
                         viewModel.markCompletedToday {
                             AlarmRingingService.stop(this)
-                            finishAndRemoveTask()
                         }
+                    },
+                    onFinish = {
+                        AlarmRingingService.stop(this)
+                        finishAndRemoveTask()
                     },
                     // Skipped day: silence the alarm but do NOT mark the goal done.
                     onEmergencyDismiss = {

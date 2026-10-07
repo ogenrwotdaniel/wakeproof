@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import com.ogenrwotdaniel.wakeproof.ui.agenda.AgendaScreen
 import com.ogenrwotdaniel.wakeproof.ui.corpus.CorpusCaptureScreen
 import com.ogenrwotdaniel.wakeproof.ui.flashcards.FlashcardsScreen
+import com.ogenrwotdaniel.wakeproof.ui.forest.ForestScreen
 import com.ogenrwotdaniel.wakeproof.ui.home.HomeScreen
 import com.ogenrwotdaniel.wakeproof.ui.onboarding.OnboardingScreen
 import com.ogenrwotdaniel.wakeproof.ui.pomodoro.PomodoroScreen
@@ -34,6 +35,7 @@ fun WakeProofNavGraph(
                     onOpenUsage = { navController.navigate(UsageRoute) },
                     onOpenAgenda = { navController.navigate(AgendaRoute) },
                     onOpenFlashcards = { navController.navigate(FlashcardsRoute) },
+                    onOpenForest = { navController.navigate(ForestRoute) },
                     onOpenCorpusCapture = { navController.navigate(CorpusCaptureRoute) }
                 )
             }
@@ -58,6 +60,9 @@ fun WakeProofNavGraph(
             }
             composable<FlashcardsRoute> {
                 FlashcardsScreen(onBack = { navController.popBackStack() })
+            }
+            composable<ForestRoute> {
+                ForestScreen(onBack = { navController.popBackStack() })
             }
             composable<CorpusCaptureRoute> {
                 CorpusCaptureScreen(onBack = { navController.popBackStack() })

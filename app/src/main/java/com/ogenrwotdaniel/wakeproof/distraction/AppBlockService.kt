@@ -6,14 +6,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.app.Service
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
-import android.telecom.TelecomManager
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
@@ -176,25 +174,10 @@ class AppBlockService : Service() {
     }
 
     /**
-     * Apps a hard block must never touch. With no override, walling off the
-     * launcher, the dialer or Settings would leave the phone genuinely unusable —
-     * including the path to turning this feature back off. A cap set on any of
-     * them still nudges; it just never blocks.
+     * Apps a hard block must never touch — see [essentialPackages]. A cap set on
+     * any of them still nudges; it just never blocks.
      */
-    private fun undismissablePackages(): Set<String> = buildSet {
-        add(packageName)
-        add("com.android.systemui")
-        add("com.android.settings")
-        runCatching {
-            getSystemService(TelecomManager::class.java).defaultDialerPackage
-        }.getOrNull()?.let(::add)
-        runCatching {
-            packageManager.resolveActivity(
-                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
-                PackageManager.MATCH_DEFAULT_ONLY
-            )?.activityInfo?.packageName
-        }.getOrNull()?.let(::add)
-    }
+    private fun undismissablePackages(): Set<String> = essentialPackages(this)
 
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(

@@ -34,6 +34,9 @@ data object AgendaRoute
 @Serializable
 data object FlashcardsRoute
 
+@Serializable
+data object ForestRoute
+
 /**
  * Debug-only: the water depth-corpus capture tool. Not in [SHELL_DESTINATIONS]
  * and not reachable in a release build — it retains photographs, which the

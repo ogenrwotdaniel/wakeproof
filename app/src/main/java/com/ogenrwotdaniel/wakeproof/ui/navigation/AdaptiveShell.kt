@@ -52,6 +52,7 @@ private val NAV_WIDTH = 220.dp
 private val SHELL_DESTINATIONS = listOf(
     ShellDestination("Today", HomeRoute, HomeRoute::class),
     ShellDestination("Focus timer", PomodoroRoute, PomodoroRoute::class),
+    ShellDestination("Forest", ForestRoute, ForestRoute::class),
     ShellDestination("Flashcards", FlashcardsRoute, FlashcardsRoute::class),
     ShellDestination("Agenda", AgendaRoute, AgendaRoute::class),
     ShellDestination("Screen time", UsageRoute, UsageRoute::class),

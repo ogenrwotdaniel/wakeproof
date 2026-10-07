@@ -17,3 +17,18 @@ fun formatDurationMinutes(minutes: Int): String {
         else -> "${hours}h ${rest}m"
     }
 }
+
+/**
+ * The same duration squeezed to fit above a chart bar a seventh of a phone
+ * wide: "45m", "2h", "1h20".
+ */
+fun formatCompactDuration(minutes: Int): String {
+    val total = minutes.coerceAtLeast(0)
+    val hours = total / 60
+    val rest = total % 60
+    return when {
+        hours == 0 -> "${rest}m"
+        rest == 0 -> "${hours}h"
+        else -> "%dh%02d".format(hours, rest)
+    }
+}

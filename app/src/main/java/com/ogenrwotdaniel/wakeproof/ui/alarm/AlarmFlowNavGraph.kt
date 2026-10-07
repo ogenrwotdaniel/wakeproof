@@ -15,13 +15,16 @@ import com.ogenrwotdaniel.wakeproof.ui.verify.WaterVerifyScreen
 
 /**
  * Navigation for the lock-screen alarm flow: ringing → the verification screen
- * matching the alarm type. Lives in [com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingActivity],
+ * matching the alarm type. [onVerified] silences the alarm the moment the goal
+ * is met; [onFinish] closes the flow once the success screen has been shown.
+ * Lives in [com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingActivity],
  * separate from the main app graph.
  */
 @Composable
 fun AlarmFlowNavGraph(
     viewModel: AlarmRingingViewModel,
     onVerified: () -> Unit,
+    onFinish: () -> Unit,
     onEmergencyDismiss: () -> Unit,
     onSnooze: () -> Unit
 ) {
@@ -44,6 +47,7 @@ fun AlarmFlowNavGraph(
         composable<PushupVerifyRoute> {
             PushupVerifyScreen(
                 onVerified = onVerified,
+                onFinish = onFinish,
                 onEmergencyDismiss = onEmergencyDismiss,
                 snoozesLeft = snoozesLeft,
                 onSnooze = { viewModel.snooze(onSnooze) }
@@ -52,6 +56,7 @@ fun AlarmFlowNavGraph(
         composable<WaterVerifyRoute> {
             WaterVerifyScreen(
                 onVerified = onVerified,
+                onFinish = onFinish,
                 onEmergencyDismiss = onEmergencyDismiss,
                 snoozesLeft = snoozesLeft,
                 onSnooze = { viewModel.snooze(onSnooze) }

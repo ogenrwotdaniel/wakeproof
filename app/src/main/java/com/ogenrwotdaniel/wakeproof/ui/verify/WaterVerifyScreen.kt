@@ -3,6 +3,8 @@ package com.ogenrwotdaniel.wakeproof.ui.verify
 import android.graphics.BitmapFactory
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -24,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import android.util.Size
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +66,7 @@ import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
 @Composable
 fun WaterVerifyScreen(
     onVerified: () -> Unit,
+    onFinish: () -> Unit,
     onEmergencyDismiss: () -> Unit,
     snoozesLeft: Int,
     onSnooze: () -> Unit,
@@ -77,6 +81,10 @@ fun WaterVerifyScreen(
         if (!cameraPermission.status.isGranted) cameraPermission.launchPermissionRequest()
     }
     // Duck the ringtone while the wizard runs; quietest while drinking/proving.
+    // As with pushups: the alarm stops the moment the target is met.
+    LaunchedEffect(state.step) {
+        if (state.step == WaterVerifyViewModel.Step.SUCCESS) onVerified()
+    }
     LaunchedEffect(state.step) {
         val volume = when (state.step) {
             WaterVerifyViewModel.Step.CAPTURE_AFTER, WaterVerifyViewModel.Step.UPLOADING -> 0.2f
@@ -210,9 +218,7 @@ fun WaterVerifyScreen(
                             )
                         }
                         Spacer(Modifier.height(24.dp))
-                        Button(onClick = onVerified, modifier = Modifier.fillMaxWidth()) {
-                            Text("Silence the alarm")
-                        }
+                        AutoReturnFooter(onFinish = onFinish)
                     }
 
                     WaterVerifyViewModel.Step.FALLBACK -> Column(
@@ -230,7 +236,12 @@ fun WaterVerifyScreen(
                         HoldToDismissButton(
                             label = "I drank it — hold 30 s",
                             holdSeconds = 30,
-                            onCompleted = { viewModel.logHonorMode(onVerified) }
+                            onCompleted = {
+                                viewModel.logHonorMode {
+                                    onVerified()
+                                    onFinish()
+                                }
+                            }
                         )
                     }
                 }
@@ -276,7 +287,25 @@ private fun CameraDeniedHint(modifier: Modifier = Modifier) {
 private fun PhotoCaptureView(onCaptured: (ByteArray) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val imageCapture = remember { ImageCapture.Builder().build() }
+    // Neither reader needs a 12 MP frame: the on-device detector resamples to a
+    // few hundred rows and the cloud path re-encodes to ~1 K. Capturing near
+    // that size skips seconds of sensor readout, JPEG encode and decode on the
+    // way to the answer.
+    val imageCapture = remember {
+        ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(1280, 960),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    )
+                    .build()
+            )
+            .build()
+    }
     var useFrontCamera by remember { mutableStateOf(false) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 

@@ -1,6 +1,5 @@
 package com.ogenrwotdaniel.wakeproof.ui.home
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -26,20 +26,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.BuildConfig
+import com.ogenrwotdaniel.wakeproof.data.DayOutcome
 import com.ogenrwotdaniel.wakeproof.data.DayStat
+import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
+import com.ogenrwotdaniel.wakeproof.ui.components.LabeledBarChart
+import com.ogenrwotdaniel.wakeproof.ui.components.chartDayLabel
+import com.ogenrwotdaniel.wakeproof.ui.formatCompactDuration
+import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
-import java.time.DayOfWeek
 import java.time.LocalDate
 
 /**
- * Dashboard: streak, today's goal cards, 7-day history chart (pure Canvas),
+ * Dashboard: focus streak, today's goal cards, 7-day focus chart,
  * and navigation. A day counts toward the streak when every alarm due that day
  * was verified — the targets come from the schedule, not from a constant.
  */
@@ -51,6 +54,7 @@ fun HomeScreen(
     onOpenUsage: () -> Unit,
     onOpenAgenda: () -> Unit,
     onOpenFlashcards: () -> Unit,
+    onOpenForest: () -> Unit,
     onOpenCorpusCapture: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
@@ -77,9 +81,8 @@ fun HomeScreen(
         ) {
             Text(text = "WakeProof", style = MaterialTheme.typography.displaySmall)
             Text(
-                text = "🔥 ${streak.days}-day streak" +
-                    (if (streak.asterisk) " *" else "") +
-                    (if (streak.asterisk) "  (* includes honor-mode water)" else ""),
+                text = "🔥 ${streak.days}-day focus streak" +
+                    if (streak.best > streak.days) "  ·  best ${streak.best}" else "",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -121,6 +124,10 @@ fun HomeScreen(
                 }
             }
 
+            // First and biggest: since 1.5 the streak is decided by focus time
+            // alone, so this is the card the day is actually won on.
+            FocusGoalCard(focusMinutes = today.focusMinutes, goalMinutes = focusGoal)
+
             StatusCard(
                 title = "Pushups",
                 value = when {
@@ -144,13 +151,6 @@ fun HomeScreen(
                 else "${today.waterMl} ml today",
                 highlight = today.waterDone
             )
-            StatusCard(
-                title = "Focus",
-                value = "${today.focusMinutes}/$focusGoal min",
-                detail = if (today.focusMinutes >= focusGoal) "Daily goal reached 🎉"
-                else "Daily focus goal",
-                highlight = today.focusMinutes >= focusGoal
-            )
 
             ExamSection(
                 exams = exams,
@@ -159,11 +159,11 @@ fun HomeScreen(
             )
 
             Text(
-                text = "Last 7 days",
+                text = "Focus — last 7 days",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            WeekChart(week = week)
+            WeekChart(week = week, goalMinutes = focusGoal)
 
             // Six identical filled buttons stacked full-width gave every
             // destination the same weight, so the screen ended in a wall with
@@ -172,6 +172,7 @@ fun HomeScreen(
             Button(onClick = onOpenPomodoro, modifier = Modifier.fillMaxWidth()) {
                 Text(if (timer.active) "Back to the timer" else "Start a study session")
             }
+            NavigationRow("Forest", "A tree for every focus block", onOpenForest)
             NavigationRow("Flashcards", "Review what's due today", onOpenFlashcards)
             NavigationRow("Agenda", "Today's calendar events", onOpenAgenda)
             NavigationRow("Screen time", "Usage and daily app limits", onOpenUsage)
@@ -430,64 +431,73 @@ private fun StatusCard(
 }
 
 /**
- * Bars = the share of that day's goals that were met, where the goals are the
- * alarms due that day (see [com.ogenrwotdaniel.wakeproof.data.dailyGoalsFrom]).
- * A day with no alarms due draws empty rather than full. Red base marks a day
- * with an emergency skip; the label is the weekday letter.
+ * Focus time per day against the daily goal — the same thing the streak is
+ * scored on. Each bar is labelled with its own value, the goal is the dashed
+ * line, and a red dot under a day marks an emergency skip of an alarm.
  */
 @Composable
-private fun WeekChart(week: List<DayStat>, modifier: Modifier = Modifier) {
-    val primary = MaterialTheme.colorScheme.primary
-    val track = MaterialTheme.colorScheme.surfaceVariant
-    val error = MaterialTheme.colorScheme.error
-    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+private fun WeekChart(week: List<DayStat>, goalMinutes: Int, modifier: Modifier = Modifier) {
+    val today = LocalDate.now().toEpochDay()
+    LabeledBarChart(
+        bars = week.map { day ->
+            ChartBar(
+                label = chartDayLabel(day.epochDay, today),
+                value = day.focusMinutes.toFloat(),
+                valueLabel = if (day.focusMinutes > 0) formatCompactDuration(day.focusMinutes) else "",
+                emphasized = day.epochDay == today,
+                reached = day.outcome == DayOutcome.MET,
+                flagged = day.skipped
+            )
+        },
+        goal = goalMinutes.toFloat().takeIf { goalMinutes > 0 },
+        goalLabel = "goal ${formatDurationMinutes(goalMinutes)}",
+        modifier = modifier
+    )
+}
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(96.dp)
-        ) {
-            if (week.isEmpty()) return@Canvas
-            val slot = size.width / week.size
-            val barWidth = slot * 0.5f
-            week.forEachIndexed { index, day ->
-                val fraction = day.goalProgress
-                val left = index * slot + (slot - barWidth) / 2f
-                drawRect(
-                    color = track,
-                    topLeft = Offset(left, 0f),
-                    size = Size(barWidth, size.height)
-                )
-                if (fraction > 0f) {
-                    drawRect(
-                        color = primary,
-                        topLeft = Offset(left, size.height * (1f - fraction)),
-                        size = Size(barWidth, size.height * fraction)
-                    )
-                }
-                if (day.skipped) {
-                    drawRect(
-                        color = error,
-                        topLeft = Offset(left, size.height - 6f),
-                        size = Size(barWidth, 6f)
-                    )
-                }
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            week.forEach { day ->
-                val letter = DayOfWeek.from(LocalDate.ofEpochDay(day.epochDay))
-                    .name.first().toString()
+/**
+ * Today's focus against the goal as a bar, not a fraction: "47/120 min" made you
+ * do the sum, and this is the number the streak now turns on.
+ */
+@Composable
+private fun FocusGoalCard(focusMinutes: Int, goalMinutes: Int, modifier: Modifier = Modifier) {
+    val reached = goalMinutes > 0 && focusMinutes >= goalMinutes
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = if (reached) CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ) else CardDefaults.cardColors()
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(text = "Focus today", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = letter,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = labelColor,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    text = formatDurationMinutes(focusMinutes),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
+            LinearProgressIndicator(
+                progress = {
+                    if (goalMinutes <= 0) 0f
+                    else (focusMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f)
+                },
+                modifier = Modifier.fillMaxWidth().height(8.dp)
+            )
+            Text(
+                text = when {
+                    goalMinutes <= 0 -> "No daily focus goal set"
+                    reached -> "Goal of ${formatDurationMinutes(goalMinutes)} reached — today counts 🔥"
+                    else -> "${formatDurationMinutes(goalMinutes - focusMinutes)} to go for today's " +
+                        "${formatDurationMinutes(goalMinutes)} goal"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Spacer(Modifier.height(4.dp))
     }
 }

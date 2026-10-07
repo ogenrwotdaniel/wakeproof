@@ -48,7 +48,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmDays
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
+import android.app.role.RoleManager
+import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
+import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import java.time.DayOfWeek
 
@@ -66,6 +69,7 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val keyState by viewModel.keyState.collectAsStateWithLifecycle()
     val reliability by viewModel.reliability.collectAsStateWithLifecycle()
+    val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val exportMessage by viewModel.exportMessage.collectAsStateWithLifecycle()
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
@@ -228,8 +232,8 @@ fun SettingsScreen(
             SwitchSetting(
                 label = "Study sound",
                 description = "Sound plays automatically during focus phases. Pick the source " +
-                    "on the Pomodoro screen — an ambient loop (rain, fireplace…) or Spotify, " +
-                    "one or the other. Turn off for silence.",
+                    "on the Pomodoro screen — an ambient loop (rain, fireplace…) or your own " +
+                    "music from this phone, one or the other. Turn off for silence.",
                 checked = settings.focusMusicEnabled,
                 onCheckedChange = viewModel::setFocusMusicEnabled
             )
@@ -242,13 +246,12 @@ fun SettingsScreen(
                     onCommit = viewModel::setSoundFadeSeconds
                 )
                 Text(
-                    text = "The ambient loop eases up from silence when a phase starts and " +
-                        "back down before it ends, instead of snapping on and off. " +
-                        "0 turns fading off. The fade-out starts this many seconds " +
-                        "before the phase ends, so a long fade wants a long phase — " +
-                        "60 s on a 5 min break spends a fifth of it easing away. " +
-                        "Spotify is controlled with media keys, which carry no " +
-                        "volume, so it is unaffected.",
+                    text = "The study sound — a loop or your own music — eases up from " +
+                        "silence when a phase starts and back down before it ends, " +
+                        "instead of snapping on and off. 0 turns fading off. The " +
+                        "fade-out starts this many seconds before the phase ends, so a " +
+                        "long fade wants a long phase — 60 s on a 5 min break spends a " +
+                        "fifth of it easing away.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -308,13 +311,33 @@ fun SettingsScreen(
                 }
             }
 
+            SwitchSetting(
+                label = "Quotes while focusing",
+                description = "A short line under the countdown, a different one each block.",
+                checked = settings.focusQuotes,
+                onCheckedChange = viewModel::setFocusQuotes
+            )
+            SwitchSetting(
+                label = "Grow a tree each focus block",
+                description = "Forest-style: a tree grows while you focus. Leave WakeProof " +
+                    "for anything that isn't a study app for more than 10 seconds and it " +
+                    "withers — that block won't count toward your daily goal. Needs usage " +
+                    "access. An alternative to locking the phone that still lets you " +
+                    "use your study apps.",
+                checked = settings.deepFocus,
+                onCheckedChange = viewModel::setDeepFocus
+            )
+            StudyAppsSection(
+                studyApps = settings.studyApps,
+                installedApps = installedApps,
+                labelOf = viewModel::appLabel,
+                onOpenPicker = viewModel::loadInstalledApps,
+                onToggle = viewModel::toggleStudyApp
+            )
+
             HorizontalDivider()
 
-            SpotifySection(
-                playlistUri = settings.spotifyPlaylistUri,
-                installed = viewModel.spotifyInstalled,
-                onPlaylistChange = viewModel::setSpotifyPlaylistUri
-            )
+            LauncherSection()
 
             HorizontalDivider()
 
@@ -456,66 +479,108 @@ fun SettingsScreen(
 }
 
 /**
- * Spotify hand-off settings: the playlist the study button opens (paste the
- * "Share → Copy link" URL). Whether playback follows the timer is not a switch
- * here — it follows from picking Spotify as the study sound on the Pomodoro
- * screen. No Spotify login happens either: WakeProof only deep-links out and
- * sends media keys, so there is nothing to authorise.
+ * Opt-in to WakeProof's minimalist home screen. Uses the system's own
+ * default-home request rather than a switch of ours, so it is always the phone,
+ * not WakeProof, that decides what Home opens — and going back to One UI Home
+ * is the same system screen every other launcher uses.
  */
 @Composable
-private fun SpotifySection(
-    playlistUri: String,
-    installed: Boolean,
-    onPlaylistChange: (String) -> Unit,
+private fun LauncherSection(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val roleManager = remember { context.getSystemService(RoleManager::class.java) }
+    var isHome by remember { mutableStateOf(roleManager.isRoleHeld(RoleManager.ROLE_HOME)) }
+    val request = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { isHome = roleManager.isRoleHeld(RoleManager.ROLE_HOME) }
+    LifecycleResumeEffect(Unit) {
+        isHome = roleManager.isRoleHeld(RoleManager.ROLE_HOME)
+        onPauseOrDispose { }
+    }
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = "Minimalist home screen", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Replace the home screen with a quiet, text-only one: the time, your focus " +
+                "today, up to ${com.ogenrwotdaniel.wakeproof.launcher.LauncherViewModel.MAX_FAVORITES} " +
+                "pinned apps and a searchable list of the rest. No icons, no badges. Apps " +
+                "you've set a limit on are dimmed and open only after a 5-second pause.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (isHome) {
+            Text(
+                text = "✓ WakeProof is your home screen.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(Intent(android.provider.Settings.ACTION_HOME_SETTINGS))
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Switch back to another home screen") }
+        } else {
+            Button(
+                onClick = {
+                    if (roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                        request.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME))
+                    } else {
+                        context.startActivity(Intent(android.provider.Settings.ACTION_HOME_SETTINGS))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Use WakeProof as home screen") }
+        }
+    }
+}
+
+/**
+ * Apps that count as studying. During a focus block they are safe to switch to
+ * — the tree keeps growing — and on the Screen time page their minutes are
+ * shown as study time rather than counted against you.
+ */
+@Composable
+private fun StudyAppsSection(
+    studyApps: Set<String>,
+    installedApps: List<InstalledApp>,
+    labelOf: (String) -> String,
+    onOpenPicker: () -> Unit,
+    onToggle: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Seeded once per saved value: typing must not be clobbered by DataStore emissions.
-    var draft by remember(playlistUri) { mutableStateOf(playlistUri) }
-
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = "Spotify", style = MaterialTheme.typography.titleMedium)
-        if (!installed) {
-            Text(
-                text = "Spotify isn't installed — the button on the Pomodoro screen will " +
-                    "offer to install it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Focus playlist link") },
-            placeholder = { Text("https://open.spotify.com/playlist/…") },
-            singleLine = true
+    var picking by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(text = "Study apps", style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = "Safe to use mid-focus, and shown as study time on the Screen time page.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { onPlaylistChange(draft) },
-                enabled = draft.trim() != playlistUri
-            ) { Text("Save") }
-            if (playlistUri.isNotBlank()) {
-                OutlinedButton(
-                    onClick = {
-                        draft = ""
-                        onPlaylistChange("")
-                    }
-                ) { Text("Clear") }
+        studyApps.sortedBy { labelOf(it).lowercase() }.forEach { pkg ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = labelOf(pkg), style = MaterialTheme.typography.bodyLarge)
+                TextButton(onClick = { onToggle(pkg) }) { Text("Remove") }
             }
         }
-        Text(
-            text = "In Spotify: playlist → ⋯ → Share → Copy link, then paste it here. " +
-                "Left blank, the button just opens Spotify.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "To let Spotify be your study sound, pick it in the sound row on the " +
-                "Pomodoro screen. It then plays and pauses with the timer, and no ambient " +
-                "loop plays underneath it.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        OutlinedButton(
+            onClick = {
+                onOpenPicker()
+                picking = true
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Add a study app…") }
+    }
+    if (picking) {
+        AppPickerDialog(
+            title = "Study apps",
+            apps = installedApps,
+            marked = studyApps,
+            markLabel = "✓",
+            onPick = { onToggle(it.packageName) },
+            onDismiss = { picking = false }
         )
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,6 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
@@ -52,8 +56,29 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
-/** Seconds of "are you sure?" before an app you have capped opens. */
-private const val MINDFUL_PAUSE_SECONDS = 5
+/**
+ * Seconds of "are you sure?" before an app you have capped opens. Was 5, which
+ * is short enough to wait out on autopilot; 45 is long enough to be dull, and
+ * dull is the point — the urge to open an app rarely survives a minute of
+ * nothing happening.
+ */
+private const val MINDFUL_PAUSE_SECONDS = 45
+
+/** How long each line of [MINDFUL_PAUSE_LINES] stays up. */
+private const val MINDFUL_LINE_SECONDS = 9
+
+/**
+ * Shown one after another while the pause runs. Deliberately plain: no
+ * animation, nothing to look at, and every line an honest reason to tap
+ * "Not now" instead of waiting.
+ */
+private val MINDFUL_PAUSE_LINES = listOf(
+    "Nothing in there is new since last time.",
+    "In ten minutes you won't remember what you saw.",
+    "This wait is the most boring part of your day. The app is the second.",
+    "You could have read a page of your notes by now.",
+    "Still here? The urge usually passes before the timer does."
+)
 
 /**
  * The home screen proper. Two views: HOME (clock, today, favourites) and ALL
@@ -301,10 +326,11 @@ private fun AllApps(
 }
 
 /**
- * Five seconds between tapping a capped app and it opening, with today's usage
- * on screen. Not a wall — the block itself is AppBlockService's job — just a
- * gap long enough for "do I actually want this?" to get a word in, which is
- * where most of the reflexive opens die.
+ * [MINDFUL_PAUSE_SECONDS] between tapping a capped app and it opening, with
+ * today's usage on screen and a slow run of lines arguing for "Not now". Not a
+ * wall — the block itself is AppBlockService's job — just a gap long and dull
+ * enough that "do I actually want this?" wins, which is where most reflexive
+ * opens die. Leaving the screen starts the wait over.
  */
 @Composable
 private fun MindfulPause(
@@ -323,6 +349,18 @@ private fun MindfulPause(
             secondsLeft--
         }
     }
+    // Waiting it out in another app and coming back must not count: the point
+    // is to sit with nothing to do. Leaving the home screen cancels the pause.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) onCancel()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val elapsed = MINDFUL_PAUSE_SECONDS - secondsLeft
+    val line = MINDFUL_PAUSE_LINES[(elapsed / MINDFUL_LINE_SECONDS).coerceAtMost(MINDFUL_PAUSE_LINES.lastIndex)]
     BackHandler(onBack = onCancel)
     Box(
         modifier = Modifier
@@ -350,6 +388,14 @@ private fun MindfulPause(
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
+            Spacer(Modifier.height(32.dp))
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.Gray,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
             Spacer(Modifier.height(32.dp))
             TextButton(onClick = onCancel) {
                 Text("Not now", color = Color.White, fontSize = 20.sp)

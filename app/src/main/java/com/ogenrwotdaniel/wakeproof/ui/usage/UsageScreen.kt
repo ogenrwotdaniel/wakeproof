@@ -44,6 +44,7 @@ import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.AppUsage
 import com.ogenrwotdaniel.wakeproof.data.DayUsage
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
+import com.ogenrwotdaniel.wakeproof.data.CoolingOff
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
@@ -72,6 +73,7 @@ fun UsageScreen(
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
     val pendingChanges by viewModel.pendingChanges.collectAsStateWithLifecycle()
+    val coolingOff by viewModel.coolingOff.collectAsStateWithLifecycle()
     val studyApps by viewModel.studyApps.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val report by viewModel.report.collectAsStateWithLifecycle()
@@ -293,6 +295,10 @@ fun UsageScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Limit another app…") }
+                    CoolingOffPicker(
+                        coolingOff = coolingOff,
+                        onPick = viewModel::setCoolingOffHours
+                    )
 
                     Text(
                         text = "Weekly coach report",
@@ -345,6 +351,7 @@ fun UsageScreen(
             app = app,
             currentLimit = limits[app.packageName],
             pending = pendingChanges[app.packageName],
+            coolingOffHours = coolingOff.hours,
             canEnforceBlocks = viewModel.canEnforceBlocks(),
             onSet = { minutes, mode ->
                 viewModel.setLimit(app.packageName, minutes, mode)
@@ -372,29 +379,70 @@ fun UsageScreen(
 }
 
 /**
+ * How long any loosening of a limit waits. Lengthening applies at once;
+ * shortening is queued behind the current wait (see
+ * [DistractionLimitRepository.requestCoolingOffHours]), and says when it lands.
+ */
+@Composable
+private fun CoolingOffPicker(coolingOff: CoolingOff, onPick: (Int) -> Unit) {
+    val context = LocalContext.current
+    Column {
+        Text(
+            text = "Wait before loosening or removing a limit",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DistractionLimitRepository.COOLING_OFF_CHOICES_HOURS.forEach { hours ->
+                FilterChip(
+                    selected = coolingOff.hours == hours,
+                    onClick = { onPick(hours) },
+                    label = { Text("$hours h") }
+                )
+            }
+        }
+        val queued = coolingOff.pendingHours
+        Text(
+            text = if (queued != null) {
+                "⌛ Becomes $queued h on ${landsAt(context, coolingOff.pendingAtMillis)}. " +
+                    "Shortening the wait has to sit out the current one first."
+            } else {
+                "A longer wait applies at once. A shorter one waits out the current wait first."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (queued != null) MaterialTheme.colorScheme.tertiary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
  * "Becomes 60 min · Nudge on Thu 09:12" — when a queued loosening lands, in the
  * phone's own clock format.
  */
 private fun pendingLabel(context: android.content.Context, change: PendingLimitChange): String {
-    val at = java.time.Instant.ofEpochMilli(change.effectiveAtMillis)
-        .atZone(java.time.ZoneId.systemDefault())
-    val day = at.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
-    val time = formatAlarmTime(context, at.hour, at.minute)
     val what = change.limit?.let {
         "becomes ${it.minutes} min · ${it.mode.name.lowercase().replaceFirstChar(Char::uppercase)}"
     } ?: "limit removed"
-    return "⌛ ${what.replaceFirstChar(Char::uppercase)} on $day $time"
+    return "⌛ ${what.replaceFirstChar(Char::uppercase)} on ${landsAt(context, change.effectiveAtMillis)}"
+}
+
+/** "Thu 09:12" for [millis], in the phone's own clock format. */
+private fun landsAt(context: android.content.Context, millis: Long): String {
+    val at = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
+    val day = at.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+    return "$day ${formatAlarmTime(context, at.hour, at.minute)}"
 }
 
 /**
  * Slider dialog for one app's daily cap. Tightening applies now; loosening or
- * removing it is queued for 24 hours — see [DistractionLimitRepository.requestLimit].
+ * removing it is queued for [coolingOffHours] — see [DistractionLimitRepository.requestLimit].
  */
 @Composable
 private fun LimitDialog(
     app: InstalledApp,
     currentLimit: AppLimit?,
     pending: PendingLimitChange?,
+    coolingOffHours: Int,
     canEnforceBlocks: Boolean,
     onSet: (Int?, LimitMode) -> Unit,
     onDismiss: () -> Unit
@@ -447,7 +495,7 @@ private fun LimitDialog(
                     Text(
                         text = buildString {
                             if (loosening) {
-                                append("This loosens the limit, so it waits 24 hours before it ")
+                                append("This loosens the limit, so it waits $coolingOffHours hours before it ")
                                 append("takes effect. Until then the current ")
                                 append("${currentLimit?.minutes} min cap keeps applying. ")
                                 append("Tightening a limit always applies at once.")
@@ -478,13 +526,13 @@ private fun LimitDialog(
                 currentLimit, AppLimit(minutes.toInt(), mode)
             )
             TextButton(onClick = { onSet(minutes.toInt(), mode) }) {
-                Text(if (loosening) "Set in 24 h" else "Set")
+                Text(if (loosening) "Set in $coolingOffHours h" else "Set")
             }
         },
         dismissButton = {
             Row {
                 if (currentLimit != null) {
-                    TextButton(onClick = { onSet(null, mode) }) { Text("Remove in 24 h") }
+                    TextButton(onClick = { onSet(null, mode) }) { Text("Remove in $coolingOffHours h") }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }

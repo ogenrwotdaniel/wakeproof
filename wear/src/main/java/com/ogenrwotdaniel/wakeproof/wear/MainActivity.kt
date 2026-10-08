@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -200,14 +199,17 @@ class MainActivity : Activity() {
         }
         // Self-tick from the absolute finish time so the display is smooth even
         // though the phone only pushes on transitions.
+        // Rounded UP and flipped on the finish time's own second boundaries, as
+        // the phone does — flooring, on unaligned boundaries, ran up to a second
+        // behind the phone on top of any clock difference.
         while (coroutineContext.isActive) {
-            val remaining = ((timer.finishAtMillis - System.currentTimeMillis()) / 1000L)
-                .coerceAtLeast(0L)
+            val msLeft = (timer.finishAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+            val remaining = (msLeft + 999) / 1000L
             val minutes = remaining / 60
             val seconds = remaining % 60
             textView.text = "$phase\n\n%d:%02d".format(minutes, seconds)
             if (remaining <= 0L) break
-            delay(1000L - SystemClock.elapsedRealtime() % 1000L)
+            delay((msLeft - 1) % 1000L + 1)
         }
     }
 

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.CachedReport
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
+import com.ogenrwotdaniel.wakeproof.data.CoolingOff
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import android.content.Context
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
@@ -149,6 +150,14 @@ class UsageViewModel @Inject constructor(
             // Picking up (or dropping) the last blocked app starts/stops the guard.
             AppBlockService.sync(context)
         }
+    }
+
+    /** The wait before a loosening lands (24 or 48 h), and any shorter one queued. */
+    val coolingOff: StateFlow<CoolingOff> = limitRepository.coolingOff
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CoolingOff())
+
+    fun setCoolingOffHours(hours: Int) {
+        viewModelScope.launch { limitRepository.requestCoolingOffHours(hours) }
     }
 
     fun cancelPendingLimit(packageName: String) {

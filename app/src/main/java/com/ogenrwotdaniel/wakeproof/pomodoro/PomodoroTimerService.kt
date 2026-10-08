@@ -108,6 +108,14 @@ class PomodoroTimerService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
+    /**
+     * [SystemClock.elapsedRealtime] at which the running phase reaches zero.
+     * The countdown is READ from this rather than decremented once per
+     * `delay(1_000)`: each delay overshoots by a few ms, so a decrementing
+     * timer fell seconds behind real time over a block — and behind the watch,
+     * which counts from the absolute finish time it was sent.
+     */
+    private var phaseDeadline = 0L
     private var focusSeconds = 25 * 60
     private var shortBreakSeconds = 5 * 60
     private var longBreakSeconds = 15 * 60
@@ -561,9 +569,10 @@ class PomodoroTimerService : Service() {
      * fade length, so repeated calls cannot restart the ramp and stall it short of
      * silence.
      */
-    private fun maybeFadeOutBeforePhaseEnd(s: PomodoroState) {
+    private fun maybeFadeOutBeforePhaseEnd(s: PomodoroState, previousRemaining: Int) {
         val fade = latestSettings.soundFadeSeconds
-        if (fade <= 0 || s.remainingSeconds != fade) return
+        // A crossing rather than an equality: a late tick can step over a value.
+        if (fade <= 0 || previousRemaining <= fade || s.remainingSeconds > fade) return
         if (musicPlayer?.isPlaying != true) return
         val nextPhaseWantsSound = if (s.phase == PomodoroPhase.FOCUS) {
             // A timed session that ends on this block goes quiet for good.
@@ -575,18 +584,27 @@ class PomodoroTimerService : Service() {
         if (!nextPhaseWantsSound) pauseMusic(fade)
     }
 
+    private fun armDeadline() {
+        phaseDeadline = SystemClock.elapsedRealtime() + _state.value.remainingSeconds * 1_000L
+    }
+
     private fun startTicker() {
         tickerJob?.cancel()
+        armDeadline()
         tickerJob = scope.launch {
             while (_state.value.running) {
-                delay(1_000)
+                // Sleep to the next whole-second boundary of the deadline, so the
+                // displayed second flips when real time says it should.
+                val msLeft = phaseDeadline - SystemClock.elapsedRealtime()
+                delay(if (msLeft > 0) (msLeft - 1) % 1_000L + 1 else 0L)
                 val current = _state.value
                 if (!current.running) break
-                if (current.remainingSeconds <= 1) {
+                val remaining = remainingSecondsAt(phaseDeadline, SystemClock.elapsedRealtime())
+                if (remaining <= 0) {
                     onPhaseComplete()
-                } else {
-                    _state.update { it.copy(remainingSeconds = it.remainingSeconds - 1) }
-                    maybeFadeOutBeforePhaseEnd(_state.value)
+                } else if (remaining != current.remainingSeconds) {
+                    _state.update { it.copy(remainingSeconds = remaining) }
+                    maybeFadeOutBeforePhaseEnd(_state.value, current.remainingSeconds)
                 }
                 updateNotification()
             }
@@ -638,6 +656,7 @@ class PomodoroTimerService : Service() {
                     completedFocusSessions = done
                 )
             }
+            armDeadline()
         } else {
             _state.update {
                 it.copy(
@@ -649,6 +668,7 @@ class PomodoroTimerService : Service() {
                     treeAtRisk = false
                 )
             }
+            armDeadline()
         }
         syncWatch()
     }
@@ -739,7 +759,9 @@ class PomodoroTimerService : Service() {
      */
     private fun syncWatch() {
         val s = _state.value
-        val finishAt = if (s.running) System.currentTimeMillis() + s.remainingSeconds * 1_000L else 0L
+        val finishAt = if (s.running) {
+            System.currentTimeMillis() + (phaseDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        } else 0L
         scope.launch {
             runCatching {
                 wearTimerSync.push(s.active, s.running, s.phase.label, s.remainingSeconds, finishAt)

@@ -156,6 +156,7 @@ dependencies {
     // orientation applied, and a sideways bottle defeats the whole method.
     implementation(libs.androidx.exifinterface)
     implementation(libs.mlkit.pose.detection)
+    implementation(libs.play.review.ktx)
 
     // Networking (Kimi API)
     implementation(libs.retrofit)

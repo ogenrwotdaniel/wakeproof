@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
+import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -57,7 +58,8 @@ class AlarmScheduler @Inject constructor(
     fun cancel(alarm: Alarm) = cancelById(alarm.id)
 
     /**
-     * Drops every schedule belonging to [alarmId] — daily, snoozed and test —
+     * Drops every schedule belonging to [alarmId] — daily, snoozed, test and
+     * both wake-up check stages —
      * and forgets it in the mirror.
      *
      * Takes an id rather than an [Alarm] because the callers that need it most
@@ -71,8 +73,60 @@ class AlarmScheduler @Inject constructor(
         alarmManager.cancel(
             fireIntent(alarmId, requestCode + TEST_REQUEST_CODE_OFFSET, testFire = true)
         )
+        cancelWakeCheck(alarmId)
+        alarmManager.cancel(wakeCheckPromptIntent(alarmId))
         directBootStore.remove(alarmId)
     }
+
+    /**
+     * Arms the [WakeCheck] prompt for [alarmId], [WakeCheck.DELAY_MINUTES] from
+     * now. setAlarmClock rather than an inexact alarm because the whole point is
+     * to land while the user may be drifting off again — Doze would defer an
+     * ordinary one past it.
+     */
+    fun scheduleWakeCheck(alarmId: Long) {
+        if (!devicePolicy.ringsAlarms) return
+        alarmManager.setAlarmClock(
+            AlarmManager.AlarmClockInfo(
+                System.currentTimeMillis() + WakeCheck.DELAY_MINUTES * 60_000L,
+                showAlarmsIntent()
+            ),
+            wakeCheckPromptIntent(alarmId)
+        )
+    }
+
+    /**
+     * Arms the re-ring that an unanswered wake-up check turns into. Returns false
+     * on a companion device, where nothing may ring.
+     */
+    fun scheduleWakeCheckReRing(alarmId: Long): Boolean {
+        if (!devicePolicy.ringsAlarms) return false
+        alarmManager.setAlarmClock(
+            AlarmManager.AlarmClockInfo(
+                System.currentTimeMillis() + WakeCheck.ANSWER_MINUTES * 60_000L,
+                showAlarmsIntent()
+            ),
+            fireIntent(alarmId, requestCode = alarmId.toInt() + WAKE_CHECK_RERING_REQUEST_CODE_OFFSET)
+        )
+        return true
+    }
+
+    /** "I'm up": drops the pending re-ring. The prompt has already fired by then. */
+    fun cancelWakeCheck(alarmId: Long) {
+        alarmManager.cancel(
+            fireIntent(alarmId, alarmId.toInt() + WAKE_CHECK_RERING_REQUEST_CODE_OFFSET)
+        )
+    }
+
+    private fun wakeCheckPromptIntent(alarmId: Long): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            alarmId.toInt() + WAKE_CHECK_PROMPT_REQUEST_CODE_OFFSET,
+            Intent(context, WakeCheckReceiver::class.java)
+                .setAction(WakeCheck.ACTION_PROMPT)
+                .putExtra(EXTRA_ALARM_ID, alarmId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
     /**
      * Rings [alarmId] again in [minutes], without touching its daily schedule —
@@ -95,7 +149,7 @@ class AlarmScheduler @Inject constructor(
      * (AlarmManager → receiver → service → full-screen intent) without touching
      * its daily schedule — a distinct request code keeps the PendingIntents apart.
      */
-    fun scheduleTestFire(alarm: Alarm, delaySeconds: Int) {
+    fun scheduleTestFire(alarm: Alarm, delaySeconds: Int, mission: AlarmType? = null) {
         if (!devicePolicy.ringsAlarms) return
         alarmManager.setAlarmClock(
             AlarmManager.AlarmClockInfo(
@@ -105,18 +159,25 @@ class AlarmScheduler @Inject constructor(
             fireIntent(
                 alarm.id,
                 requestCode = alarm.id.toInt() + TEST_REQUEST_CODE_OFFSET,
-                testFire = true
+                testFire = true,
+                mission = mission
             )
         )
     }
 
-    private fun fireIntent(alarmId: Long, requestCode: Int, testFire: Boolean = false): PendingIntent =
+    private fun fireIntent(
+        alarmId: Long,
+        requestCode: Int,
+        testFire: Boolean = false,
+        mission: AlarmType? = null
+    ): PendingIntent =
         PendingIntent.getBroadcast(
             context,
             requestCode,
             Intent(context, AlarmReceiver::class.java)
                 .putExtra(EXTRA_ALARM_ID, alarmId)
-                .putExtra(EXTRA_TEST_FIRE, testFire),
+                .putExtra(EXTRA_TEST_FIRE, testFire)
+                .putExtra(EXTRA_MISSION, mission?.name),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -137,5 +198,7 @@ class AlarmScheduler @Inject constructor(
     private companion object {
         const val TEST_REQUEST_CODE_OFFSET = 10_000
         const val SNOOZE_REQUEST_CODE_OFFSET = 20_000
+        const val WAKE_CHECK_PROMPT_REQUEST_CODE_OFFSET = 30_000
+        const val WAKE_CHECK_RERING_REQUEST_CODE_OFFSET = 40_000
     }
 }

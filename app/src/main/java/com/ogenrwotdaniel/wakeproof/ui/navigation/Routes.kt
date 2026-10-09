@@ -20,6 +20,9 @@ data object PushupVerifyRoute
 data object WaterVerifyRoute
 
 @Serializable
+data object MathVerifyRoute
+
+@Serializable
 data object PomodoroRoute
 
 @Serializable

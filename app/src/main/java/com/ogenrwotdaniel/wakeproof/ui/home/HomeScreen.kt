@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.home
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +71,11 @@ fun HomeScreen(
     val timer by viewModel.timer.collectAsStateWithLifecycle()
     var testArmed by remember { mutableStateOf(false) }
     var addingExam by remember { mutableStateOf(false) }
+
+    val activity = LocalActivity.current
+    LaunchedEffect(streak.days) {
+        if (activity != null && viewModel.claimReviewPrompt(streak.days)) launchPlayReview(activity)
+    }
 
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -203,6 +210,15 @@ fun HomeScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Test-fire water alarm (10 s)") }
+                // Borrows the pushup alarm and swaps its mission, so trying the
+                // math flow creates no MATH row for older builds to choke on.
+                OutlinedButton(
+                    onClick = {
+                        viewModel.testFire(AlarmType.PUSHUP, mission = AlarmType.MATH)
+                        testArmed = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Test-fire math alarm (10 s)") }
                 if (testArmed) {
                     Text(
                         text = "Armed — lock your phone now to test the lock-screen wake.",

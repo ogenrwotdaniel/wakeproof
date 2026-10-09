@@ -4,8 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.alarm.SnoozeStore
+import com.ogenrwotdaniel.wakeproof.alarm.WakeCheck
+import com.ogenrwotdaniel.wakeproof.alarm.WakeCheckStore
+import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
+import com.ogenrwotdaniel.wakeproof.alarm.EXTRA_MISSION
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
+import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -13,6 +18,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -23,7 +30,9 @@ import kotlinx.coroutines.launch
 class AlarmRingingViewModel @Inject constructor(
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
-    private val snoozeStore: SnoozeStore
+    private val snoozeStore: SnoozeStore,
+    private val wakeCheckStore: WakeCheckStore,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val alarmId = MutableStateFlow(-1L)
@@ -33,13 +42,20 @@ class AlarmRingingViewModel @Inject constructor(
     /** Snoozes this alarm has left today; 0 hides the button. */
     val snoozesLeft: StateFlow<Int> = _snoozesLeft
 
+    private val missionOverride = MutableStateFlow<AlarmType?>(null)
+
     val alarm: StateFlow<Alarm?> = alarmId
         // Room is unreadable before the device's first unlock; the screen
         // falls back to its generic text on null rather than crashing.
         .flatMapLatest { id -> repository.observeAlarm(id).catch { emit(null) } }
+        .combine(missionOverride) { alarm, mission ->
+            if (alarm != null && mission != null) alarm.copy(type = mission) else alarm
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun setAlarmId(id: Long) {
+    /** [mission] is a debug test fire's [EXTRA_MISSION]; null for every real alarm. */
+    fun setAlarmId(id: Long, mission: String? = null) {
+        missionOverride.value = mission?.let { name -> AlarmType.entries.firstOrNull { it.name == name } }
         alarmId.value = id
         _snoozesLeft.value = if (id == -1L) 0 else snoozeStore.remaining(id)
     }
@@ -62,12 +78,22 @@ class AlarmRingingViewModel @Inject constructor(
         onSnoozed()
     }
 
-    /** Marks today's goal done for this alarm, then runs [onDone] on the main thread. */
+    /**
+     * Marks today's goal done for this alarm and arms the [WakeCheck], then runs
+     * [onDone] on the main thread.
+     *
+     * The check is skipped when the setting cannot be read (before the first
+     * unlock DataStore is unreadable): adding a ring the user may have switched
+     * off is worse than missing one check.
+     */
     fun markCompletedToday(onDone: () -> Unit) {
         viewModelScope.launch {
-            alarmId.value.takeIf { it != -1L }?.let {
+            alarmId.value.takeIf { it != -1L }?.let { id ->
                 // Never let a storage failure (e.g. pre-unlock) keep the alarm ringing.
-                runCatching { repository.markCompletedToday(it) }
+                runCatching { repository.markCompletedToday(id) }
+                val wantsCheck = runCatching { settingsRepository.settings.first().wakeUpCheck }
+                    .getOrDefault(false)
+                if (wantsCheck && wakeCheckStore.claimToday(id)) scheduler.scheduleWakeCheck(id)
             }
             onDone()
         }

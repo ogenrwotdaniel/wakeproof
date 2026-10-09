@@ -22,6 +22,7 @@ import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.ogenrwotdaniel.wakeproof.data.backup.BackupRepository
 import com.ogenrwotdaniel.wakeproof.data.backup.backupFilename
@@ -230,6 +231,18 @@ class SettingsViewModel @Inject constructor(
 
     fun setPushupTarget(value: Int) {
         viewModelScope.launch { settingsRepository.setPushupTarget(value.coerceIn(5, 50)) }
+    }
+
+    fun setMathProblems(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setMathProblems(
+                value.coerceIn(MathChallenge.MIN_PROBLEMS, MathChallenge.MAX_PROBLEMS)
+            )
+        }
+    }
+
+    fun setWakeUpCheck(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setWakeUpCheck(value) }
     }
 
     fun setWaterAmountMl(value: Int) {

@@ -136,6 +136,13 @@
             android:directBootAware="true"
             android:exported="false" />
 
+        <!-- Wake-up check prompt + "I'm up". Direct-boot aware for the same
+             reason as AlarmReceiver: a verification can precede the first unlock. -->
+        <receiver
+            android:name=".alarm.WakeCheckReceiver"
+            android:directBootAware="true"
+            android:exported="false" />
+
         <receiver
             android:name=".alarm.BootReceiver"
             android:directBootAware="true"

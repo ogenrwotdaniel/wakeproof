@@ -37,8 +37,20 @@ class HomeViewModel @Inject constructor(
     alarmDevicePolicy: AlarmDevicePolicy,
     private val examDao: ExamDao,
     statsRepository: StatsRepository,
-    settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
+
+    /**
+     * Claims the one review request this install gets, if [streakDays] has
+     * earned it. True means the caller should show the sheet now; the flag is
+     * set first, so a crash mid-sheet cannot make the app ask twice.
+     */
+    suspend fun claimReviewPrompt(streakDays: Int): Boolean {
+        val asked = runCatching { settingsRepository.reviewPrompted() }.getOrDefault(true)
+        if (!shouldAskForReview(streakDays, asked)) return false
+        settingsRepository.markReviewPrompted()
+        return true
+    }
 
     /** Upcoming exams (today onward) for the countdown section. */
     val exams: StateFlow<List<Exam>> = examDao.observeUpcoming(LocalDate.now().toEpochDay())
@@ -103,10 +115,10 @@ class HomeViewModel @Inject constructor(
      * Fires the first alarm of [type] in [TEST_FIRE_DELAY_SECONDS] seconds through
      * the real AlarmManager pipeline — lock the phone to test the full-screen wake.
      */
-    fun testFire(type: AlarmType) {
+    fun testFire(type: AlarmType, mission: AlarmType? = null) {
         viewModelScope.launch {
             repository.firstAlarmOfType(type)?.let {
-                scheduler.scheduleTestFire(it, TEST_FIRE_DELAY_SECONDS)
+                scheduler.scheduleTestFire(it, TEST_FIRE_DELAY_SECONDS, mission)
             }
         }
     }

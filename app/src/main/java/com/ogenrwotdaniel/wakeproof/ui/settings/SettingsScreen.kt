@@ -52,7 +52,9 @@ import android.app.role.RoleManager
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
+import com.ogenrwotdaniel.wakeproof.alarm.WakeCheck
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge
 import java.time.DayOfWeek
 
 /**
@@ -169,6 +171,22 @@ fun SettingsScreen(
                 range = 5f..50f,
                 unit = "reps",
                 onCommit = viewModel::setPushupTarget
+            )
+            SliderSetting(
+                label = "Math problems in a row",
+                value = settings.mathProblems,
+                range = MathChallenge.MIN_PROBLEMS.toFloat()..MathChallenge.MAX_PROBLEMS.toFloat(),
+                unit = "sums",
+                onCommit = viewModel::setMathProblems,
+                steps = MathChallenge.MAX_PROBLEMS - MathChallenge.MIN_PROBLEMS - 1
+            )
+            SwitchSetting(
+                label = "Wake-up check",
+                description = "${WakeCheck.DELAY_MINUTES} minutes after you dismiss an alarm, " +
+                    "a notification asks if you're still up. Ignore it for " +
+                    "${WakeCheck.ANSWER_MINUTES} minutes and the alarm rings again.",
+                checked = settings.wakeUpCheck,
+                onCheckedChange = viewModel::setWakeUpCheck
             )
             SliderSetting(
                 label = "Water per alarm",
@@ -707,7 +725,7 @@ private fun AddAlarmDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // CUSTOM is left out on purpose: it has no verification screen,
                     // so offering it here would create an alarm nothing can dismiss.
-                    listOf(AlarmType.PUSHUP, AlarmType.WATER).forEach { candidate ->
+                    listOf(AlarmType.PUSHUP, AlarmType.WATER, AlarmType.MATH).forEach { candidate ->
                         FilterChip(
                             selected = candidate == type,
                             onClick = { type = candidate },

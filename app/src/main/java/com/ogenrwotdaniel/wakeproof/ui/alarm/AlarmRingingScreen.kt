@@ -78,6 +78,7 @@ fun AlarmRingingScreen(
                 text = when (alarm?.type) {
                     AlarmType.WATER -> "Drink your water and prove it with the camera."
                     AlarmType.PUSHUP -> "Do your pushups in front of the camera."
+                    AlarmType.MATH -> "Solve a few sums. Works in the dark, no camera."
                     else -> "Complete your verification to silence the alarm."
                 },
                 style = MaterialTheme.typography.bodyLarge,

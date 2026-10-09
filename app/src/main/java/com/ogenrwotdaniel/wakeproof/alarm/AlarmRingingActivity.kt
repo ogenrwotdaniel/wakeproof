@@ -29,7 +29,9 @@ class AlarmRingingActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
 
-        viewModel.setAlarmId(intent.getLongExtra(EXTRA_ALARM_ID, -1L))
+        viewModel.setAlarmId(
+            intent.getLongExtra(EXTRA_ALARM_ID, -1L), intent.getStringExtra(EXTRA_MISSION)
+        )
 
         setContent {
             WakeProofTheme {
@@ -67,6 +69,8 @@ class AlarmRingingActivity : ComponentActivity() {
     // marked complete instead of the one actually ringing.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        viewModel.setAlarmId(intent.getLongExtra(EXTRA_ALARM_ID, -1L))
+        viewModel.setAlarmId(
+            intent.getLongExtra(EXTRA_ALARM_ID, -1L), intent.getStringExtra(EXTRA_MISSION)
+        )
     }
 }

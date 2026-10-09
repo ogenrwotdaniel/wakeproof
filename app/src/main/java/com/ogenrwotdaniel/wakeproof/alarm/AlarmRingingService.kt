@@ -69,6 +69,7 @@ class AlarmRingingService : Service() {
             return START_NOT_STICKY
         }
         val alarmId = intent?.getLongExtra(EXTRA_ALARM_ID, -1L) ?: -1L
+        mission = intent?.getStringExtra(EXTRA_MISSION)
 
         createNotificationChannel()
         startForeground(
@@ -115,12 +116,16 @@ class AlarmRingingService : Service() {
             startActivity(
                 Intent(this, AlarmRingingActivity::class.java)
                     .putExtra(EXTRA_ALARM_ID, alarmId)
+                    .putExtra(EXTRA_MISSION, mission)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         } catch (_: Exception) {
             // Overlay permission revoked or launch blocked: heads-up notification remains.
         }
     }
+
+    /** Debug test fires only: see [EXTRA_MISSION]. Null for every real alarm. */
+    private var mission: String? = null
 
     private fun stopRinging() {
         player?.release()
@@ -188,6 +193,7 @@ class AlarmRingingService : Service() {
             alarmId.toInt(),
             Intent(this, AlarmRingingActivity::class.java)
                 .putExtra(EXTRA_ALARM_ID, alarmId)
+                .putExtra(EXTRA_MISSION, mission)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -206,6 +212,7 @@ class AlarmRingingService : Service() {
     private fun contentTextFor(alarm: Alarm) = when (alarm.type) {
         AlarmType.PUSHUP -> "Pushups to silence it. No shortcuts."
         AlarmType.WATER -> "Drink your water and prove it."
+        AlarmType.MATH -> "Solve the sums to silence it."
         AlarmType.CUSTOM -> "Complete your verification."
     }
 
@@ -219,9 +226,11 @@ class AlarmRingingService : Service() {
         private const val RAMP_DURATION_MS = 60_000L
         private const val RAMP_STEPS = 30
 
-        fun start(context: Context, alarmId: Long) {
+        fun start(context: Context, alarmId: Long, mission: String? = null) {
             context.startForegroundService(
-                Intent(context, AlarmRingingService::class.java).putExtra(EXTRA_ALARM_ID, alarmId)
+                Intent(context, AlarmRingingService::class.java)
+                    .putExtra(EXTRA_ALARM_ID, alarmId)
+                    .putExtra(EXTRA_MISSION, mission)
             )
         }
 

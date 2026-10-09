@@ -10,7 +10,7 @@ import java.util.UUID
 
 /** Which daily goal a log entry belongs to. */
 @Serializable
-enum class GoalKind { PUSHUP, WATER, FOCUS }
+enum class GoalKind { PUSHUP, WATER, FOCUS, MATH }
 
 /**
  * How the goal was completed. VERIFIED = camera/API proof, UNVERIFIED =
@@ -23,7 +23,7 @@ enum class CompletionStatus { VERIFIED, UNVERIFIED, SKIPPED }
 /**
  * One completed (or skipped) goal instance. [epochDay] is
  * [java.time.LocalDate.toEpochDay]; [amount] is reps for PUSHUP, ml for WATER,
- * minutes for FOCUS.
+ * minutes for FOCUS, problems solved for MATH.
  */
 @Entity(
     tableName = "completion_logs",

@@ -8,9 +8,15 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-/** What the user must prove to dismiss an alarm. */
+/**
+ * What the user must prove to dismiss an alarm.
+ *
+ * Stored by NAME (Room's default enum mapping, and the backup JSON), so a new
+ * value is safe to append — but a build that predates it cannot read a row
+ * carrying it, so every synced device must be updated together.
+ */
 @Serializable
-enum class AlarmType { PUSHUP, WATER, CUSTOM }
+enum class AlarmType { PUSHUP, WATER, CUSTOM, MATH }
 
 /**
  * A daily repeating alarm. [lastCompletedEpochDay] records the most recent day

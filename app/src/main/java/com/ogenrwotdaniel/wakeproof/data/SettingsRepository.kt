@@ -22,6 +22,14 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 /** User-tunable settings (DataStore-backed). */
 data class WakeProofSettings(
     val pushupTarget: Int = 15,
+    /** Problems in a row a math alarm demands; see [com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge]. */
+    val mathProblems: Int = 3,
+    /**
+     * Ask "still up?" a few minutes after an alarm is verified, and ring again
+     * if nobody answers. Proving you were awake for thirty seconds is not the
+     * same as getting up, and falling back asleep is how most alarms lose.
+     */
+    val wakeUpCheck: Boolean = true,
     val waterAmountMl: Int = 500,
     /** Full capacity of the bottle you drink from; converts a level drop into ml. */
     val bottleCapacityMl: Int = 750,
@@ -114,6 +122,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     val settings: Flow<WakeProofSettings> = dataStore.data.map { prefs ->
         WakeProofSettings(
             pushupTarget = prefs[PUSHUP_TARGET] ?: 15,
+            mathProblems = prefs[MATH_PROBLEMS] ?: 3,
+            wakeUpCheck = prefs[WAKE_UP_CHECK] ?: true,
             waterAmountMl = prefs[WATER_AMOUNT_ML] ?: 500,
             bottleCapacityMl = prefs[BOTTLE_CAPACITY_ML] ?: 750,
             emergencyHoldSeconds = prefs[EMERGENCY_HOLD_SECONDS] ?: 60,
@@ -144,6 +154,11 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     }
 
     suspend fun setPushupTarget(value: Int) = dataStore.edit { it[PUSHUP_TARGET] = value }
+    /** Whether the Play review sheet has been requested — once per install, ever. */
+    suspend fun reviewPrompted(): Boolean = dataStore.data.first()[REVIEW_PROMPTED] ?: false
+    suspend fun markReviewPrompted() = dataStore.edit { it[REVIEW_PROMPTED] = true }
+    suspend fun setMathProblems(value: Int) = dataStore.edit { it[MATH_PROBLEMS] = value }
+    suspend fun setWakeUpCheck(value: Boolean) = dataStore.edit { it[WAKE_UP_CHECK] = value }
     suspend fun setWaterAmountMl(value: Int) = dataStore.edit { it[WATER_AMOUNT_ML] = value }
     suspend fun setBottleCapacityMl(value: Int) = dataStore.edit { it[BOTTLE_CAPACITY_ML] = value }
     suspend fun setEmergencyHoldSeconds(value: Int) = dataStore.edit { it[EMERGENCY_HOLD_SECONDS] = value }
@@ -217,6 +232,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
 
     private companion object {
         val PUSHUP_TARGET = intPreferencesKey("pushup_target")
+        val MATH_PROBLEMS = intPreferencesKey("math_problems")
+        val REVIEW_PROMPTED = booleanPreferencesKey("review_prompted")
+        val WAKE_UP_CHECK = booleanPreferencesKey("wake_up_check")
         val WATER_AMOUNT_ML = intPreferencesKey("water_amount_ml")
         val BOTTLE_CAPACITY_ML = intPreferencesKey("bottle_capacity_ml")
         val EMERGENCY_HOLD_SECONDS = intPreferencesKey("emergency_hold_seconds")

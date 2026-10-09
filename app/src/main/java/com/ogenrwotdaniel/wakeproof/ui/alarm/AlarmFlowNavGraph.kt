@@ -8,8 +8,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.ui.navigation.AlarmRingingRoute
+import com.ogenrwotdaniel.wakeproof.ui.navigation.MathVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.PushupVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.WaterVerifyRoute
+import com.ogenrwotdaniel.wakeproof.ui.verify.MathVerifyScreen
 import com.ogenrwotdaniel.wakeproof.ui.verify.PushupVerifyScreen
 import com.ogenrwotdaniel.wakeproof.ui.verify.WaterVerifyScreen
 
@@ -39,6 +41,7 @@ fun AlarmFlowNavGraph(
                 onStartVerification = { type ->
                     when (type) {
                         AlarmType.WATER -> navController.navigate(WaterVerifyRoute)
+                        AlarmType.MATH -> navController.navigate(MathVerifyRoute)
                         else -> navController.navigate(PushupVerifyRoute)
                     }
                 }
@@ -46,6 +49,15 @@ fun AlarmFlowNavGraph(
         }
         composable<PushupVerifyRoute> {
             PushupVerifyScreen(
+                onVerified = onVerified,
+                onFinish = onFinish,
+                onEmergencyDismiss = onEmergencyDismiss,
+                snoozesLeft = snoozesLeft,
+                onSnooze = { viewModel.snooze(onSnooze) }
+            )
+        }
+        composable<MathVerifyRoute> {
+            MathVerifyScreen(
                 onVerified = onVerified,
                 onFinish = onFinish,
                 onEmergencyDismiss = onEmergencyDismiss,

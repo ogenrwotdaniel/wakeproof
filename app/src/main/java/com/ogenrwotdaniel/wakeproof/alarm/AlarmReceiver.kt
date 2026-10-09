@@ -43,7 +43,9 @@ class AlarmReceiver : BroadcastReceiver() {
         val testFire = intent.getBooleanExtra(EXTRA_TEST_FIRE, false)
         val unlocked = context.getSystemService(UserManager::class.java).isUserUnlocked
         if (testFire || !unlocked) {
-            AlarmRingingService.start(context, alarmId)
+            AlarmRingingService.start(
+                context, alarmId, mission = intent.getStringExtra(EXTRA_MISSION).takeIf { testFire }
+            )
             if (testFire) return
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.Default).launch {

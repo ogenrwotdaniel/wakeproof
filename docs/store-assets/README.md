@@ -1,8 +1,8 @@
 # Play store assets
 
 What Play Console needs under **Main store listing → Graphics**, and where it
-comes from. Texts (app name, short and full description, release notes) live in
-`docs/STORE_LISTING.md`.
+comes from. Texts (app name, short and full description, release notes) are kept
+in local Play Console notes outside the repository.
 
 | Asset | File | Spec | State |
 |---|---|---|---|

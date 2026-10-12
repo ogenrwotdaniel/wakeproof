@@ -26,3 +26,7 @@ docs/TESTER_EMAIL.md
 tools/water/corpus/
 tools/**/__pycache__/
 tools/water/.pytest_cache/
+
+# Play Console working notes (release checklist, store texts) — kept locally
+docs/PLAY_PUBLISHING.md
+docs/STORE_LISTING.md

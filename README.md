@@ -77,3 +77,9 @@ so it can't be used to cheat.
    verification and study chat.
 3. Run the reliability check from onboarding to confirm alarms can fire on
    your device.
+
+## License
+
+WakeProof is free software, licensed under the
+[GNU General Public License v3.0](LICENSE). You may use, study, modify and
+share it; copies and modified versions must stay under the same license.

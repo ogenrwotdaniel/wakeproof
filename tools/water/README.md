@@ -46,10 +46,10 @@ cheat* true without a key.
 | `import_masks.py` | Derives line labels from a public dataset's liquid masks. |
 | `label.py` | Click the water line on any pile of bottle photos. |
 
-Run everything with the torch venv that already exists — no new environment:
+Run everything with any Python environment that has PyTorch installed:
 
 ```bash
-PY=/home/ogenrwotdaniel/PycharmProjects/ilyasutskever/.venv/bin/python
+PY=python3   # or the path to a venv with torch
 cd tools/water
 $PY -m pytest tests/ -q          # 42 tests, ~2 s
 $PY evaluate.py --synthetic -v   # smoke run, needs no photographs

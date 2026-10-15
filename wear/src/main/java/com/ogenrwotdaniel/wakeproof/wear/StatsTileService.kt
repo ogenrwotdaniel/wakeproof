@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.wear
 
+import android.text.format.DateFormat
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
 import androidx.wear.protolayout.DimensionBuilders.dp
@@ -16,6 +17,9 @@ import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.TileService
 import com.google.common.util.concurrent.ListenableFuture
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Date
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,9 +28,16 @@ import kotlinx.coroutines.guava.future
 
 /**
  * A Wear OS Tile showing today's WakeProof progress — streak, focus vs goal,
- * and water — read from the snapshot the phone mirrors onto the Data Layer.
+ * and water — read from the snapshot the phone mirrors onto the Data Layer,
+ * with focus blocks finished on the watch but not yet synced added on top.
+ *
+ * While the watch's own timer runs, the tile shows the phase and the wall-clock
+ * time it ends ("Break at 14:32") rather than a countdown: a fixed time stays
+ * true without the tile re-rendering every second, which tiles are not for.
+ *
  * Tapping the tile opens the watch app. Refreshed on demand by
- * [StatsDataListenerService] whenever the phone pushes new stats.
+ * [StatsDataListenerService] whenever the phone pushes new stats, and by
+ * [WatchTimerEngine] on every timer change.
  */
 class StatsTileService : TileService() {
 
@@ -35,11 +46,19 @@ class StatsTileService : TileService() {
     override fun onTileRequest(
         requestParams: RequestBuilders.TileRequest
     ): ListenableFuture<TileBuilders.Tile> = scope.future {
-        val stats = WearStatsReader.read(this@StatsTileService)
+        val context = this@StatsTileService
+        val stats = WearStatsReader.read(context)
+        val zone = ZoneId.systemDefault()
+        val today = focusToday(
+            stats, FocusSessionOutbox.pending(context), LocalDate.now(zone).toEpochDay(), zone
+        )
+        val timer = WatchTimerEngine.state(context)
         TileBuilders.Tile.Builder()
             .setResourcesVersion(RESOURCES_VERSION)
             .setFreshnessIntervalMillis(REFRESH_MS)
-            .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout(stats)))
+            .setTileTimeline(
+                TimelineBuilders.Timeline.fromLayoutElement(layout(stats, today, timer))
+            )
             .build()
     }
 
@@ -54,13 +73,36 @@ class StatsTileService : TileService() {
         super.onDestroy()
     }
 
-    private fun layout(stats: WearStats): LayoutElementBuilders.LayoutElement {
+    private fun layout(
+        stats: WearStats,
+        today: WatchFocusToday,
+        timer: WatchTimerState
+    ): LayoutElementBuilders.LayoutElement {
         val column = LayoutElementBuilders.Column.Builder()
             .setHorizontalAlignment(HORIZONTAL_ALIGN_CENTER)
 
-        if (!stats.present) {
+        if (timer.active) {
+            column.addContent(text(timer.phase.label, Typography.TYPOGRAPHY_TITLE2, COLOR_STREAK))
+            val next = if (timer.phase == WatchPhase.FOCUS) "Break" else "Focus"
+            val detail = if (timer.running) {
+                "$next at ${DateFormat.getTimeFormat(this).format(Date(timer.phaseEndsAt))}"
+            } else {
+                "Paused"
+            }
+            column.addContent(text(detail, Typography.TYPOGRAPHY_BODY1, COLOR_TEXT))
+            column.addContent(spacer())
             column.addContent(
-                text("Open WakeProof\non your phone", Typography.TYPOGRAPHY_BODY2, COLOR_MUTED)
+                text("Focus today ${today.minutes}m", Typography.TYPOGRAPHY_CAPTION1, COLOR_MUTED)
+            )
+        } else if (!stats.present) {
+            // Never met the phone. The watch can still run a pomodoro, so the
+            // tile offers that rather than sending the user off to the phone.
+            column.addContent(
+                text("Focus today ${today.minutes}m", Typography.TYPOGRAPHY_TITLE3, COLOR_TEXT)
+            )
+            column.addContent(spacer())
+            column.addContent(
+                text("Tap to start\na focus block", Typography.TYPOGRAPHY_BODY2, COLOR_MUTED)
             )
         } else {
             val star = if (stats.asterisk) "*" else ""
@@ -69,10 +111,10 @@ class StatsTileService : TileService() {
             )
             column.addContent(text("day streak", Typography.TYPOGRAPHY_CAPTION1, COLOR_MUTED))
             column.addContent(spacer())
-            val focusDone = stats.focusGoal > 0 && stats.focusMinutes >= stats.focusGoal
+            val focusDone = stats.focusGoal > 0 && today.minutes >= stats.focusGoal
             column.addContent(
                 text(
-                    "Focus ${stats.focusMinutes}/${stats.focusGoal}m" + if (focusDone) " ✓" else "",
+                    "Focus ${today.minutes}/${stats.focusGoal}m" + if (focusDone) " ✓" else "",
                     Typography.TYPOGRAPHY_TITLE3,
                     if (focusDone) COLOR_GOOD else COLOR_TEXT
                 )
@@ -85,6 +127,16 @@ class StatsTileService : TileService() {
                         if (waterDone) " ✓" else "",
                     Typography.TYPOGRAPHY_TITLE3,
                     if (waterDone) COLOR_GOOD else COLOR_WATER
+                )
+            )
+        }
+        if (today.unsyncedBlocks > 0) {
+            column.addContent(spacer())
+            column.addContent(
+                text(
+                    "${today.unsyncedBlocks} to sync",
+                    Typography.TYPOGRAPHY_CAPTION2,
+                    COLOR_MUTED
                 )
             )
         }

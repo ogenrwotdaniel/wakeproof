@@ -10,7 +10,10 @@ import com.google.android.gms.wearable.WearableListenerService
  * Reacts to Data Layer pushes from the phone:
  * - `/wakeproof/stats` → re-render [StatsTileService].
  * - `/wakeproof/timer` → post/update/cancel the timer Ongoing Activity via
- *   [TimerNotifier] (deleted item or active=false clears it).
+ *   [TimerNotifier] (deleted item or active=false clears it) — unless the
+ *   watch's own timer is running, which keeps the chip.
+ * - `/wakeproof/session/…` deleted → the phone imported a block finished here;
+ *   the tile's "waiting to sync" count and focus total change with it.
  */
 class StatsDataListenerService : WearableListenerService() {
     override fun onDataChanged(dataEvents: DataEventBuffer) {
@@ -18,7 +21,12 @@ class StatsDataListenerService : WearableListenerService() {
         var timerChanged = false
         var timer: TimerSnapshot? = null
         for (event in dataEvents) {
-            when (event.dataItem.uri.path) {
+            val path = event.dataItem.uri.path.orEmpty()
+            if (path.startsWith(SessionContract.PATH_PREFIX)) {
+                refreshTile = true
+                continue
+            }
+            when (path) {
                 WearStatsPath.STATS -> refreshTile = true
                 TimerContract.PATH -> {
                     timerChanged = true
@@ -35,7 +43,7 @@ class StatsDataListenerService : WearableListenerService() {
         if (refreshTile) {
             TileService.getUpdater(this).requestUpdate(StatsTileService::class.java)
         }
-        if (timerChanged) {
+        if (timerChanged && !WatchTimerEngine.state(this).active) {
             TimerNotifier.update(this, timer)
         }
     }

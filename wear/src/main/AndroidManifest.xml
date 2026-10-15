@@ -7,6 +7,18 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Post the live-timer Ongoing Activity on the watch face. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The watch runs its own pomodoro: a phase end has to land on time with the
+         screen off, so it is an exact alarm. USE_EXACT_ALARM covers timer apps from
+         API 33; SCHEDULE_EXACT_ALARM is granted by default on 31-32 and needs no
+         permission at all on 30. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <!-- Re-arm a running timer after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The phase-change buzz. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"
@@ -16,8 +28,8 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
 
-        <!-- Standalone so it installs/runs without blocking on the phone app;
-             it simply shows "no data yet" until the phone pushes stats. -->
+        <!-- Standalone: the watch runs its own focus timer and queues finished
+             blocks for the phone, so it is fully usable without one. -->
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
@@ -58,5 +70,15 @@
                     android:pathPrefix="/wakeproof" />
             </intent-filter>
         </service>
+
+        <!-- Phase ends of the watch's own timer; also re-arms after boot/update. -->
+        <receiver
+            android:name=".PhaseEndReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

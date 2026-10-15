@@ -27,6 +27,12 @@ object WearContract {
     const val KEY_WATER_TARGET = "water_target"
     const val KEY_WATER_ML = "water_ml"
     const val KEY_UPDATED = "updated_at"
+    // Phase lengths and subject, so a pomodoro started ON THE WATCH (with no
+    // phone around) runs the user's own lengths and logs under their subject.
+    const val KEY_FOCUS_LEN = "focus_len"
+    const val KEY_SHORT_BREAK_LEN = "short_break_len"
+    const val KEY_LONG_BREAK_LEN = "long_break_len"
+    const val KEY_SUBJECT = "active_subject"
 
     // Live Pomodoro timer mirrored to the watch's Ongoing Activity.
     const val TIMER_PATH = "/wakeproof/timer"
@@ -57,6 +63,21 @@ object WearContract {
     const val CMD_TIMER_PAUSE = "timer_pause"
     const val CMD_TIMER_RESUME = "timer_resume"
     const val CMD_TIMER_STOP = "timer_stop"
+
+    /**
+     * Focus blocks finished on the watch's OWN timer, one DataItem each at
+     * `SESSION_PATH_PREFIX + <block id>`. The watch writes them whether or not
+     * the phone is reachable and the Data Layer delivers them when it is; the
+     * phone imports each and then deletes the item, which is the acknowledgement.
+     * Mirrors the watch's `SessionContract`.
+     */
+    const val SESSION_PATH_PREFIX = "/wakeproof/session/"
+    const val KEY_SESSION_ID = "s_id"
+    const val KEY_SESSION_STARTED = "s_started"
+    const val KEY_SESSION_ENDED = "s_ended"
+    const val KEY_SESSION_MINUTES = "s_minutes"
+    const val KEY_SESSION_EPOCH_DAY = "s_epoch_day"
+    const val KEY_SESSION_SUBJECT = "s_subject"
 }
 
 /**
@@ -84,6 +105,10 @@ class WearStatsSync @Inject constructor(
             dataMap.putInt(WearContract.KEY_WATER_COUNT, today.waterCount)
             dataMap.putInt(WearContract.KEY_WATER_TARGET, today.waterTargetCount)
             dataMap.putInt(WearContract.KEY_WATER_ML, today.waterMl)
+            dataMap.putInt(WearContract.KEY_FOCUS_LEN, settings.focusMinutes)
+            dataMap.putInt(WearContract.KEY_SHORT_BREAK_LEN, settings.shortBreakMinutes)
+            dataMap.putInt(WearContract.KEY_LONG_BREAK_LEN, settings.longBreakMinutes)
+            dataMap.putString(WearContract.KEY_SUBJECT, settings.activeSubject)
             // Force a distinct DataItem so the watch is notified even when the
             // visible numbers happen to be identical to the last push.
             dataMap.putLong(WearContract.KEY_UPDATED, System.currentTimeMillis())

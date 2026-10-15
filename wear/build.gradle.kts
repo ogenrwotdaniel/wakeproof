@@ -27,8 +27,8 @@ android {
         // every versionCode there must be unique forever, so picking 4 would collide
         // with the phone's second-next upload. The offset keeps the two sequences
         // from ever meeting: phone N, watch 1000 + N.
-        versionCode = 1004
-        versionName = "1.2.0"
+        versionCode = 1008
+        versionName = "1.6.0"
     }
 
     signingConfigs {
@@ -76,4 +76,11 @@ dependencies {
 
     // Ongoing Activity (self-ticking timer chip on the watch face)
     implementation(libs.androidx.wear.ongoing)
+
+    // Ambient mode: the timer stays on the watch screen, dimmed, when the wrist
+    // drops, instead of the watch returning to its face. Needs a ComponentActivity.
+    implementation(libs.androidx.wear)
+    implementation(libs.androidx.activity)
+
+    testImplementation(libs.junit)
 }

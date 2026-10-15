@@ -30,6 +30,7 @@ import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
 import com.ogenrwotdaniel.wakeproof.music.MusicLibrary
 import com.ogenrwotdaniel.wakeproof.music.MusicSelection
 import com.ogenrwotdaniel.wakeproof.music.Track
+import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.wear.WearTimerSync
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -103,6 +104,7 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var completionRepository: CompletionRepository
     @Inject lateinit var wearTimerSync: WearTimerSync
+    @Inject lateinit var wearStatsSync: WearStatsSync
     @Inject lateinit var musicLibrary: MusicLibrary
     @Inject lateinit var usageStatsRepository: UsageStatsRepository
 
@@ -629,6 +631,9 @@ class PomodoroTimerService : Service() {
                     subject = settingsRepository.settings.first().activeSubject
                 )
             }
+            // The watch's focus total otherwise waits for the app's screen to
+            // close — and a block run with the phone face-down never opens it.
+            runCatching { wearStatsSync.push() }
             val done = current.completedFocusSessions + 1
             // Timed session finished: skip the trailing break and stop cleanly.
             if (current.targetFocusBlocks in 1..done) {

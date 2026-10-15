@@ -308,6 +308,11 @@ class SettingsViewModel @Inject constructor(
 
     fun appLabel(packageName: String): String = usageStatsRepository.appLabel(packageName)
 
+    /** Blank = credit unmeasured focus time to nothing. */
+    fun setFocusCreditApp(packageName: String) {
+        viewModelScope.launch { settingsRepository.setFocusCreditApp(packageName) }
+    }
+
     fun toggleStudyApp(packageName: String) {
         viewModelScope.launch {
             val current = settingsRepository.settings.first().studyApps

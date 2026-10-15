@@ -19,7 +19,11 @@ import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WeekStats
 import com.ogenrwotdaniel.wakeproof.data.WeeklyReportGenerator
 import com.ogenrwotdaniel.wakeproof.data.WeeklyReportRepository
+import com.ogenrwotdaniel.wakeproof.data.DeviceStudyUsage
+import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
 import com.ogenrwotdaniel.wakeproof.data.db.SubjectMinutes
+import com.ogenrwotdaniel.wakeproof.data.studyTimeSummary
+import com.ogenrwotdaniel.wakeproof.data.sync.StudyUsageSync
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,6 +35,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -42,6 +47,7 @@ class UsageViewModel @Inject constructor(
     private val reportGenerator: WeeklyReportGenerator,
     private val reportRepository: WeeklyReportRepository,
     private val settingsRepository: SettingsRepository,
+    private val studyUsageSync: StudyUsageSync,
     statsRepository: StatsRepository,
     completionRepository: CompletionRepository,
     @ApplicationContext private val context: Context
@@ -93,18 +99,39 @@ class UsageViewModel @Inject constructor(
         val usedMinutes: Long
     )
 
-    /** One study app's minutes today, for the study-time card. */
-    data class StudyAppMinutes(val packageName: String, val label: String, val minutes: Long)
+    /** This device's measured study-app minutes today; refreshed on each resume. */
+    private val _localStudy = MutableStateFlow<Map<String, Long>>(emptyMap())
 
-    private val _studyApps = MutableStateFlow<List<StudyAppMinutes>>(emptyList())
+    /** The account's other devices' reports for today (empty when not syncing). */
+    private val _peerStudy = MutableStateFlow<List<DeviceStudyUsage>>(emptyList())
+
+    /** Packages marked as study apps, for the 📚 marker in the top-apps list. */
+    val studyPackages: StateFlow<Set<String>> = settingsRepository.settings
+        .map { it.studyApps + context.packageName }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /**
-     * Today's time in the apps marked as study apps (Settings → Study apps),
-     * plus WakeProof itself, busiest first. Shown as study rather than lumped
-     * into screen time — an evening in Samsung Notes is the opposite of the
-     * thing the screen-time number warns about.
+     * Today's study time: the study apps (Settings → Study apps, plus WakeProof
+     * itself) measured on every synced device, plus any focus-timer time no
+     * screen measured, credited to the app focus is spent in. Shown as study
+     * rather than lumped into screen time — an evening in Samsung Notes is the
+     * opposite of the thing the screen-time number warns about.
      */
-    val studyApps: StateFlow<List<StudyAppMinutes>> = _studyApps.asStateFlow()
+    val studyTime: StateFlow<StudyTimeSummary?> = combine(
+        _localStudy, _peerStudy, statsRepository.observeToday(), settingsRepository.settings
+    ) { local, peers, today, settings ->
+        studyTimeSummary(
+            today = LocalDate.now().toEpochDay(),
+            local = local,
+            localLabels = local.keys.associateWith(usageStatsRepository::appLabel),
+            peers = peers,
+            focusMinutes = today.focusMinutes.toLong(),
+            creditPackage = settings.focusCreditApp
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Label for the credited app, which may not be installed on this device. */
+    fun appLabel(packageName: String): String = usageStatsRepository.appLabel(packageName)
 
     /** Today's measured minutes for capped apps, refreshed on each resume. */
     private val _limitUsage = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -192,12 +219,12 @@ class UsageViewModel @Inject constructor(
             val capped = limitRepository.currentLimits().keys
             _limitUsage.value = usageStatsRepository.todayForegroundMillisFor(capped)
                 .mapValues { (_, millis) -> millis / 60_000 }
-            val study = settingsRepository.settings.first().studyApps + context.packageName
-            _studyApps.value = usageStatsRepository.todayForegroundMillisFor(study)
-                .map { (pkg, millis) ->
-                    StudyAppMinutes(pkg, usageStatsRepository.appLabel(pkg), millis / 60_000)
-                }
-                .sortedByDescending { it.minutes }
+            val study = studyUsageSync.localMinutesToday()
+            _localStudy.value = study
+            // Publish ours before reading theirs, so a peer opening its card
+            // right after sees this device's latest too.
+            studyUsageSync.publish(study)
+            _peerStudy.value = studyUsageSync.peersToday()
         }
     }
 }

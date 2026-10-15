@@ -81,6 +81,21 @@ class SyncPreferences @Inject constructor(@ApplicationContext context: Context) 
         prefs.remove(LAST_ERROR)
     }
 
+    /**
+     * A random id for this install, minted on first use. Names this device's
+     * own documents (e.g. its study-time report) so peers can tell them apart
+     * and it can skip its own when reading theirs. A reinstall mints a new one.
+     */
+    suspend fun installId(): String {
+        dataStore.data.first()[INSTALL_ID]?.let { return it }
+        var id = ""
+        dataStore.edit { prefs ->
+            id = prefs[INSTALL_ID] ?: java.util.UUID.randomUUID().toString()
+            prefs[INSTALL_ID] = id
+        }
+        return id
+    }
+
     private fun cursorKey(collection: String) = stringPreferencesKey("$CURSOR_PREFIX$collection")
 
     private companion object {
@@ -88,5 +103,6 @@ class SyncPreferences @Inject constructor(@ApplicationContext context: Context) 
         val ENABLED = booleanPreferencesKey("sync_enabled")
         val LAST_SYNCED_AT = longPreferencesKey("last_synced_at")
         val LAST_ERROR = stringPreferencesKey("last_error")
+        val INSTALL_ID = stringPreferencesKey("install_id")
     }
 }

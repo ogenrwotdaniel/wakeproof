@@ -347,10 +347,12 @@ fun SettingsScreen(
             )
             StudyAppsSection(
                 studyApps = settings.studyApps,
+                focusCreditApp = settings.focusCreditApp,
                 installedApps = installedApps,
                 labelOf = viewModel::appLabel,
                 onOpenPicker = viewModel::loadInstalledApps,
-                onToggle = viewModel::toggleStudyApp
+                onToggle = viewModel::toggleStudyApp,
+                onFocusCreditApp = viewModel::setFocusCreditApp
             )
 
             HorizontalDivider()
@@ -559,10 +561,12 @@ private fun LauncherSection(modifier: Modifier = Modifier) {
 @Composable
 private fun StudyAppsSection(
     studyApps: Set<String>,
+    focusCreditApp: String,
     installedApps: List<InstalledApp>,
     labelOf: (String) -> String,
     onOpenPicker: () -> Unit,
     onToggle: (String) -> Unit,
+    onFocusCreditApp: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var picking by remember { mutableStateOf(false) }
@@ -590,6 +594,30 @@ private fun StudyAppsSection(
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text("Add a study app…") }
+
+        Text(text = "Focus time is spent in", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            text = "Focus-timer time that no screen measured — a block timed on your " +
+                "watch, or studied on paper — is shown as time in this app.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val choices = (studyApps + focusCreditApp).filter { it.isNotBlank() }
+                .sortedBy { labelOf(it).lowercase() }
+            choices.forEach { pkg ->
+                FilterChip(
+                    selected = pkg == focusCreditApp,
+                    onClick = { onFocusCreditApp(pkg) },
+                    label = { Text(labelOf(pkg)) }
+                )
+            }
+            FilterChip(
+                selected = focusCreditApp.isBlank(),
+                onClick = { onFocusCreditApp("") },
+                label = { Text("Don't count it") }
+            )
+        }
     }
     if (picking) {
         AppPickerDialog(

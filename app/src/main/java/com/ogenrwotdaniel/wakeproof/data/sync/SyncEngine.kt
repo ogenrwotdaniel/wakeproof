@@ -55,7 +55,8 @@ class SyncEngine @Inject constructor(
     private val tables: List<@JvmSuppressWildcards SyncTable<out SyncableEntity>>,
     private val alarms: AlarmDao,
     private val scheduler: AlarmScheduler,
-    private val settings: SettingsRepository
+    private val settings: SettingsRepository,
+    private val studyUsage: StudyUsageSync
 ) {
 
     /** One pass at a time: the periodic worker and a "Sync now" tap can overlap. */
@@ -86,6 +87,10 @@ class SyncEngine @Inject constructor(
             // tablet's list without ever ringing there.
             if (retireSeededAlarms() || alarmsChanged) reconcileAlarmSchedule()
             if (syncSharedSettings(db, uid)) changed++
+            // Not a table: a per-device report of today's study-app time, so the
+            // other devices' study cards can include it. Best-effort, never fails
+            // the pass.
+            studyUsage.publishToday()
             preferences.recordSuccess(System.currentTimeMillis())
             SyncResult.Success(changed)
         } catch (e: Exception) {

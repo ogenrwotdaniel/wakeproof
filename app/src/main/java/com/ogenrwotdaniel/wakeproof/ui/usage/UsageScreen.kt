@@ -48,6 +48,7 @@ import com.ogenrwotdaniel.wakeproof.data.CoolingOff
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
+import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
 import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
@@ -74,7 +75,8 @@ fun UsageScreen(
     val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
     val pendingChanges by viewModel.pendingChanges.collectAsStateWithLifecycle()
     val coolingOff by viewModel.coolingOff.collectAsStateWithLifecycle()
-    val studyApps by viewModel.studyApps.collectAsStateWithLifecycle()
+    val studyTime by viewModel.studyTime.collectAsStateWithLifecycle()
+    val studyPackages by viewModel.studyPackages.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val report by viewModel.report.collectAsStateWithLifecycle()
     val reportUi by viewModel.reportUi.collectAsStateWithLifecycle()
@@ -131,7 +133,9 @@ fun UsageScreen(
                         }
                     }
 
-                    StudyTimeCard(studyApps = studyApps)
+                    studyTime?.let { summary ->
+                        StudyTimeCard(summary = summary, labelOf = viewModel::appLabel)
+                    }
 
                     Text(
                         text = "Screen time — last 7 days",
@@ -188,7 +192,7 @@ fun UsageScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = (if (studyApps.any { it.packageName == app.packageName }) "📚 " else "") +
+                                    text = (if (app.packageName in studyPackages) "📚 " else "") +
                                         app.label,
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier.weight(1f)
@@ -550,45 +554,76 @@ private fun focusSummary(focusMinutes: Int, screenMinutes: Long): String {
 }
 
 /**
- * Time in study apps today, credited by name. Mostly so that an afternoon
- * writing in Samsung Notes shows up as what it was rather than as anonymous
- * screen time; the focus streak itself is driven by the Pomodoro timer, which
- * keeps counting whichever app is on screen.
+ * Time in study apps today, credited by name, across every synced device. Mostly
+ * so that an afternoon writing in Samsung Notes shows up as what it was rather
+ * than as anonymous screen time. Focus time no screen measured (a block timed on
+ * the watch, or on paper) is added as its own row, credited to the app focus is
+ * spent in — see [com.ogenrwotdaniel.wakeproof.data.studyTimeSummary] for why it
+ * never double counts.
  */
 @Composable
 private fun StudyTimeCard(
-    studyApps: List<UsageViewModel.StudyAppMinutes>,
+    summary: StudyTimeSummary,
+    labelOf: (String) -> String,
     modifier: Modifier = Modifier
 ) {
-    val total = studyApps.sumOf { it.minutes }
     Card(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = "📚 ${formatMinutes(total)} in study apps today",
+                text = "📚 ${formatMinutes(summary.totalMinutes)} studying today",
                 style = MaterialTheme.typography.titleMedium
             )
-            studyApps.filter { it.minutes > 0 }.forEach { app ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = app.label, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        text = formatMinutes(app.minutes),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            summary.measured.forEach { app ->
+                StudyRow(label = app.label, minutes = app.minutes)
+            }
+            val credited = summary.creditedPackage
+            if (credited != null && summary.creditedMinutes > 0) {
+                StudyRow(
+                    label = "${labelOf(credited)} · focus timer",
+                    minutes = summary.creditedMinutes
+                )
+            }
+            if (summary.peers.isNotEmpty()) {
+                val context = LocalContext.current
+                Text(
+                    text = "Includes " + summary.peers.joinToString { peer ->
+                        val at = peerTime(peer.updatedAtMillis)
+                        "${peer.deviceName} (as of ${formatAlarmTime(context, at.hour, at.minute)})"
+                    } + ".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Text(
-                text = "Choose which apps count in Settings → Study apps. A running focus " +
-                    "timer counts toward your goal whichever app you study in.",
+                text = if (credited != null) {
+                    "Focus-timer time no screen measured — a block on your watch, or on " +
+                        "paper — counts as ${labelOf(credited)}. Choose which apps count in " +
+                        "Settings → Study apps."
+                } else {
+                    "Choose which apps count in Settings → Study apps. A running focus " +
+                        "timer counts toward your goal whichever app you study in."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
+
+@Composable
+private fun StudyRow(label: String, minutes: Long) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = formatMinutes(minutes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun peerTime(millis: Long): java.time.LocalTime =
+    java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
 
 /** Daily screen time, each bar labelled with its own total; today in bold. */
 @Composable

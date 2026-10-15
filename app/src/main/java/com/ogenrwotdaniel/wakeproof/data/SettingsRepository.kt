@@ -97,6 +97,12 @@ data class WakeProofSettings(
      * WakeProof for one of them does not wither the session's tree.
      */
     val studyApps: Set<String> = DEFAULT_STUDY_APPS,
+    /**
+     * The app focus time is spent in. Focus minutes no screen measured — a
+     * block timed on the watch, or studied on paper — are credited to it on
+     * the study card. Blank = no credit.
+     */
+    val focusCreditApp: String = DEFAULT_FOCUS_CREDIT_APP,
     /** A quiet line under the focus countdown, changing every block. */
     val focusQuotes: Boolean = true,
     /**
@@ -109,7 +115,9 @@ data class WakeProofSettings(
     val onboardingComplete: Boolean = false
 ) {
     companion object {
-        val DEFAULT_STUDY_APPS = setOf("com.samsung.android.app.notes")
+        const val SAMSUNG_NOTES = "com.samsung.android.app.notes"
+        val DEFAULT_STUDY_APPS = setOf(SAMSUNG_NOTES)
+        const val DEFAULT_FOCUS_CREDIT_APP = SAMSUNG_NOTES
     }
 }
 
@@ -145,6 +153,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             studySubjects = prefs[STUDY_SUBJECTS]?.takeIf { it.isNotEmpty() } ?: setOf("General"),
             activeSubject = prefs[ACTIVE_SUBJECT] ?: "General",
             studyApps = prefs[STUDY_APPS] ?: WakeProofSettings.DEFAULT_STUDY_APPS,
+            focusCreditApp = prefs[FOCUS_CREDIT_APP] ?: WakeProofSettings.DEFAULT_FOCUS_CREDIT_APP,
             focusQuotes = prefs[FOCUS_QUOTES] ?: true,
             deepFocus = prefs[DEEP_FOCUS] ?: true,
             launcherFavorites = prefs[LAUNCHER_FAVORITES]
@@ -180,6 +189,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun setMusicSelection(value: String) = dataStore.edit { it[MUSIC_SELECTION] = value }
     suspend fun setMusicShuffle(value: Boolean) = dataStore.edit { it[MUSIC_SHUFFLE] = value }
     suspend fun setStudyApps(value: Set<String>) = dataStore.edit { it[STUDY_APPS] = value }
+    suspend fun setFocusCreditApp(value: String) = dataStore.edit { it[FOCUS_CREDIT_APP] = value }
     suspend fun setFocusQuotes(value: Boolean) = dataStore.edit { it[FOCUS_QUOTES] = value }
     suspend fun setDeepFocus(value: Boolean) = dataStore.edit { it[DEEP_FOCUS] = value }
     suspend fun setLauncherFavorites(value: List<String>) =
@@ -255,6 +265,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val MUSIC_SELECTION = stringPreferencesKey("music_selection")
         val MUSIC_SHUFFLE = booleanPreferencesKey("music_shuffle")
         val STUDY_APPS = stringSetPreferencesKey("study_apps")
+        val FOCUS_CREDIT_APP = stringPreferencesKey("focus_credit_app")
         val FOCUS_QUOTES = booleanPreferencesKey("focus_quotes")
         val DEEP_FOCUS = booleanPreferencesKey("deep_focus")
         val LAUNCHER_FAVORITES = stringPreferencesKey("launcher_favorites")

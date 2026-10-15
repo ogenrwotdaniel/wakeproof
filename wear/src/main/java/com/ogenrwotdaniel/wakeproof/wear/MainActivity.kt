@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.text.format.DateFormat
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -162,6 +163,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Opening the app — from the alert or the launcher — is the acknowledgement.
+        Buzzer.stop()
         Wearable.getDataClient(this).addListener(dataListener)
         render()
         scope.launch { FocusSessionOutbox.flush(applicationContext) }
@@ -338,12 +341,12 @@ class MainActivity : ComponentActivity() {
         textView.text = buildString {
             if (s.present) {
                 append("🔥 ${s.streak}-day streak\n\n")
-                append("Focus ${formatMinutes(today.minutes)}")
-                if (s.focusGoal > 0) append(" / ${formatMinutes(s.focusGoal)}")
+                append("Focus ${formatFocusMinutes(today.minutes)}")
+                if (s.focusGoal > 0) append(" / ${formatFocusMinutes(s.focusGoal)}")
                 append("\n")
                 append("💧 ${s.waterCount}/${s.waterTarget}  (${s.waterMl} ml)")
             } else {
-                append("Focus today ${formatMinutes(today.minutes)}")
+                append("Focus today ${formatFocusMinutes(today.minutes)}")
             }
             if (today.unsyncedBlocks > 0) {
                 append("\n\n${today.unsyncedBlocks} block")
@@ -418,14 +421,13 @@ class MainActivity : ComponentActivity() {
 
     private fun clock(seconds: Long) = "%d:%02d".format(seconds / 60, seconds % 60)
 
-    private fun formatMinutes(minutes: Int): String {
-        val h = minutes / 60
-        val m = minutes % 60
-        return when {
-            h == 0 -> "${m}m"
-            m == 0 -> "${h}h"
-            else -> "${h}h ${m}m"
-        }
+    /**
+     * Any touch silences a phase-change buzz: the app may already be on screen
+     * (ambient) when a phase ends, so no onResume follows to do it.
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) Buzzer.stop()
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onDestroy() {

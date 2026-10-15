@@ -180,26 +180,60 @@ object TimerNotifier {
             title = "${state.phase.label} — $minutes min"
             text = "Step away from the screen. Focus again at $until."
         }
-        postAlert(context, PHASE_ALERT_ID, title, text)
+        postAlert(context, PHASE_ALERT_ID, title, text, stopsBuzz = true)
     }
 
-    /** "Session complete" once a timed session on the watch runs out. */
-    fun sessionComplete(context: Context, blocks: Int) {
+    /**
+     * The end of a session, with what it added up to: "Session complete" when a
+     * timed session ran out, "Session ended" when the user stopped it (which is
+     * how a free run always ends). Carries today's total against the goal, so
+     * the last thing a session says is how the day stands.
+     */
+    fun sessionSummary(context: Context, complete: Boolean, blocks: Int, minutes: Int, day: FocusDay?) {
+        // The last phase alert is stale now; this replaces it.
+        clearPhaseAlert(context)
         if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) return
-        // The last phase alert is stale now; this replaces it.
-        NotificationManagerCompat.from(context).cancel(PHASE_ALERT_ID)
         postAlert(
             context,
             SESSION_DONE_ID,
-            "Session complete",
-            "$blocks focus block${if (blocks == 1) "" else "s"} done."
+            if (complete) "Session complete" else "Session ended",
+            sessionSummary(blocks, minutes, day),
+            // Only a session that ran out is buzzing; a stop was a tap.
+            stopsBuzz = complete
         )
     }
 
-    @android.annotation.SuppressLint("MissingPermission") // both callers check the grant inline
-    private fun postAlert(context: Context, id: Int, title: String, text: String) {
+    /**
+     * Today's focus reached the daily goal — which is what makes the day count
+     * toward the streak (the streak is focus-only). Silent: it lands with a
+     * phase-change buzz that is already playing.
+     */
+    fun goalReached(context: Context, day: FocusDay) {
+        if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
+        postAlert(
+            context,
+            GOAL_REACHED_ID,
+            "Daily focus goal reached",
+            "${formatFocusMinutes(day.minutes)} of ${formatFocusMinutes(day.goal)} today. This day counts toward your streak.",
+            stopsBuzz = false
+        )
+    }
+
+    fun clearPhaseAlert(context: Context) {
+        NotificationManagerCompat.from(context).cancel(PHASE_ALERT_ID)
+    }
+
+    /**
+     * Posts a peeking alert. [stopsBuzz] adds "Got it", for an alert that
+     * arrives with a long buzz; swiping any alert away also stops the buzz,
+     * since that is the user acknowledging it just the same.
+     */
+    @android.annotation.SuppressLint("MissingPermission") // every caller checks the grant inline
+    private fun postAlert(context: Context, id: Int, title: String, text: String, stopsBuzz: Boolean) {
         ensureAlertChannel(context)
         val open = PendingIntent.getActivity(
             context,
@@ -207,21 +241,32 @@ object TimerNotifier {
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val notification = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+        // Request code = notification id, so each alert keeps its own extra.
+        val stopBuzz = PendingIntent.getBroadcast(
+            context,
+            id,
+            Intent(context, StopBuzzReceiver::class.java)
+                .putExtra(StopBuzzReceiver.EXTRA_NOTIFICATION_ID, id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val builder = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
+            .setDeleteIntent(stopBuzz)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setTimeoutAfter(ALERT_TIMEOUT_MS)
-            .build()
-        NotificationManagerCompat.from(context).notify(id, notification)
+        if (stopsBuzz) builder.addAction(0, "Got it", stopBuzz)
+        NotificationManagerCompat.from(context).notify(id, builder.build())
     }
 
     private const val SESSION_DONE_ID = 43
     private const val PHASE_ALERT_ID = 44
+    private const val GOAL_REACHED_ID = 45
     private const val ALERT_CHANNEL_ID = "wakeproof_phase"
     private const val ALERT_TIMEOUT_MS = 2 * 60_000L
 

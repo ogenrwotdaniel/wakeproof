@@ -80,5 +80,10 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- "Got it" / swipe-away on a phase alert: stops the long buzz. -->
+        <receiver
+            android:name=".StopBuzzReceiver"
+            android:exported="false" />
     </application>
 </manifest>

@@ -12,6 +12,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.ogenrwotdaniel.wakeproof.wear.WatchBlockImporter
 import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.widget.WakeProofWidget
 import dagger.hilt.EntryPoint
@@ -39,12 +40,16 @@ class SyncWorker(
     interface SyncWorkerEntryPoint {
         fun syncEngine(): SyncEngine
         fun wearStatsSync(): WearStatsSync
+        fun watchBlockImporter(): WatchBlockImporter
     }
 
     override suspend fun doWork(): Result {
         val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext, SyncWorkerEntryPoint::class.java
         )
+        // Before the pass, so a watch block that missed its event goes up to the
+        // cloud in this same pass rather than the next one.
+        runCatching { entryPoint.watchBlockImporter().sweep() }
         return when (val result = entryPoint.syncEngine().sync()) {
             is SyncResult.Skipped -> Result.success()
             is SyncResult.Failure -> Result.retry()

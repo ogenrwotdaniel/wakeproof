@@ -56,6 +56,9 @@ class CompletionRepository @Inject constructor(private val dao: CompletionLogDao
         return true
     }
 
+    /** Every focus block id since [fromEpochDay], tombstones included. */
+    suspend fun focusSyncIdsSince(fromEpochDay: Long): List<String> = dao.focusSyncIdsSince(fromEpochDay)
+
     /** Focus minutes per subject since [fromEpochDay] (null subject = untagged). */
     fun observeFocusBySubject(fromEpochDay: Long) = dao.observeFocusBySubject(fromEpochDay)
 

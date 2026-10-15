@@ -23,6 +23,14 @@ interface CompletionLogDao : SyncDao<CompletionLog> {
     @Query("SELECT * FROM completion_logs")
     suspend fun backupAll(): List<CompletionLog>
 
+    /**
+     * syncIds of focus blocks on or after [fromEpochDay], TOMBSTONES INCLUDED —
+     * the watch's acknowledgement list, and a block deleted here was still
+     * received.
+     */
+    @Query("SELECT syncId FROM completion_logs WHERE kind = 'FOCUS' AND epochDay >= :fromEpochDay")
+    suspend fun focusSyncIdsSince(fromEpochDay: Long): List<String>
+
     /** Restores rows verbatim, ids included, so references between tables survive. */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun restoreAll(rows: List<CompletionLog>)

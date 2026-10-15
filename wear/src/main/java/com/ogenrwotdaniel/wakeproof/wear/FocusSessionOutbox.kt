@@ -1,6 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.wear
 
 import android.content.Context
+import android.util.Log
 import androidx.core.content.edit
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.PutDataMapRequest
@@ -22,6 +23,14 @@ internal object SessionContract {
     const val KEY_MINUTES = "s_minutes"
     const val KEY_EPOCH_DAY = "s_epoch_day"
     const val KEY_SUBJECT = "s_subject"
+
+    /**
+     * String list on the phone's STATS item: block ids the phone holds. This is
+     * the acknowledgement — the watch deletes its own items once listed. (A
+     * delete from the phone only removes the phone's copy: an item belongs to
+     * the node that wrote it.) MUST match app `WearContract.KEY_SESSION_ACKED`.
+     */
+    const val KEY_ACKED = "s_acked"
 }
 
 /**
@@ -50,6 +59,7 @@ internal object SessionContract {
  */
 internal object FocusSessionOutbox {
 
+    private const val TAG = "FocusSessionOutbox"
     private const val FILE = "focus_outbox"
     private const val KEY_UNSENT = "unsent"
     private const val SEP = "|"
@@ -78,16 +88,25 @@ internal object FocusSessionOutbox {
 
     /**
      * Blocks that have not been acknowledged by the phone yet: the session
-     * items still on the Data Layer, plus anything stuck in the local copy.
+     * items still on the Data Layer, plus anything stuck in the local copy,
+     * minus every id the phone's latest stats push lists as received.
+     *
+     * Acknowledged items are deleted here as a side effect. This node wrote
+     * them, so this is the one delete that actually removes them everywhere.
      */
     suspend fun pending(context: Context): List<FocusBlock> = withContext(Dispatchers.IO) {
+        val dataClient = Wearable.getDataClient(context)
+        var acked: Set<String> = emptySet()
         val onLayer = runCatching {
-            val buffer = Wearable.getDataClient(context).dataItems.await()
+            val buffer = dataClient.dataItems.await()
             try {
+                acked = buffer.firstOrNull { it.uri.path == WearStatsPath.STATS }
+                    ?.let { DataMapItem.fromDataItem(it).dataMap.getStringArrayList(SessionContract.KEY_ACKED) }
+                    .orEmpty().toSet()
                 buffer.filter { it.uri.path?.startsWith(SessionContract.PATH_PREFIX) == true }
                     .mapNotNull { item ->
                         val map = DataMapItem.fromDataItem(item).dataMap
-                        FocusBlock(
+                        item.uri to FocusBlock(
                             id = map.getString(SessionContract.KEY_ID) ?: return@mapNotNull null,
                             startedAt = map.getLong(SessionContract.KEY_STARTED),
                             endedAt = map.getLong(SessionContract.KEY_ENDED),
@@ -100,8 +119,22 @@ internal object FocusSessionOutbox {
                 buffer.release()
             }
         }.getOrDefault(emptyList())
-        val local = prefs(context).getStringSet(KEY_UNSENT, emptySet()).orEmpty().mapNotNull(::decode)
-        (onLayer + local).distinctBy { it.id }
+
+        onLayer.filter { (_, block) -> block.id in acked }.forEach { (uri, block) ->
+            runCatching { dataClient.deleteDataItems(uri).await() }
+                .onSuccess { Log.d(TAG, "Phone has ${block.id}; removed from the layer") }
+        }
+        val prefs = prefs(context)
+        val unsent = prefs.getStringSet(KEY_UNSENT, emptySet()).orEmpty()
+        val stillUnsent = unsent.filterNot { raw -> decode(raw)?.id in acked }.toSet()
+        if (stillUnsent.size != unsent.size) prefs.edit(commit = true) { putStringSet(KEY_UNSENT, stillUnsent) }
+
+        val waiting = onLayer.map { it.second }.filterNot { it.id in acked } + stillUnsent.mapNotNull(::decode)
+        waiting.distinctBy { it.id }.also { all ->
+            if (all.isNotEmpty()) {
+                Log.d(TAG, "Waiting for phone: " + all.joinToString { "${it.id} day=${it.epochDay} ${it.minutes}m" })
+            }
+        }
     }
 
     private suspend fun put(context: Context, block: FocusBlock): Boolean {

@@ -19,6 +19,7 @@ import com.ogenrwotdaniel.wakeproof.data.sync.SyncResult
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncWorker
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.ui.MainViewModel
+import com.ogenrwotdaniel.wakeproof.wear.WatchBlockImporter
 import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.widget.WakeProofWidget
 import javax.inject.Inject
@@ -41,6 +42,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var wearStatsSync: WearStatsSync
 
     @Inject lateinit var syncEngine: SyncEngine
+    @Inject lateinit var watchBlockImporter: WatchBlockImporter
 
     override fun onStart() {
         super.onStart()
@@ -53,6 +55,8 @@ class MainActivity : ComponentActivity() {
         // the case that matters: picking up the tablet after studying on the phone.
         // sync() is a no-op unless signed in and enabled, and never throws.
         lifecycleScope.launch {
+            // Watch blocks whose Data Layer event was missed — see WatchBlockImporter.
+            runCatching { watchBlockImporter.sweep() }
             if (syncEngine.sync() is SyncResult.Success) {
                 runCatching { WakeProofWidget().updateAll(applicationContext) }
             }

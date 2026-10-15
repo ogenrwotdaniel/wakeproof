@@ -3,9 +3,11 @@ package com.ogenrwotdaniel.wakeproof.wear
 import android.content.Context
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
+import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.StatsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
@@ -78,6 +80,17 @@ object WearContract {
     const val KEY_SESSION_MINUTES = "s_minutes"
     const val KEY_SESSION_EPOCH_DAY = "s_epoch_day"
     const val KEY_SESSION_SUBJECT = "s_subject"
+
+    /**
+     * On the STATS item: ids of focus blocks the phone holds (last
+     * [ACK_WINDOW_DAYS] days). THIS is the acknowledgement. Deleting the
+     * session item from the phone is not: a DataItem belongs to the node that
+     * wrote it, and a delete from any other node only removes the local copy —
+     * the watch kept three imported blocks as "waiting" and counted them twice
+     * (2026-10-15). The watch deletes its own items once their ids appear here.
+     */
+    const val KEY_SESSION_ACKED = "s_acked"
+    const val ACK_WINDOW_DAYS = 14L
 }
 
 /**
@@ -90,7 +103,8 @@ object WearContract {
 class WearStatsSync @Inject constructor(
     @ApplicationContext private val context: Context,
     private val statsRepository: StatsRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val completionRepository: CompletionRepository
 ) {
     private val dataClient by lazy { Wearable.getDataClient(context) }
 
@@ -109,6 +123,11 @@ class WearStatsSync @Inject constructor(
             dataMap.putInt(WearContract.KEY_SHORT_BREAK_LEN, settings.shortBreakMinutes)
             dataMap.putInt(WearContract.KEY_LONG_BREAK_LEN, settings.longBreakMinutes)
             dataMap.putString(WearContract.KEY_SUBJECT, settings.activeSubject)
+            val ackFrom = LocalDate.now().toEpochDay() - WearContract.ACK_WINDOW_DAYS
+            dataMap.putStringArrayList(
+                WearContract.KEY_SESSION_ACKED,
+                ArrayList(completionRepository.focusSyncIdsSince(ackFrom))
+            )
             // Force a distinct DataItem so the watch is notified even when the
             // visible numbers happen to be identical to the last push.
             dataMap.putLong(WearContract.KEY_UPDATED, System.currentTimeMillis())

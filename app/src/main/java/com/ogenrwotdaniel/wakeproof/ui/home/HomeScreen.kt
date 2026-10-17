@@ -65,6 +65,7 @@ fun HomeScreen(
     val week by viewModel.week.collectAsStateWithLifecycle()
     val streak by viewModel.streak.collectAsStateWithLifecycle()
     val nextPushup by viewModel.nextPushupAlarm.collectAsStateWithLifecycle()
+    val nextMath by viewModel.nextMathAlarm.collectAsStateWithLifecycle()
     val focusGoal by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
     val exams by viewModel.exams.collectAsStateWithLifecycle()
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
@@ -158,6 +159,23 @@ fun HomeScreen(
                 else "${today.waterMl} ml today",
                 highlight = today.waterDone
             )
+            // Only for people who use math alarms — a permanent "—" card would be noise for the rest.
+            if (today.mathTarget > 0 || today.mathCount > 0) {
+                StatusCard(
+                    title = "Math",
+                    value = when {
+                        today.mathTarget == 0 -> "${today.mathCount} solved"
+                        today.mathDone -> "Done ✓"
+                        today.mathTarget == 1 -> "Pending"
+                        else -> "${today.mathCount}/${today.mathTarget}"
+                    },
+                    detail = when {
+                        today.mathTarget == 0 -> "No math alarm due today"
+                        else -> nextMath?.let { "Alarm at $it" } ?: "No alarm set"
+                    },
+                    highlight = today.mathDone
+                )
+            }
 
             ExamSection(
                 exams = exams,

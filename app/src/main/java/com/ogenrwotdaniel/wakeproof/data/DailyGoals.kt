@@ -19,9 +19,9 @@ import java.time.LocalDate
  * water that nothing would ever ring for. The schedule is the only honest
  * source for the target, so the target is read from it.
  */
-data class DailyGoals(val pushupTarget: Int, val waterTarget: Int) {
-    val hasAny: Boolean get() = pushupTarget > 0 || waterTarget > 0
-    val total: Int get() = pushupTarget + waterTarget
+data class DailyGoals(val pushupTarget: Int, val waterTarget: Int, val mathTarget: Int = 0) {
+    val hasAny: Boolean get() = pushupTarget > 0 || waterTarget > 0 || mathTarget > 0
+    val total: Int get() = pushupTarget + waterTarget + mathTarget
 }
 
 /** What a day did with the goals it was set. */
@@ -46,7 +46,9 @@ enum class DayOutcome {
  * The goals [day] carries, given the alarms as they stand now.
  *
  * Disabled and deleted alarms ask for nothing, and an alarm only asks on the
- * days its own repeat mask covers. [AlarmType.CUSTOM] is counted as neither —
+ * days its own repeat mask covers. Each verifying type is its own target — a
+ * MATH alarm asks for one solved run, and was once left out entirely, so a
+ * morning's math never appeared on Home at all. [AlarmType.CUSTOM] is counted as none —
  * it has no verification screen behind it, so no completion log can ever
  * satisfy it and counting it would freeze the streak permanently.
  *
@@ -59,7 +61,8 @@ fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
     val live = alarms.filter { it.enabled && !it.deleted && AlarmDays.contains(it.daysMask, day) }
     return DailyGoals(
         pushupTarget = live.count { it.type == AlarmType.PUSHUP },
-        waterTarget = live.count { it.type == AlarmType.WATER }
+        waterTarget = live.count { it.type == AlarmType.WATER },
+        mathTarget = live.count { it.type == AlarmType.MATH }
     )
 }
 
@@ -73,6 +76,10 @@ fun pushupsVerified(dayLogs: List<CompletionLog>): Int =
 
 fun watersLogged(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.WATER)
 
+/** Math runs actually solved; an emergency-dismissed one is logged SKIPPED and does not count. */
+fun mathsSolved(dayLogs: List<CompletionLog>): Int =
+    dayLogs.count { it.kind == GoalKind.MATH && it.status == CompletionStatus.VERIFIED }
+
 /**
  * Scores one day. Pure, so the streak rule is testable without Room, a clock or
  * a device.
@@ -84,7 +91,8 @@ fun dayOutcome(dayLogs: List<CompletionLog>, goals: DailyGoals): DayOutcome = wh
     !goals.hasAny -> DayOutcome.NO_GOALS
     dayLogs.any { it.status == CompletionStatus.SKIPPED } -> DayOutcome.MISSED
     pushupsVerified(dayLogs) >= goals.pushupTarget &&
-        watersLogged(dayLogs) >= goals.waterTarget -> DayOutcome.MET
+        watersLogged(dayLogs) >= goals.waterTarget &&
+        mathsSolved(dayLogs) >= goals.mathTarget -> DayOutcome.MET
 
     else -> DayOutcome.MISSED
 }

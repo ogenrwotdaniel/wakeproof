@@ -21,7 +21,9 @@ data class TodayStatus(
     val waterMl: Int = 0,
     val waterTargetCount: Int = 0,
     val focusMinutes: Int = 0,
-    val anyUnverifiedWater: Boolean = false
+    val anyUnverifiedWater: Boolean = false,
+    val mathCount: Int = 0,
+    val mathTarget: Int = 0
 ) {
     /**
      * Requires a target: with no pushup alarm scheduled today, `0 >= 0` would
@@ -29,6 +31,7 @@ data class TodayStatus(
      */
     val pushupDone: Boolean get() = pushupTarget > 0 && pushupCount >= pushupTarget
     val waterDone: Boolean get() = waterTargetCount > 0 && waterCount >= waterTargetCount
+    val mathDone: Boolean get() = mathTarget > 0 && mathCount >= mathTarget
 }
 
 /** One day of history for the 7-day chart. */
@@ -98,7 +101,9 @@ class StatsRepository @Inject constructor(
             waterMl = waters.sumOf { it.amount },
             waterTargetCount = goals.waterTarget,
             focusMinutes = today.focusMinutes(),
-            anyUnverifiedWater = waters.any { it.status == CompletionStatus.UNVERIFIED }
+            anyUnverifiedWater = waters.any { it.status == CompletionStatus.UNVERIFIED },
+            mathCount = mathsSolved(today),
+            mathTarget = goals.mathTarget
         )
     }
 

@@ -72,6 +72,23 @@ class DailyGoalsTest {
     }
 
     @Test
+    fun `math alarms are their own target`() {
+        // They used to count toward nothing, so a solved math mission never
+        // appeared on Home — the morning looked as though nothing was done.
+        val goals = dailyGoalsFrom(
+            listOf(alarm(AlarmType.MATH), alarm(AlarmType.PUSHUP)),
+            DayOfWeek.MONDAY
+        )
+        assertEquals(DailyGoals(pushupTarget = 1, waterTarget = 0, mathTarget = 1), goals)
+    }
+
+    @Test
+    fun `only a solved math run counts, not an emergency dismiss`() {
+        val day = logs(log(GoalKind.MATH), log(GoalKind.MATH, CompletionStatus.SKIPPED))
+        assertEquals(1, mathsSolved(day))
+    }
+
+    @Test
     fun `an alarm only asks on the days it repeats`() {
         val weekdayPushups = listOf(alarm(AlarmType.PUSHUP, AlarmDays.WEEKDAYS))
         assertEquals(1, dailyGoalsFrom(weekdayPushups, DayOfWeek.FRIDAY).pushupTarget)
@@ -114,6 +131,13 @@ class DailyGoalsTest {
             log(GoalKind.WATER, CompletionStatus.SKIPPED)
         )
         assertEquals(DayOutcome.MISSED, dayOutcome(skipped, goals))
+    }
+
+    @Test
+    fun `a math target is met by a solved run`() {
+        val goals = DailyGoals(pushupTarget = 0, waterTarget = 0, mathTarget = 1)
+        assertEquals(DayOutcome.MET, dayOutcome(logs(log(GoalKind.MATH)), goals))
+        assertEquals(DayOutcome.MISSED, dayOutcome(emptyList(), goals))
     }
 
     @Test

@@ -103,9 +103,12 @@ class HomeViewModel @Inject constructor(
      */
     val ringsAlarms: StateFlow<Boolean> = alarmDevicePolicy.ringsAlarmsFlow
 
-    val nextPushupAlarm: StateFlow<String?> = repository.observeAlarms()
+    val nextPushupAlarm: StateFlow<String?> = earliestAlarm(AlarmType.PUSHUP)
+    val nextMathAlarm: StateFlow<String?> = earliestAlarm(AlarmType.MATH)
+
+    private fun earliestAlarm(type: AlarmType): StateFlow<String?> = repository.observeAlarms()
         .map { list ->
-            list.filter { it.type == AlarmType.PUSHUP && it.enabled }
+            list.filter { it.type == type && it.enabled }
                 .minByOrNull { it.hour * 60 + it.minute }
                 ?.let { formatAlarmTime(context, it.hour, it.minute) }
         }

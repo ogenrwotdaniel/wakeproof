@@ -133,6 +133,50 @@ class AccountRepository @Inject constructor(
     }
 
     /**
+     * A fresh Google ID token for the account this device already syncs as, to
+     * hand to the watch (Settings -> Sync -> "Sign in the watch").
+     *
+     * Asks only among accounts that have used this app and auto-selects when
+     * there is one, so in practice it is a brief sheet rather than a picker.
+     * The chosen account must be the one signed in here: a watch on a different
+     * account would upload into a tree no other device reads.
+     */
+    suspend fun idTokenForWatch(activity: Activity): Result<String> {
+        val clientId = availability.webClientId
+        val email = auth?.currentUser?.email
+        if (clientId == null || auth?.currentUser == null) {
+            return Result.failure(IllegalStateException("Sign in on this device first."))
+        }
+        return runCatching {
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(
+                    GetGoogleIdOption.Builder()
+                        .setServerClientId(clientId)
+                        .setFilterByAuthorizedAccounts(true)
+                        .setAutoSelectEnabled(true)
+                        .build()
+                )
+                .build()
+            val credentialManager = CredentialManager.create(context)
+            val response = try {
+                credentialManager.getCredential(activity, request)
+            } catch (e: GetCredentialCancellationException) {
+                // Same post-sign-out cool-down as in signIn().
+                explicitSignIn(credentialManager, activity, clientId)
+                    ?: throw SignInCancelled("Cancelled.")
+            } catch (e: NoCredentialException) {
+                explicitSignIn(credentialManager, activity, clientId)
+                    ?: throw SignInCancelled("No Google account is available on this device.")
+            }
+            val credential = GoogleIdTokenCredential.createFrom(response.credential.data)
+            if (email != null && !credential.id.equals(email, ignoreCase = true)) {
+                throw SignInCancelled("Pick $email — the account this device syncs with.")
+            }
+            credential.idToken
+        }
+    }
+
+    /**
      * The account-picker flow behind the "Sign in with Google" button, used when
      * the one-tap sheet declines to appear.
      *

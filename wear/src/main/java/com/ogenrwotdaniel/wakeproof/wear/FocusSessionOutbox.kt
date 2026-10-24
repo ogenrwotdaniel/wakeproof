@@ -153,11 +153,11 @@ internal object FocusSessionOutbox {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     /** Subject last, so a "|" typed into a subject name cannot shift the other fields. */
-    private fun encode(b: FocusBlock): String =
+    internal fun encode(b: FocusBlock): String =
         listOf(b.id, b.startedAt, b.endedAt, b.minutes, b.epochDay, b.subject.orEmpty())
             .joinToString(SEP)
 
-    private fun decode(raw: String): FocusBlock? {
+    internal fun decode(raw: String): FocusBlock? {
         val f = raw.split(SEP, limit = 6)
         if (f.size != 6) return null
         return FocusBlock(

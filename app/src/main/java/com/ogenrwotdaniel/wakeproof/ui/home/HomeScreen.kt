@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +42,9 @@ import com.ogenrwotdaniel.wakeproof.ui.components.chartDayLabel
 import com.ogenrwotdaniel.wakeproof.ui.formatCompactDuration
 import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimerRules
+import kotlinx.coroutines.delay
 import java.time.LocalDate
 
 /**
@@ -70,6 +74,7 @@ fun HomeScreen(
     val exams by viewModel.exams.collectAsStateWithLifecycle()
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     val timer by viewModel.timer.collectAsStateWithLifecycle()
+    val watchTimer by viewModel.watchTimer.collectAsStateWithLifecycle()
     var testArmed by remember { mutableStateOf(false) }
     var addingExam by remember { mutableStateOf(false) }
 
@@ -106,6 +111,7 @@ fun HomeScreen(
                     onOpen = onOpenPomodoro
                 )
             }
+            WatchSessionCard(watchTimer)
 
             // A companion device holds the whole schedule and arms none of it.
             // Without this the tablet looks exactly like a phone whose alarms
@@ -299,6 +305,52 @@ private fun RunningSessionCard(
             }
             Text(
                 text = "%d:%02d".format(remainingSeconds / 60, remainingSeconds % 60),
+                style = MaterialTheme.typography.headlineMedium
+            )
+        }
+    }
+}
+
+/**
+ * A session running on the watch, from the copy the watch publishes to the
+ * cloud. Not tappable: there is nothing on this device to open — the watch owns
+ * the timer, and this is a window onto it. Ticks locally from the watch's phase
+ * end, like the watch does for the phone's timer; renders nothing when idle.
+ */
+@Composable
+private fun WatchSessionCard(timer: LiveWatchTimer?, modifier: Modifier = Modifier) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(timer) {
+        while (timer?.active == true) {
+            now = System.currentTimeMillis()
+            delay(1_000L - now % 1_000L)
+        }
+    }
+    val display = LiveWatchTimerRules.display(timer, now) ?: return
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "${display.phaseLabel} on your watch" + if (display.running) "" else " (paused)",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    text = if (display.awaitingWatch) "Waiting for the watch…" else display.blockLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+            Text(
+                text = "%d:%02d".format(display.remainingSeconds / 60, display.remainingSeconds % 60),
                 style = MaterialTheme.typography.headlineMedium
             )
         }

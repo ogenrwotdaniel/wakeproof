@@ -4,10 +4,43 @@ Cross-device sync keeps alarms, streak history, flashcards, exams and parked
 thoughts the same on the phone and the tablet. It is opt-in: signed out, the app
 behaves exactly as it did before, entirely on-device.
 
-The watch needs nothing here. It has no account of its own and never talks to the
-cloud — it reads a snapshot pushed over the Wearable Data Layer by whichever
-phone it is paired with. Because that phone now syncs, the watch shows synced
-numbers as a consequence. See the Data Layer notes in `CLAUDE.md`.
+## The watch (since 1.7)
+
+The watch can write to the cloud itself, over its own Wi-Fi/LTE, so a session
+timed on the wrist reaches the tablet while the phone is somewhere else. It is
+optional: an unsigned-in watch behaves exactly as before, handing blocks to the
+phone over the Data Layer, and the phone syncs them.
+
+* **Sign-in.** Same Google account as the phone, so the same `users/{uid}`.
+  Either on the phone (Settings -> Sync -> "Sign in the watch": a fresh Google
+  ID token sent over MessageClient `/wakeproof/auth`, exchanged by the watch's
+  `CloudAuthListenerService` and never stored), or on the watch ("Sign in to
+  cloud", Credential Manager — why the watch targets SDK 35). Firebase keeps the
+  session on the watch afterwards.
+* **No new Firebase setup.** The watch shares the phone's applicationId, so the
+  phone's `app/google-services.json` entry is the watch's too. The plugin is not
+  applied in `:wear`; `wear/build.gradle.kts` reads that file into BuildConfig
+  and `WatchCloud` initialises Firebase by hand. No file -> no upload.
+* **Blocks** go to `completion_logs/{blockId}` as ordinary VERIFIED FOCUS rows,
+  written by a TRANSACTION that creates the doc only if absent — a blind set
+  could overwrite a tombstone. The block id is also the `syncId` the phone gives
+  it on Data Layer import, so the two copies are one row. The phone's ack list is
+  read off its own table, so a block it first saw via cloud is acknowledged too.
+  Queued in `CloudOutbox` (SharedPreferences; Firestore's queue is memory-only on
+  the watch) and drained by `CloudUploadWorker` under a network constraint. Only
+  blocks finished while signed in are queued.
+* **Live timer** at `live/watchTimer`: one overwritten doc (not a synced table —
+  `SyncEngine` never pulls it), written on every timer transition. Home on any
+  device shows it as "Focus on your watch" (`LiveWatchTimerRules`, unit-tested):
+  hidden 10 min after a running phase should have ended with no update (watch
+  offline) and 12 h after a pause.
+* **Freshness on the reader.** `LiveCloudFeed`, while Home is on screen, also
+  listens to the newest `completion_logs` doc and runs a normal sync pass when
+  its server stamp passes this device's cursor — so new blocks appear within
+  seconds, through the one code path that writes downloaded rows.
+
+The rules need no change: `live/watchTimer` and `completion_logs` both sit under
+`users/{uid}/{collection}/{docId}`.
 
 ## The model
 

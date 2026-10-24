@@ -99,6 +99,18 @@ fun SyncSection(
                         Text("Sign out")
                     }
                 }
+                Text(
+                    text = "Your Galaxy Watch can upload its own focus sessions and live " +
+                        "timer, so this list stays current when the phone is elsewhere.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = { activity?.let(viewModel::signInWatch) },
+                    enabled = activity != null && !state.busy
+                ) {
+                    Text("Sign in the watch")
+                }
             }
         }
 
@@ -106,7 +118,7 @@ fun SyncSection(
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (text.startsWith("Synced")) {
+                color = if (text.startsWith("Synced") || text.startsWith("Sent to the watch")) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.error

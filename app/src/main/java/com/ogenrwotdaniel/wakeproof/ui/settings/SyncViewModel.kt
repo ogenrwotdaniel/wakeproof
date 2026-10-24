@@ -12,6 +12,7 @@ import com.ogenrwotdaniel.wakeproof.data.sync.SyncEngine
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncPreferences
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncResult
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncWorker
+import com.ogenrwotdaniel.wakeproof.wear.WatchSignIn
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -41,6 +42,7 @@ class SyncViewModel @Inject constructor(
     private val accounts: AccountRepository,
     private val syncEngine: SyncEngine,
     private val preferences: SyncPreferences,
+    private val watchSignIn: WatchSignIn,
     availability: CloudSyncAvailability
 ) : ViewModel() {
 
@@ -120,6 +122,30 @@ class SyncViewModel @Inject constructor(
         viewModelScope.launch {
             busy.value = true
             runSync(announceNoChanges = true)
+            busy.value = false
+        }
+    }
+
+    /**
+     * Signs the paired watch in to the same account, so it uploads its own
+     * blocks and live timer instead of waiting to meet this phone again.
+     */
+    fun signInWatch(activity: Activity) {
+        if (busy.value) return
+        viewModelScope.launch {
+            busy.value = true
+            message.value = accounts.idTokenForWatch(activity).fold(
+                onSuccess = { token ->
+                    if (watchSignIn.send(token) > 0) {
+                        "Sent to the watch. Its home screen shows ☁ and your account once it's signed in."
+                    } else {
+                        "No watch in reach. Open WakeProof on the watch and try again."
+                    }
+                },
+                onFailure = { error ->
+                    if (error is SignInCancelled) error.message else "Couldn't sign in the watch: ${error.message}"
+                }
+            )
             busy.value = false
         }
     }

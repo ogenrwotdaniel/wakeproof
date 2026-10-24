@@ -30,7 +30,9 @@ import kotlinx.coroutines.sync.withLock
  * Every user action and every phase end goes through here: the pure transition
  * from [WatchTimer], then the side effects in one place — persist, re-arm the
  * phase-end alarm, refresh the Now Bar item and tile, buzz ([Buzzer]), and hand a finished
- * focus block to [FocusSessionOutbox] for the phone to pick up whenever it can.
+ * focus block to [FocusSessionOutbox] for the phone to pick up whenever it can —
+ * and, when signed in, to [CloudOutbox] for the cloud, which also carries the
+ * live timer to the tablet.
  *
  * Serialised by a [Mutex] because two callers race for the same phase end by
  * design: the open screen's own countdown reaching zero, and the alarm. Each
@@ -127,6 +129,7 @@ object WatchTimerEngine {
             // Today BEFORE this block, so the goal crossing is seen exactly once.
             val dayBefore = focusDay(app)
             FocusSessionOutbox.enqueue(app, block)
+            CloudOutbox.enqueue(app, block)
             val added = if (block.epochDay == todayEpochDay()) block.minutes else 0
             day = dayBefore.copy(minutes = dayBefore.minutes + added)
             goalReached = crossedGoal(dayBefore.minutes, added, dayBefore.goal)
@@ -172,7 +175,10 @@ object WatchTimerEngine {
             block = WatchTimer.advance(current, now, ZoneId.systemDefault()).completed
             WatchTimer.stop()
         }
-        block?.let { FocusSessionOutbox.enqueue(context, it) }
+        block?.let {
+            FocusSessionOutbox.enqueue(context, it)
+            CloudOutbox.enqueue(context, it)
+        }
     }
 
     private suspend fun mutate(context: Context, transform: suspend (WatchTimerState) -> WatchTimerState) {
@@ -184,6 +190,9 @@ object WatchTimerEngine {
         }
         TimerNotifier.refresh(app)
         TileService.getUpdater(app).requestUpdate(StatsTileService::class.java)
+        // The tablet's "on your watch" card. Queued, not sent: a network call has
+        // no place in an alarm receiver, and the worker reads the newest state.
+        CloudOutbox.kick(app)
     }
 
     private fun arm(context: Context, state: WatchTimerState) {

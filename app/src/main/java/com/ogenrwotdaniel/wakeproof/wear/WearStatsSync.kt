@@ -91,6 +91,13 @@ object WearContract {
      */
     const val KEY_SESSION_ACKED = "s_acked"
     const val ACK_WINDOW_DAYS = 14L
+
+    /**
+     * Phone -> watch, MessageClient: a fresh Google ID token for this device's
+     * sync account, so the watch can sign in to the cloud without a picker.
+     * Mirrors the watch's `CloudContract.AUTH_PATH`.
+     */
+    const val AUTH_PATH = "/wakeproof/auth"
 }
 
 /**

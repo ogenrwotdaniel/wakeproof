@@ -17,7 +17,13 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.gms.wearable.DataClient
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.Wearable
 import java.time.LocalDate
@@ -42,7 +48,8 @@ import kotlinx.coroutines.launch
  * Three states, in this order of precedence:
  * 1. the watch's own timer, if one is running;
  * 2. the phone's timer, mirrored and remote-controlled as before;
- * 3. idle: today's progress, plus Start (on the watch) and Start on phone.
+ * 3. idle: today's progress, plus Start (on the watch) and Start on phone —
+ *    and the cloud line: who the watch uploads as, or a way to sign it in.
  *
  * The alarm is deliberately not controllable from here. See the note on
  * `WearContract.COMMAND_PATH`: an alarm you can silence from your wrist is one
@@ -77,6 +84,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var buttons: LinearLayout
     private lateinit var root: ScrollView
     private var ambient = false
+    /** The last sign-in outcome, shown in place of the cloud line until the screen closes. */
+    private var cloudMessage: String? = null
 
     private val ambientCallback = object : AmbientLifecycleObserver.AmbientLifecycleCallback {
         override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
@@ -168,6 +177,7 @@ class MainActivity : ComponentActivity() {
         Wearable.getDataClient(this).addListener(dataListener)
         render()
         scope.launch { FocusSessionOutbox.flush(applicationContext) }
+        CloudOutbox.kick(applicationContext)
     }
 
     override fun onPause() {
@@ -331,6 +341,35 @@ class MainActivity : ComponentActivity() {
             addButton(session.label) { WatchTimerEngine.start(applicationContext, session) }
         }
         addPhoneButton("Start on phone", TimerCommands.START)
+        if (WatchCloud.canSignInHere && !WatchCloud.signedIn(applicationContext)) {
+            addButton("Sign in to cloud") { signInHere() }
+        }
+    }
+
+    /**
+     * Google sign-in on the watch itself, for the direct cloud upload. The
+     * phone's Settings → Sync → "Sign in the watch" does the same without the
+     * small-screen picker; this is for when the phone is not around.
+     */
+    private suspend fun signInHere() {
+        val option = GetGoogleIdOption.Builder()
+            .setServerClientId(BuildConfig.WEB_CLIENT_ID)
+            .setFilterByAuthorizedAccounts(false)
+            .build()
+        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+        val token = try {
+            val response = CredentialManager.create(this).getCredential(this, request)
+            GoogleIdTokenCredential.createFrom(response.credential.data).idToken
+        } catch (e: GetCredentialCancellationException) {
+            return
+        } catch (e: GetCredentialException) {
+            cloudMessage = "Couldn't sign in here.\nOn the phone: Settings → Sync → Sign in the watch."
+            return
+        }
+        cloudMessage = WatchCloud.signIn(applicationContext, token).fold(
+            onSuccess = { "Signed in as $it" },
+            onFailure = { "Sign-in failed: ${it.message}" }
+        )
     }
 
     private suspend fun renderStats() {
@@ -353,7 +392,17 @@ class MainActivity : ComponentActivity() {
                 if (today.unsyncedBlocks > 1) append("s")
                 append(" waiting for phone")
             }
+            append(cloudLine())
         }
+    }
+
+    /** One line on the cloud upload; empty in a build with no cloud at all. */
+    private fun cloudLine(): String {
+        cloudMessage?.let { return "\n\n$it" }
+        if (!WatchCloud.configured) return ""
+        val account = WatchCloud.accountLabel(applicationContext) ?: return "\n\nCloud: not signed in"
+        val waiting = CloudOutbox.waiting(applicationContext)
+        return "\n\n☁ $account" + if (waiting > 0) "\n$waiting waiting for network" else ""
     }
 
     // --- Shared -------------------------------------------------------------------

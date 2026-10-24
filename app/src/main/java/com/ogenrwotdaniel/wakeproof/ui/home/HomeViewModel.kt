@@ -17,6 +17,8 @@ import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.data.db.Exam
 import com.ogenrwotdaniel.wakeproof.data.db.ExamDao
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveCloudFeed
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import java.time.LocalDate
@@ -37,7 +39,8 @@ class HomeViewModel @Inject constructor(
     alarmDevicePolicy: AlarmDevicePolicy,
     private val examDao: ExamDao,
     statsRepository: StatsRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    liveCloudFeed: LiveCloudFeed
 ) : ViewModel() {
 
     /**
@@ -74,6 +77,15 @@ class HomeViewModel @Inject constructor(
      * dashboard could not answer.
      */
     val timer: StateFlow<PomodoroState> = PomodoroTimerService.state
+
+    /**
+     * A pomodoro running on the WATCH, as the watch last published it to the
+     * cloud — how the tablet follows a session while the phone is elsewhere.
+     * Subscribing is also what keeps the completion logs live (see
+     * [LiveCloudFeed]), so both listeners exist only while Home is on screen.
+     */
+    val watchTimer: StateFlow<LiveWatchTimer?> = liveCloudFeed.whileVisible()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Daily focus goal in minutes, for the Focus card's progress. */
     val focusGoalMinutes: StateFlow<Int> = settingsRepository.settings

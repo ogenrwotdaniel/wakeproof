@@ -5,6 +5,8 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.style.TextDecoration
@@ -88,9 +90,6 @@ private val MINDFUL_PAUSE_LINES = listOf(
 
 /** How often "Other apps" reshuffles. Long enough to read, too short to learn. */
 private const val SHUFFLE_SECONDS = 4
-
-/** Agenda rows shown before "+ n more", so the list cannot take over the screen. */
-private const val AGENDA_MAX_ROWS = 6
 
 /**
  * The home screen proper. Two views: HOME (clock, today, agenda, the permanent
@@ -205,10 +204,15 @@ fun LauncherScreen(
                     doneKeys = doneKeys,
                     allowed = calendarAllowed,
                     onAllow = { askCalendar.launch(Manifest.permission.READ_CALENDAR) },
-                    onToggleDone = viewModel::setEventDone
+                    onToggleDone = viewModel::setEventDone,
+                    // Takes all the space between the focus line and the pins,
+                    // so the whole day is visible at once; scrolls only on a day
+                    // with more than fits.
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
                 )
-
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(16.dp))
 
                 val byPackage = apps.associateBy { it.packageName }
                 val favorites = settings.launcherFavorites
@@ -262,9 +266,12 @@ fun LauncherScreen(
 }
 
 /**
- * Today's events from the phone's calendar, as plain lines. A tap ticks an
- * event off (the same done-state as the Agenda screen in the app). Without the
- * calendar permission it is one line offering to ask.
+ * All of today's events from the phone's calendar, as plain lines: all-day
+ * ones first, then by start time, titles wrapping rather than cut off. Once
+ * capped at six rows with "+ n more"; the user wanted the whole day in view,
+ * and the home screen had the room. A tap ticks an event off (the same
+ * done-state as the Agenda screen in the app). Without the calendar permission
+ * it is one line offering to ask.
  */
 @Composable
 private fun Agenda(
@@ -272,7 +279,8 @@ private fun Agenda(
     doneKeys: Set<String>,
     allowed: Boolean,
     onAllow: () -> Unit,
-    onToggleDone: (AgendaEvent, Boolean) -> Unit
+    onToggleDone: (AgendaEvent, Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     if (!allowed) {
@@ -280,7 +288,7 @@ private fun Agenda(
             text = "Show my calendar here ›",
             style = MaterialTheme.typography.bodyMedium,
             color = Color.Gray,
-            modifier = Modifier.clickable(onClick = onAllow)
+            modifier = modifier.clickable(onClick = onAllow)
         )
         return
     }
@@ -288,18 +296,20 @@ private fun Agenda(
         Text(
             text = "Nothing on the calendar today.",
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.DarkGray
+            color = Color.DarkGray,
+            modifier = modifier
         )
         return
     }
-    Column {
+    val ordered = remember(events) { events.sortedWith(compareBy({ !it.allDay }, { it.beginMillis })) }
+    Column(modifier.verticalScroll(rememberScrollState())) {
         Text(
             text = "Today",
             style = MaterialTheme.typography.labelLarge,
             color = Color.Gray,
             modifier = Modifier.padding(bottom = 2.dp)
         )
-        events.take(AGENDA_MAX_ROWS).forEach { event ->
+        ordered.forEach { event ->
             val done = event.key in doneKeys
             val start = Instant.ofEpochMilli(event.beginMillis).atZone(ZoneId.systemDefault())
             Text(
@@ -308,19 +318,12 @@ private fun Agenda(
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (done) Color.DarkGray else Color.LightGray,
                 textDecoration = if (done) TextDecoration.LineThrough else null,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onToggleDone(event, !done) }
                     .padding(vertical = 3.dp)
-            )
-        }
-        if (events.size > AGENDA_MAX_ROWS) {
-            Text(
-                text = "+ ${events.size - AGENDA_MAX_ROWS} more",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray
             )
         }
     }

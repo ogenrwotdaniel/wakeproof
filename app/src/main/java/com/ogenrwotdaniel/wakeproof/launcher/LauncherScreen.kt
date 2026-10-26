@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
-import java.time.LocalDate
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -263,9 +262,9 @@ fun LauncherScreen(
 }
 
 /**
- * Today and the next two days from the phone's calendar, as plain lines. A
- * tap ticks an event off (the same done-state as the Agenda screen in the
- * app). Without the calendar permission it is one line offering to ask.
+ * Today's events from the phone's calendar, as plain lines. A tap ticks an
+ * event off (the same done-state as the Agenda screen in the app). Without the
+ * calendar permission it is one line offering to ask.
  */
 @Composable
 private fun Agenda(
@@ -287,30 +286,20 @@ private fun Agenda(
     }
     if (events.isEmpty()) {
         Text(
-            text = "Nothing on the calendar for the next three days.",
+            text = "Nothing on the calendar today.",
             style = MaterialTheme.typography.bodyMedium,
             color = Color.DarkGray
         )
         return
     }
-    val todayDate = LocalDate.now()
-    var lastDay: LocalDate? = null
     Column {
+        Text(
+            text = "Today",
+            style = MaterialTheme.typography.labelLarge,
+            color = Color.Gray,
+            modifier = Modifier.padding(bottom = 2.dp)
+        )
         events.take(AGENDA_MAX_ROWS).forEach { event ->
-            val day = eventDay(event)
-            if (day != lastDay) {
-                lastDay = day
-                Text(
-                    text = when (day) {
-                        todayDate -> "Today"
-                        todayDate.plusDays(1) -> "Tomorrow"
-                        else -> day.format(DateTimeFormatter.ofPattern("EEEE"))
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                )
-            }
             val done = event.key in doneKeys
             val start = Instant.ofEpochMilli(event.beginMillis).atZone(ZoneId.systemDefault())
             Text(

@@ -61,7 +61,7 @@ class LauncherViewModel @Inject constructor(
 
     private val _agenda = MutableStateFlow<List<AgendaEvent>>(emptyList())
 
-    /** Calendar events from today through [AGENDA_DAYS] days, for the agenda. */
+    /** Today's calendar events ([onAgenda]), for the home-screen agenda. */
     val agenda: StateFlow<List<AgendaEvent>> = _agenda.asStateFlow()
 
     val doneEventKeys: StateFlow<Set<String>> = agendaRepository.doneKeys
@@ -99,8 +99,8 @@ class LauncherViewModel @Inject constructor(
             _pinned.value = pinnedApps(context, apps)
             _apps.value = apps
             _agenda.value = withContext(Dispatchers.IO) {
-                val until = LocalDate.now().plusDays(AGENDA_DAYS.toLong())
-                agendaRepository.upcomingEvents().filter { eventDay(it) < until }
+                val today = LocalDate.now()
+                agendaRepository.upcomingEvents().filter { onAgenda(it, today) }
             }
         }
     }
@@ -146,7 +146,18 @@ class LauncherViewModel @Inject constructor(
         /** A home screen of twenty favourites is an app drawer with extra steps. */
         const val MAX_FAVORITES = 8
 
-        /** Today plus the next two days: enough to plan by, short enough to glance at. */
-        const val AGENDA_DAYS = 3
+        /**
+         * Whether [event] belongs on the home screen's agenda: today only. Was
+         * today plus the next two days, which on a real calendar ran to "+ 18
+         * more" — a home screen showing the week is a planner, not a glance at
+         * what today asks of you.
+         *
+         * All-day events must fall exactly on today. The provider stores them
+         * as UTC midnights, so east of Greenwich yesterday's all-day event
+         * still overlaps the start of the local day and comes back from the
+         * query; timed events that began before today and run into it stay.
+         */
+        fun onAgenda(event: AgendaEvent, today: LocalDate): Boolean =
+            if (event.allDay) eventDay(event) == today else eventDay(event) <= today
     }
 }

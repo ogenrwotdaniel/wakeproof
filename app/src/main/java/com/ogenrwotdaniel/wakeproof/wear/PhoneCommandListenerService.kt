@@ -51,6 +51,8 @@ class PhoneCommandListenerService : WearableListenerService() {
         if (messageEvent.path != WearContract.COMMAND_PATH) return
         when (String(messageEvent.data, Charsets.UTF_8)) {
             WearContract.CMD_TIMER_START -> PomodoroTimerService.start(applicationContext)
+            // Pause and stop are refused by the timer while a session runs
+            // (nuclear focus); passed on anyway so the rule lives in one place.
             WearContract.CMD_TIMER_PAUSE -> PomodoroTimerService.pause(applicationContext)
             WearContract.CMD_TIMER_RESUME -> PomodoroTimerService.resume(applicationContext)
             WearContract.CMD_TIMER_STOP -> PomodoroTimerService.stop(applicationContext)

@@ -44,47 +44,20 @@ object WatchTimerEngine {
 
     fun state(context: Context): WatchTimerState = WatchTimerStore.read(context)
 
-    suspend fun start(context: Context, session: WatchSession = WatchSession.FREE) = mutate(context) {
+    suspend fun start(context: Context, session: WatchSession) = mutate(context) {
         val stats = WearStatsReader.read(context)
         WatchTimer.start(stats.durations, stats.subject, System.currentTimeMillis(), session)
     }
 
     // A user action is an acknowledgement: whatever is still buzzing stops.
 
-    suspend fun pause(context: Context) {
-        Buzzer.stop()
-        mutate(context) { WatchTimer.pause(it, System.currentTimeMillis()) }
-    }
-
     suspend fun resume(context: Context) {
         Buzzer.stop()
         mutate(context) { WatchTimer.resume(it, System.currentTimeMillis()) }
     }
 
-    /**
-     * Ends the run. Blocks already finished are credited and summed up in a
-     * "Session ended" notification — for a free run, stopping IS how the
-     * session ends, so this is its "all focus done". A block in progress is
-     * not credited, as on the phone.
-     */
-    suspend fun stop(context: Context) {
-        Buzzer.stop()
-        val app = context.applicationContext
-        var prior: WatchTimerState? = null
-        mutate(app) { prior = it; WatchTimer.stop() }
-        val ended = prior ?: return
-        if (ended.active && ended.completedFocus > 0) {
-            TimerNotifier.sessionSummary(
-                app,
-                complete = false,
-                blocks = ended.completedFocus,
-                minutes = ended.completedFocus * ended.durations.focusMinutes,
-                day = focusDay(app)
-            )
-        } else {
-            TimerNotifier.clearPhaseAlert(app)
-        }
-    }
+    // No pause and no stop (nuclear focus, as on the phone): a run ends when
+    // its last block does. Resume stays for a run paused by an older build.
 
     suspend fun skipBreak(context: Context) = mutate(context) {
         WatchTimer.skipBreak(it, System.currentTimeMillis()).also { next ->

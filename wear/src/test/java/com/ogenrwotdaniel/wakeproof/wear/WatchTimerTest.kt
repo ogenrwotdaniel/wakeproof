@@ -70,7 +70,8 @@ class WatchTimerTest {
 
     @Test
     fun `every fourth block is followed by a long break`() {
-        var s = WatchTimer.start(durations, null, t0)
+        // Unbounded, to see the cadence past the end of any preset.
+        var s = WatchTimer.start(durations, null, t0).copy(targetFocusBlocks = 0)
         var now = t0
         val breaks = mutableListOf<WatchPhase>()
         repeat(4) {
@@ -98,11 +99,10 @@ class WatchTimerTest {
     }
 
     @Test
-    fun `pause freezes the remaining time and resume continues from it`() {
-        val s = WatchTimer.start(durations, null, t0)
-        val paused = WatchTimer.pause(s, t0 + 10 * minute)
-        assertFalse(paused.running)
-        assertEquals(15 * minute, paused.remainingMillisAt(t0 + 60 * minute))
+    fun `a run paused by an older build resumes from where it stopped`() {
+        // There is no pause any more; this is the state an old build left behind.
+        val paused = WatchTimer.start(durations, null, t0)
+            .copy(running = false, remainingMillis = 15 * minute)
         assertFalse(paused.isDue(t0 + 60 * minute))
 
         val resumed = WatchTimer.resume(paused, t0 + 60 * minute)
@@ -113,7 +113,7 @@ class WatchTimerTest {
     }
 
     @Test
-    fun `stop mid focus credits nothing`() {
+    fun `the idle state is inactive`() {
         assertFalse(WatchTimer.stop().active)
     }
 
@@ -159,10 +159,9 @@ class WatchTimerTest {
 
     @Test
     fun `presets map to the same block counts as the phone`() {
-        // 25+5: 1 h = 2 blocks (55 min), 1 h 30 = 3 (85), 2 h = 4 (115); free = 0.
+        // 25+5: 1 h = 2 blocks (55 min), 1 h 30 = 3 (85), 2 h = 4 (115).
         fun blocks(session: WatchSession) =
             WatchTimer.start(durations, null, t0, session).targetFocusBlocks
-        assertEquals(0, blocks(WatchSession.FREE))
         assertEquals(2, blocks(WatchSession.ONE_HOUR))
         assertEquals(3, blocks(WatchSession.NINETY))
         assertEquals(4, blocks(WatchSession.TWO_HOURS))
@@ -184,15 +183,45 @@ class WatchTimerTest {
     }
 
     @Test
-    fun `a free run never finishes on its own`() {
-        var s = WatchTimer.start(durations, null, t0)
-        repeat(20) {
-            val a = WatchTimer.advance(s, s.phaseEndsAt, utc, ::nextId)
-            assertFalse(a.sessionFinished)
-            s = a.state
+    fun `every preset ends by itself, since nothing else can end it`() {
+        for (session in WatchSession.entries) {
+            var s = WatchTimer.start(durations, null, t0, session)
+            var advances = 0
+            while (s.active) {
+                s = WatchTimer.advance(s, s.phaseEndsAt, utc, ::nextId).state
+                advances++
+                assertTrue("$session never ended", advances < 50)
+            }
         }
-        assertTrue(s.active)
     }
 
     private fun assertNotNullBlock(a: Advance) = assertEquals(25, a.completed?.minutes)
+
+    @Test
+    fun `three hours is six fixed pomodoros with the long break after the third`() {
+        // Phone lengths of 50/10/30 must not stretch the preset.
+        var s = WatchTimer.start(WatchDurations(50, 10, 30), null, t0, WatchSession.THREE_HOURS)
+        assertEquals(6, s.targetFocusBlocks)
+        assertEquals(WatchDurations(25, 5, 15), s.durations)
+        val phases = mutableListOf<WatchPhase>()
+        var finished = false
+        var now = t0
+        while (!finished) {
+            now = s.phaseEndsAt
+            val a = WatchTimer.advance(s, now, utc, ::nextId)
+            finished = a.sessionFinished
+            s = a.state
+            if (!finished) phases += s.phase
+        }
+        // Breaks after blocks 1..5; only the third is long, none after the sixth.
+        assertEquals(
+            listOf(
+                WatchPhase.SHORT_BREAK, WatchPhase.FOCUS, WatchPhase.SHORT_BREAK, WatchPhase.FOCUS,
+                WatchPhase.LONG_BREAK, WatchPhase.FOCUS, WatchPhase.SHORT_BREAK, WatchPhase.FOCUS,
+                WatchPhase.SHORT_BREAK, WatchPhase.FOCUS
+            ),
+            phases
+        )
+        assertEquals(t0 + 185 * minute, now)
+    }
 }

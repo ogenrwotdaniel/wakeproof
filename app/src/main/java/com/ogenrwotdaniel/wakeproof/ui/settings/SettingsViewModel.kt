@@ -22,7 +22,9 @@ import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.ogenrwotdaniel.wakeproof.data.backup.BackupRepository
 import com.ogenrwotdaniel.wakeproof.data.backup.backupFilename
@@ -56,7 +58,8 @@ class SettingsViewModel @Inject constructor(
     private val completionRepository: CompletionRepository,
     private val reliabilityChecker: ReliabilityChecker,
     private val backupRepository: BackupRepository,
-    private val usageStatsRepository: UsageStatsRepository
+    private val usageStatsRepository: UsageStatsRepository,
+    spotifyController: SpotifyController
 ) : ViewModel() {
 
     private val _exportMessage = MutableStateFlow<String?>(null)
@@ -289,6 +292,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setSessionKeepScreenOn(value) }
     }
 
+    /** True when the Spotify app is present, so the UI can adapt its wording. */
+    val spotifyInstalled: Boolean = spotifyController.isInstalled()
+
+    fun setSpotifyPlaylistUri(value: String) {
+        viewModelScope.launch { settingsRepository.setSpotifyPlaylistUri(value) }
+    }
+
     fun setFocusQuotes(value: Boolean) {
         viewModelScope.launch { settingsRepository.setFocusQuotes(value) }
     }
@@ -313,11 +323,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setFocusCreditApp(packageName) }
     }
 
+    /**
+     * The study apps are also the focus list — the only apps that open during a
+     * session. Adding one mid-session would be a way around the wall, so it is
+     * refused until the session ends; removing one only tightens and is fine.
+     */
     fun toggleStudyApp(packageName: String) {
         viewModelScope.launch {
             val current = settingsRepository.settings.first().studyApps
+            val adding = packageName !in current
+            if (adding && PomodoroTimerService.state.value.active) return@launch
             settingsRepository.setStudyApps(
-                if (packageName in current) current - packageName else current + packageName
+                if (adding) current + packageName else current - packageName
             )
         }
     }

@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.MotionEvent
@@ -40,14 +39,14 @@ import kotlinx.coroutines.launch
 /**
  * Launcher screen for the watch app.
  *
- * The watch RUNS its own pomodoro now ([WatchTimerEngine]): start, pause, skip
- * a break and stop all work with the phone in another room, flat, or never
- * paired. Each finished focus block waits on the Data Layer and lands in the
+ * The watch RUNS its own pomodoro now ([WatchTimerEngine]): start and skip a
+ * break work with the phone in another room, flat, or never paired. There is
+ * no pause and no stop (nuclear focus, as on the phone). Each finished focus block waits on the Data Layer and lands in the
  * phone's history — and from there in cloud sync — whenever the two next meet.
  *
  * Three states, in this order of precedence:
  * 1. the watch's own timer, if one is running;
- * 2. the phone's timer, mirrored and remote-controlled as before;
+ * 2. the phone's timer, mirrored (no pause/stop: the phone refuses them);
  * 3. idle: today's progress, plus Start (on the watch) and Start on phone —
  *    and the cloud line: who the watch uploads as, or a way to sign it in.
  *
@@ -77,9 +76,6 @@ class MainActivity : ComponentActivity() {
 
     private val scope = MainScope()
     private var renderJob: Job? = null
-    private var stopArmedJob: Job? = null
-    /** Stop is armed by a first tap until this uptime; the second tap within it stops. */
-    private var stopArmedUntil = 0L
     private lateinit var textView: TextView
     private lateinit var buttons: LinearLayout
     private lateinit var root: ScrollView
@@ -209,34 +205,18 @@ class MainActivity : ComponentActivity() {
     // --- The watch's own timer -------------------------------------------------
 
     /**
-     * Pause/resume, skip (breaks only — skipping focus would be "stop" with
-     * better manners) and stop. Stop takes two taps: a stop mid-focus throws
-     * the block away, and a wrist is easy to brush.
+     * Skip break only (breaks only — skipping focus would be "stop" with better
+     * manners). No pause and no stop since 2026-10-27, as on the phone: once a
+     * session starts it runs to its last block. Resume appears only for a run
+     * paused by an older build, which would otherwise be stuck.
      */
     private fun showLocalControls(state: WatchTimerState) {
         buttons.removeAllViews()
-        if (state.running) {
-            addButton("Pause") { WatchTimerEngine.pause(applicationContext) }
-        } else {
+        if (!state.running) {
             addButton("Resume") { WatchTimerEngine.resume(applicationContext) }
         }
         if (state.phase != WatchPhase.FOCUS) {
             addButton("Skip break") { WatchTimerEngine.skipBreak(applicationContext) }
-        }
-        val armed = SystemClock.uptimeMillis() < stopArmedUntil
-        addButton(if (armed) "Tap again to stop" else "Stop") {
-            if (SystemClock.uptimeMillis() < stopArmedUntil) {
-                stopArmedUntil = 0L
-                stopArmedJob?.cancel()
-                WatchTimerEngine.stop(applicationContext)
-            } else {
-                stopArmedUntil = SystemClock.uptimeMillis() + STOP_CONFIRM_MS
-                stopArmedJob?.cancel()
-                stopArmedJob = scope.launch {
-                    delay(STOP_CONFIRM_MS)
-                    render()
-                }
-            }
         }
     }
 
@@ -299,12 +279,10 @@ class MainActivity : ComponentActivity() {
      */
     private fun showPhoneControls(timer: TimerSnapshot) {
         buttons.removeAllViews()
-        if (timer.running) {
-            addPhoneButton("Pause", TimerCommands.PAUSE)
-        } else {
-            addPhoneButton("Resume", TimerCommands.RESUME)
-        }
-        addPhoneButton("Stop", TimerCommands.STOP)
+        // The phone refuses pause and stop mid-session, so offering them here
+        // would be two buttons that do nothing. Resume only rescues a session
+        // paused by an older phone build.
+        if (!timer.running) addPhoneButton("Resume", TimerCommands.RESUME)
     }
 
     /** Shows the phone's countdown, ticking every second while running. */
@@ -331,8 +309,9 @@ class MainActivity : ComponentActivity() {
     // --- Idle --------------------------------------------------------------------
 
     /**
-     * The four session lengths the phone offers — free run, 1 h, 1 h 30, 2 h —
-     * all run on the WATCH, and work with no phone at all. Starting on the phone is still offered, second,
+     * The four session lengths the phone offers — 1 h, 1 h 30, 2 h, 3 h — all
+     * run on the WATCH, and work with no phone at all. None can be paused or
+     * stopped once started. Starting on the phone is still offered, second,
      * for a session that wants the phone's music, forest and app blocking.
      */
     private fun showIdleControls() {
@@ -486,6 +465,5 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         val BACKGROUND = Color.parseColor("#0F1417")
-        const val STOP_CONFIRM_MS = 3_000L
     }
 }

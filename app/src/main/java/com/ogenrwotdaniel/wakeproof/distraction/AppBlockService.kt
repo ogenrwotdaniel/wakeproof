@@ -3,7 +3,9 @@ package com.ogenrwotdaniel.wakeproof.distraction
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.KeyguardManager
 import android.app.PendingIntent
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -14,11 +16,16 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
+import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
+import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -28,35 +35,42 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 
 /**
- * Enforces [LimitMode.BLOCK] caps: while a walled-off app is on screen and its
- * daily allowance is spent, [BlockedActivity] is thrown in front of it. There is
- * no override — the cap lifts when the calendar day does, which falls out for
- * free because usage is measured from midnight.
+ * The one thing that stands in front of other apps. Three jobs, decided per
+ * tick by [gateVerdict]:
  *
- * Watching happens by polling [UsageStatsRepository.foregroundPackage] rather
- * than through an AccessibilityService. Accessibility would be the more precise
- * hook, but Play restricts it to genuine accessibility use and has rejected
- * blockers built on it; polling needs only the two special grants this app
- * already asks for (usage access, and draw-over-other-apps — which is also what
- * lets a service launch an Activity from the background at all).
+ * * NUCLEAR FOCUS — while a Pomodoro session is active (breaks included), any
+ *   app not on the focus list (Settings → Study apps) is walled until the
+ *   session ends. The timer has no pause or stop, so neither does this.
+ * * [LimitMode.BLOCK] caps — once an app's daily allowance is spent,
+ *   [BlockedActivity] is thrown in front of it until midnight. No override.
+ * * The WAIT — social, video and messaging apps ([AppGate]) open only after
+ *   five minutes on [GateActivity], however they were opened.
  *
- * Cost is kept low by measuring usage only on entering a capped app and then
- * extrapolating locally between refreshes, so the expensive event walk does not
- * run on every tick. Once an app's allowance is spent it is remembered as spent
- * until midnight, so walking back into it is walled on the very next tick
- * instead of after another measurement.
+ * Watching happens by polling usage events rather than through an
+ * AccessibilityService. Accessibility would be the more precise hook, but Play
+ * restricts it to genuine accessibility use and has rejected blockers built on
+ * it; polling needs only the two special grants this app already asks for
+ * (usage access, and draw-over-other-apps — which is also what lets a service
+ * launch an Activity from the background at all). The cost is latency: an app
+ * opened from the Edge panel can show for up to [POLL_MILLIS] before the wall
+ * lands, and the Recents thumbnail is drawn by the system, out of reach.
+ *
+ * Cap cost is kept low by measuring usage only on entering a capped app and
+ * then extrapolating locally between refreshes. Once an app's allowance is
+ * spent it is remembered as spent until midnight, so walking back into it is
+ * walled on the very next tick instead of after another measurement.
  */
 @AndroidEntryPoint
 class AppBlockService : Service() {
 
     @Inject lateinit var limitRepository: DistractionLimitRepository
     @Inject lateinit var usageRepository: UsageStatsRepository
+    @Inject lateinit var settingsRepository: SettingsRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -66,11 +80,19 @@ class AppBlockService : Service() {
      */
     @Volatile private var blockedLimits: Map<String, AppLimit> = emptyMap()
 
+    /** The focus list (study apps, plus Spotify when it is the study sound). */
+    @Volatile private var focusList: Set<String> = emptySet()
+
     /** PackageManager lookups, resolved once — they cannot change under us. */
     private val untouchable: Set<String> by lazy { undismissablePackages() }
 
-    /** Last package we saw resume; polling returns null while the user sits still. */
-    private var foregroundPackage: String? = null
+    /** Which app is in front; see [ForegroundTracker] for why it is a running fold. */
+    private val tracker by lazy {
+        ForegroundTracker(getSystemService(UsageStatsManager::class.java))
+    }
+
+    /** Package → whether it waits. Category lookups are cheap but not free. */
+    private val gatedCache = mutableMapOf<String, Boolean>()
 
     /** Measured usage for [baselineFor] and the clock reading it was taken at. */
     private var baselineFor: String? = null
@@ -97,6 +119,9 @@ class AppBlockService : Service() {
         }
     }
 
+    /** Last verdict logged, so the log says what changed rather than every tick. */
+    private var lastLogged: String? = null
+
     /** Suppresses a second wall for the same app while the first is still up. */
     private var lastBlockedPackage: String? = null
     private var lastBlockedAt = 0L
@@ -109,6 +134,18 @@ class AppBlockService : Service() {
             buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         )
+        scope.launch {
+            settingsRepository.settings.collect { cfg ->
+                // Spotify as the study sound is part of the session: its
+                // "Open playlist" button lands in Spotify, and walling that
+                // would leave a session with music that cannot be chosen.
+                focusList = if (FocusSound.isSpotify(cfg.focusSoundId)) {
+                    cfg.studyApps + SpotifyController.SPOTIFY_PACKAGE
+                } else {
+                    cfg.studyApps
+                }
+            }
+        }
         scope.launch {
             limitRepository.limits.collect { all ->
                 blockedLimits = all
@@ -132,6 +169,7 @@ class AppBlockService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     private val powerManager by lazy { getSystemService(PowerManager::class.java) }
+    private val keyguardManager by lazy { getSystemService(KeyguardManager::class.java) }
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(screenReceiver) }
@@ -140,13 +178,11 @@ class AppBlockService : Service() {
     }
 
     private suspend fun watch() {
-        // Give the limits collector a tick to land before deciding there is
-        // nothing to guard.
+        // Give the collectors a tick to land before the first decision.
         delay(POLL_MILLIS)
         while (true) {
-            val limits = blockedLimits
-            // Nothing left to guard, or the grant went away: stop burning cycles.
-            if (limits.isEmpty() || !usageRepository.hasAccess()) {
+            // The grant went away: nothing can be seen, so stop burning cycles.
+            if (!usageRepository.hasAccess()) {
                 stopSelf()
                 return
             }
@@ -169,64 +205,103 @@ class AppBlockService : Service() {
                 spentDay = today
             }
 
-            usageRepository.foregroundPackage()?.let { foregroundPackage = it }
-            val current = foregroundPackage
-            val limit = limits[current]
-            if (current == null || limit == null) {
-                baselineFor = null
-                // Genuinely somewhere else now (not just looking at our own wall),
-                // so a re-entry should be blocked at once rather than debounced.
-                if (current != null && current != packageName) lastBlockedPackage = null
+            // Still reading events while the lock screen is up keeps the fold
+            // current, but nothing behind the lock screen can be used.
+            val current = runCatching { tracker.current() }
+                .onFailure { Log.w(TAG, "foreground query failed", it) }
+                .getOrNull()
+            if (current == null || keyguardManager.isKeyguardLocked) {
                 delay(POLL_MILLIS)
                 continue
             }
-
-            // Spent earlier today against a cap at least this strict: no need to
-            // measure again — usage cannot have gone down.
-            val spentAt = spentToday[current]
-            if (spentAt != null && limit.minutes <= spentAt) {
-                block(current, limit.minutes * 60_000L, limit.minutes)
+            if (current == packageName) {
+                // Looking at our own wall (or WakeProof itself). Not a re-entry.
                 delay(POLL_MILLIS)
                 continue
             }
+            // Genuinely somewhere else now (not just looking at our own wall), so
+            // a re-entry should be walled at once rather than debounced.
+            if (current != lastBlockedPackage) lastBlockedPackage = null
 
-            val now = SystemClock.elapsedRealtime()
-            if (baselineFor != current || now - baselineTakenAt > BASELINE_REFRESH_MILLIS) {
-                baselineMillis = usageRepository.todayForegroundMillisFor(setOf(current))[current] ?: 0L
-                baselineTakenAt = SystemClock.elapsedRealtime()
-                baselineFor = current
+            val now = System.currentTimeMillis()
+            val gated = gatedCache.getOrPut(current) { AppGate.isGated(this, current, untouchable) }
+            if (gated) GatePasses.seen(current, now)
+            val limit = blockedLimits[current]
+            val verdict = gateVerdict(
+                essential = current in untouchable,
+                focusSessionActive = PomodoroTimerService.state.value.active,
+                onFocusList = current in focusList,
+                capSpent = limit != null && capSpent(current, limit),
+                gated = gated,
+                hasPass = GatePasses.isValid(current, now)
+            )
+            logVerdict(current, verdict)
+            when (verdict) {
+                GateVerdict.ALLOW -> Unit
+                GateVerdict.FOCUS_WALL -> wall(current) {
+                    BlockedActivity.focusIntent(this, usageRepository.appLabel(current))
+                }
+                GateVerdict.CAP_WALL -> wall(current) {
+                    BlockedActivity.intent(
+                        context = this,
+                        label = usageRepository.appLabel(current),
+                        usedMinutes = limit!!.minutes,
+                        capMinutes = limit.minutes
+                    )
+                }
+                GateVerdict.WAIT -> wall(current) {
+                    GateActivity.intent(this, current, usageRepository.appLabel(current))
+                }
             }
-            val usedMillis = baselineMillis + (SystemClock.elapsedRealtime() - baselineTakenAt)
-
-            if (usedMillis >= limit.minutes * 60_000L) {
-                spentToday[current] = limit.minutes
-                block(current, usedMillis, limit.minutes)
-            }
-            // Always the fast cadence, even with allowance left. Sleeping until
-            // the cap was due (up to 30 s) also stopped the loop noticing a
-            // switch to ANOTHER capped app whose allowance was already gone.
-            // The foreground check is a one-minute event query; only the
-            // midnight-onwards measurement is expensive, and that is still
-            // rate-limited by BASELINE_REFRESH_MILLIS.
             delay(POLL_MILLIS)
         }
     }
 
-    private fun block(packageName: String, usedMillis: Long, capMinutes: Int) {
+    /**
+     * Whether [current]'s BLOCK cap is spent today. Measures on entry and
+     * extrapolates between [BASELINE_REFRESH_MILLIS] refreshes; a spent app is
+     * remembered until midnight against a cap at least this strict.
+     */
+    private suspend fun capSpent(current: String, limit: AppLimit): Boolean {
+        val spentAt = spentToday[current]
+        if (spentAt != null && limit.minutes <= spentAt) return true
         val now = SystemClock.elapsedRealtime()
-        val repeat = packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS
-        if (repeat) return
+        if (baselineFor != current || now - baselineTakenAt > BASELINE_REFRESH_MILLIS) {
+            baselineMillis = usageRepository.todayForegroundMillisFor(setOf(current))[current] ?: 0L
+            baselineTakenAt = SystemClock.elapsedRealtime()
+            baselineFor = current
+        }
+        val usedMillis = baselineMillis + (SystemClock.elapsedRealtime() - baselineTakenAt)
+        if (usedMillis < limit.minutes * 60_000L) return false
+        spentToday[current] = limit.minutes
+        return true
+    }
+
+    /**
+     * Throws [intent] in front of [packageName], once: the wall pauses the app,
+     * so the next tick sees WakeProof in front and leaves it alone. The debounce
+     * only covers the tick or two before the wall's own resume lands.
+     */
+    private fun wall(packageName: String, intent: () -> Intent) {
+        val now = SystemClock.elapsedRealtime()
+        if (packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS) return
         lastBlockedPackage = packageName
         lastBlockedAt = now
+        runCatching { startActivity(intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { Log.w(TAG, "could not raise the wall over $packageName", it) }
+    }
 
-        startActivity(
-            BlockedActivity.intent(
-                context = this,
-                label = usageRepository.appLabel(packageName),
-                usedMinutes = (usedMillis / 60_000L).toInt(),
-                capMinutes = capMinutes
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
+    /**
+     * One line per change of app or verdict. The blocker failing after a phone
+     * call could not be reproduced from the code alone; this is what to read
+     * (`adb logcat -s AppBlockService`) the next time it happens.
+     */
+    private fun logVerdict(packageName: String, verdict: GateVerdict) {
+        val line = "$packageName -> $verdict"
+        if (line != lastLogged) {
+            lastLogged = line
+            Log.i(TAG, line)
+        }
     }
 
     /**
@@ -235,18 +310,26 @@ class AppBlockService : Service() {
      */
     private fun undismissablePackages(): Set<String> = essentialPackages(this)
 
+    /**
+     * The service is always on now, so its notification must be as quiet as
+     * Android allows: IMPORTANCE_MIN folds it to a single line at the bottom of
+     * the shade with no status-bar icon. A channel's importance cannot be
+     * lowered once created, hence a new id and the old LOW channel deleted.
+     */
     private fun createChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        manager.createNotificationChannel(
             NotificationChannel(
-                CHANNEL_ID, "App limit enforcement", NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "Shown while blocked apps are being kept shut" }
+                CHANNEL_ID, "Distraction wall", NotificationManager.IMPORTANCE_MIN
+            ).apply { description = "Shown while WakeProof keeps distracting apps behind a wall" }
         )
     }
 
     private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_launcher_foreground)
-        .setContentTitle("App limits are being enforced")
-        .setContentText("Blocked apps stay shut until midnight.")
+        .setContentTitle("Distractions are behind a wall")
+        .setContentText("Social apps wait 5 minutes. Spent and off-focus apps stay shut.")
         .setOngoing(true)
         .setContentIntent(
             PendingIntent.getActivity(
@@ -257,11 +340,17 @@ class AppBlockService : Service() {
         .build()
 
     companion object {
-        private const val CHANNEL_ID = "wakeproof_app_block"
+        private const val TAG = "AppBlockService"
+        private const val CHANNEL_ID = "wakeproof_app_block_quiet"
+        private const val LEGACY_CHANNEL_ID = "wakeproof_app_block"
         private const val NOTIFICATION_ID = 43
 
-        /** Foreground checks per tick. Fast enough to catch an app opening. */
-        private const val POLL_MILLIS = 1_000L
+        /**
+         * Foreground checks per tick. Halved from 1 s once the wait had to beat
+         * the Edge panel: this is the longest an app can show before its wall
+         * lands. Cheap, because [ForegroundTracker] reads only new events.
+         */
+        private const val POLL_MILLIS = 500L
 
         /** How long an extrapolated usage figure is trusted before re-measuring. */
         private const val BASELINE_REFRESH_MILLIS = 30_000L
@@ -285,14 +374,14 @@ class AppBlockService : Service() {
         private const val REBLOCK_MILLIS = 1_500L
 
         /**
-         * Starts enforcement when there is something to enforce and the grants are
-         * in place, and stops it otherwise. Safe to call on every app start; the
-         * draw-over-other-apps grant is what exempts this from the background
-         * foreground-service-start restriction.
+         * Starts enforcement when the grants are in place, and stops it otherwise.
+         * Always on with them: the wait covers every social app installed, so
+         * there is effectively always something to enforce. Safe to call on
+         * every app start; the draw-over-other-apps grant is what exempts this
+         * from the background foreground-service-start restriction.
          */
-        suspend fun sync(context: Context) {
-            val enforceable = DistractionLimitRepository(context).blockedPackages.first().isNotEmpty() &&
-                UsageStatsRepository(context).hasAccess() &&
+        fun sync(context: Context) {
+            val enforceable = UsageStatsRepository(context).hasAccess() &&
                 Settings.canDrawOverlays(context)
             val intent = Intent(context, AppBlockService::class.java)
             runCatching {

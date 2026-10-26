@@ -27,6 +27,7 @@ internal object WatchTimerStore {
     private const val LONG_MIN = "long_min"
     private const val SUBJECT = "subject"
     private const val TARGET = "target_blocks"
+    private const val LONG_EVERY = "long_break_every"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -51,7 +52,8 @@ internal object WatchTimerStore {
                 longBreakMinutes = p.getInt(LONG_MIN, defaults.longBreakMinutes)
             ),
             subject = p.getString(SUBJECT, null),
-            targetFocusBlocks = p.getInt(TARGET, 0)
+            targetFocusBlocks = p.getInt(TARGET, 0),
+            longBreakEvery = p.getInt(LONG_EVERY, WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK)
         )
     }
 
@@ -71,6 +73,7 @@ internal object WatchTimerStore {
             putInt(LONG_MIN, state.durations.longBreakMinutes)
             putString(SUBJECT, state.subject)
             putInt(TARGET, state.targetFocusBlocks)
+            putInt(LONG_EVERY, state.longBreakEvery)
         }
     }
 }

@@ -11,19 +11,12 @@ import com.ogenrwotdaniel.wakeproof.data.db.ParkedThoughtDao
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
-import com.ogenrwotdaniel.wakeproof.music.MusicGroup
-import com.ogenrwotdaniel.wakeproof.music.MusicLibrary
-import com.ogenrwotdaniel.wakeproof.music.MusicSelection
-import com.ogenrwotdaniel.wakeproof.music.Track
-import com.ogenrwotdaniel.wakeproof.music.groupsOf
-import com.ogenrwotdaniel.wakeproof.music.select
-import com.ogenrwotdaniel.wakeproof.pomodoro.NowPlaying
+import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -37,7 +30,7 @@ class PomodoroViewModel @Inject constructor(
     private val kimiRepository: KimiRepository,
     private val settingsRepository: SettingsRepository,
     private val parkedThoughtDao: ParkedThoughtDao,
-    private val musicLibrary: MusicLibrary,
+    private val spotify: SpotifyController,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
@@ -82,64 +75,22 @@ class PomodoroViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setFocusSoundId(id) }
     }
 
-    /** What the user's library holds, grouped for the picker. Loaded on demand. */
-    data class LibraryState(
-        val hasPermission: Boolean = false,
-        val loaded: Boolean = false,
-        val tracks: List<Track> = emptyList(),
-        val folders: List<MusicGroup> = emptyList(),
-        val albums: List<MusicGroup> = emptyList(),
-        val artists: List<MusicGroup> = emptyList(),
-        /** "Music/Study" and its song count, when the selection is a picked folder. */
-        val pickedFolderLabel: String? = null,
-        val pickedFolderCount: Int? = null
-    ) {
-        fun countFor(selection: MusicSelection): Int = tracks.select(selection).size
+    /** Whether to offer Spotify controls at all (false → the button installs it). */
+    val spotifyInstalled: Boolean = spotify.isInstalled()
+
+    private val _spotifyError = MutableStateFlow<String?>(null)
+    val spotifyError: StateFlow<String?> = _spotifyError
+
+    /** Opens the saved playlist, or Spotify itself when none is configured. */
+    fun openSpotify() {
+        val link = settings.value.spotifyPlaylistUri
+        _spotifyError.value =
+            if (spotify.open(link)) null else "Couldn't open Spotify on this phone."
     }
 
-    private val _library = MutableStateFlow(LibraryState(hasPermission = musicLibrary.hasPermission()))
-    val library: StateFlow<LibraryState> = _library
-
-    /** Re-reads the library — after the permission is granted, or the picker opens. */
-    fun loadLibrary() {
-        viewModelScope.launch {
-            val granted = musicLibrary.hasPermission()
-            val tracks = musicLibrary.tracks()
-            val (folders, albums, artists) = groupsOf(tracks)
-            val picked = MusicSelection.decode(settingsRepository.settings.first().musicSelection)
-                as? MusicSelection.PickedFolder
-            _library.value = LibraryState(
-                hasPermission = granted,
-                loaded = true,
-                tracks = tracks,
-                folders = folders,
-                albums = albums,
-                artists = artists,
-                pickedFolderLabel = picked?.let { musicLibrary.folderLabel(it.treeUri) },
-                pickedFolderCount = picked?.let { musicLibrary.folderTracks(it.treeUri).size }
-            )
-        }
-    }
-
-    /** A folder came back from the system folder browser: keep access to it and play it. */
-    fun onFolderPicked(treeUri: android.net.Uri) {
-        viewModelScope.launch {
-            val previous = MusicSelection.decode(settingsRepository.settings.first().musicSelection)
-            musicLibrary.rememberFolder(treeUri, previous)
-            settingsRepository.setMusicSelection(MusicSelection.PickedFolder(treeUri.toString()).encode())
-            loadLibrary()
-        }
-    }
-
-    val nowPlaying: StateFlow<NowPlaying?> = PomodoroTimerService.nowPlaying
-
-    fun setMusicSelection(selection: MusicSelection) {
-        viewModelScope.launch { settingsRepository.setMusicSelection(selection.encode()) }
-    }
-
-    fun setMusicShuffle(value: Boolean) {
-        viewModelScope.launch { settingsRepository.setMusicShuffle(value) }
-    }
+    fun spotifyPlayPause() = spotify.playPause()
+    fun spotifyNext() = spotify.next()
+    fun spotifyPrevious() = spotify.previous()
 
     fun setActiveSubject(name: String) {
         viewModelScope.launch { settingsRepository.setActiveSubject(name) }

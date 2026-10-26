@@ -41,6 +41,7 @@ import com.ogenrwotdaniel.wakeproof.ui.deviceUses24HourClock
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import androidx.compose.ui.unit.dp
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -250,8 +251,8 @@ fun SettingsScreen(
             SwitchSetting(
                 label = "Study sound",
                 description = "Sound plays automatically during focus phases. Pick the source " +
-                    "on the Pomodoro screen — an ambient loop (rain, fireplace…) or your own " +
-                    "music from this phone, one or the other. Turn off for silence.",
+                    "on the Pomodoro screen — an ambient loop (rain, fireplace…) or Spotify, " +
+                    "one or the other. Turn off for silence.",
                 checked = settings.focusMusicEnabled,
                 onCheckedChange = viewModel::setFocusMusicEnabled
             )
@@ -264,12 +265,13 @@ fun SettingsScreen(
                     onCommit = viewModel::setSoundFadeSeconds
                 )
                 Text(
-                    text = "The study sound — a loop or your own music — eases up from " +
-                        "silence when a phase starts and back down before it ends, " +
-                        "instead of snapping on and off. 0 turns fading off. The " +
-                        "fade-out starts this many seconds before the phase ends, so a " +
-                        "long fade wants a long phase — 60 s on a 5 min break spends a " +
-                        "fifth of it easing away.",
+                    text = "The ambient loop eases up from silence when a phase starts and " +
+                        "back down before it ends, instead of snapping on and off. " +
+                        "0 turns fading off. The fade-out starts this many seconds " +
+                        "before the phase ends, so a long fade wants a long phase — " +
+                        "60 s on a 5 min break spends a fifth of it easing away. " +
+                        "Spotify is controlled with media keys, which carry no " +
+                        "volume, so it is unaffected.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -353,6 +355,14 @@ fun SettingsScreen(
                 onOpenPicker = viewModel::loadInstalledApps,
                 onToggle = viewModel::toggleStudyApp,
                 onFocusCreditApp = viewModel::setFocusCreditApp
+            )
+
+            HorizontalDivider()
+
+            SpotifySection(
+                playlistUri = settings.spotifyPlaylistUri,
+                installed = viewModel.spotifyInstalled,
+                onPlaylistChange = viewModel::setSpotifyPlaylistUri
             )
 
             HorizontalDivider()
@@ -499,6 +509,71 @@ fun SettingsScreen(
 }
 
 /**
+ * Spotify hand-off settings: the playlist the study button opens (paste the
+ * "Share → Copy link" URL). Whether playback follows the timer is not a switch
+ * here — it follows from picking Spotify as the study sound on the Pomodoro
+ * screen. No Spotify login happens either: WakeProof only deep-links out and
+ * sends media keys, so there is nothing to authorise.
+ */
+@Composable
+private fun SpotifySection(
+    playlistUri: String,
+    installed: Boolean,
+    onPlaylistChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Seeded once per saved value: typing must not be clobbered by DataStore emissions.
+    var draft by remember(playlistUri) { mutableStateOf(playlistUri) }
+
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = "Spotify", style = MaterialTheme.typography.titleMedium)
+        if (!installed) {
+            Text(
+                text = "Spotify isn't installed — the button on the Pomodoro screen will " +
+                    "offer to install it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Focus playlist link") },
+            placeholder = { Text("https://open.spotify.com/playlist/…") },
+            singleLine = true
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { onPlaylistChange(draft) },
+                enabled = draft.trim() != playlistUri
+            ) { Text("Save") }
+            if (playlistUri.isNotBlank()) {
+                OutlinedButton(
+                    onClick = {
+                        draft = ""
+                        onPlaylistChange("")
+                    }
+                ) { Text("Clear") }
+            }
+        }
+        Text(
+            text = "In Spotify: playlist → ⋯ → Share → Copy link, then paste it here. " +
+                "Left blank, the button just opens Spotify.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "To let Spotify be your study sound, pick it in the sound row on the " +
+                "Pomodoro screen. It then plays and pauses with the timer, and no ambient " +
+                "loop plays underneath it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
  * Opt-in to WakeProof's minimalist home screen. Uses the system's own
  * default-home request rather than a switch of ours, so it is always the phone,
  * not WakeProof, that decides what Home opens — and going back to One UI Home
@@ -554,9 +629,10 @@ private fun LauncherSection(modifier: Modifier = Modifier) {
 }
 
 /**
- * Apps that count as studying. During a focus block they are safe to switch to
- * — the tree keeps growing — and on the Screen time page their minutes are
- * shown as study time rather than counted against you.
+ * Apps that count as studying. They are the focus list: during a session they
+ * are the only apps that open (everything else meets the focus wall), and on
+ * the Screen time page their minutes are shown as study time rather than
+ * counted against you. Adding is locked while a session runs.
  */
 @Composable
 private fun StudyAppsSection(
@@ -571,9 +647,12 @@ private fun StudyAppsSection(
 ) {
     var picking by remember { mutableStateOf(false) }
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val sessionRunning by PomodoroTimerService.state
+            .collectAsStateWithLifecycle()
         Text(text = "Study apps", style = MaterialTheme.typography.titleSmall)
         Text(
-            text = "Safe to use mid-focus, and shown as study time on the Screen time page.",
+            text = "Your focus list: the only apps that open during a focus session " +
+                "(the phone always works). Also shown as study time on the Screen time page.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -592,8 +671,11 @@ private fun StudyAppsSection(
                 onOpenPicker()
                 picking = true
             },
+            enabled = !sessionRunning.active,
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Add a study app…") }
+        ) {
+            Text(if (sessionRunning.active) "Locked until the session ends" else "Add a study app…")
+        }
 
         Text(text = "Focus time is spent in", style = MaterialTheme.typography.bodyLarge)
         Text(

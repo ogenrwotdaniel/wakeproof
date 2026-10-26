@@ -7,7 +7,8 @@ import android.telecom.TelecomManager
 
 /**
  * Apps nothing in WakeProof may ever stand in front of: WakeProof itself, the
- * system UI, Settings, the default dialer and the home screen.
+ * system UI, Settings, the default dialer (with its in-call screen) and the
+ * home screen.
  *
  * Shared by two features with the same failure mode. A hard app block with no
  * override would otherwise brick the phone, including the path to turning the
@@ -18,6 +19,13 @@ fun essentialPackages(context: Context): Set<String> = buildSet {
     add(context.packageName)
     add("com.android.systemui")
     add("com.android.settings")
+    // The in-call screen is its own package on most phones, separate from the
+    // dialer. With nuclear focus walling every app not on the focus list, a
+    // missing entry here would put a wall over an incoming call.
+    addAll(IN_CALL_PACKAGES)
+    // Runtime-permission dialogs, including ones WakeProof itself raises.
+    add("com.google.android.permissioncontroller")
+    add("com.android.permissioncontroller")
     runCatching {
         context.getSystemService(TelecomManager::class.java).defaultDialerPackage
     }.getOrNull()?.let(::add)
@@ -28,3 +36,11 @@ fun essentialPackages(context: Context): Set<String> = buildSet {
         )?.activityInfo?.packageName
     }.getOrNull()?.let(::add)
 }
+
+/** In-call screens: Samsung, AOSP, and Google's dialer, which hosts its own. */
+private val IN_CALL_PACKAGES = setOf(
+    "com.samsung.android.incallui",
+    "com.android.incallui",
+    "com.google.android.dialer",
+    "com.android.server.telecom"
+)

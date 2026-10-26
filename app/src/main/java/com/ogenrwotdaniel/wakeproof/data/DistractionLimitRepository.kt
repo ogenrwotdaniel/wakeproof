@@ -2,6 +2,8 @@ package com.ogenrwotdaniel.wakeproof.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -36,17 +38,6 @@ data class AppLimit(val minutes: Int, val mode: LimitMode = LimitMode.NUDGE)
 data class PendingLimitChange(val limit: AppLimit?, val effectiveAtMillis: Long)
 
 /**
- * How long a loosening waits. [pendingHours] is a SHORTER wait queued behind
- * the current one — shortening the wait is itself a loosening, so it has to sit
- * out the wait it is trying to shorten, or 48 h would be 24 h with one extra tap.
- */
-data class CoolingOff(
-    val hours: Int = DistractionLimitRepository.DEFAULT_COOLING_OFF_HOURS,
-    val pendingHours: Int? = null,
-    val pendingAtMillis: Long = 0L
-)
-
-/**
  * Per-app daily screen-time caps ("Instagram ≤ 30 min/day") plus a
  * notified-today marker so each app nudges at most once per day. Entries are
  * flat "pkg|minutes|mode" strings in DataStore. Constructible without Hilt
@@ -70,37 +61,6 @@ class DistractionLimitRepository @Inject constructor(
         all.filterValues { it.mode == LimitMode.BLOCK }.keys
     }
 
-    /** The cooling-off in force, plus any shorter one queued behind it. */
-    val coolingOff: Flow<CoolingOff> = dataStore.data.map { prefs ->
-        CoolingOff(
-            hours = prefs[COOLING_HOURS]?.takeIf { it in COOLING_OFF_CHOICES_HOURS }
-                ?: DEFAULT_COOLING_OFF_HOURS,
-            pendingHours = prefs[COOLING_PENDING_HOURS]?.takeIf { it in COOLING_OFF_CHOICES_HOURS },
-            pendingAtMillis = prefs[COOLING_PENDING_AT] ?: 0L
-        )
-    }
-
-    /**
-     * Changes the cooling-off. Longer applies now (stricter); shorter is queued
-     * for the CURRENT cooling-off, then lands like any other loosening. Choosing
-     * the current value again drops a queued shortening.
-     */
-    suspend fun requestCoolingOffHours(hours: Int, nowMillis: Long = System.currentTimeMillis()) {
-        if (hours !in COOLING_OFF_CHOICES_HOURS) return
-        dataStore.edit { prefs ->
-            val current = prefs[COOLING_HOURS]?.takeIf { it in COOLING_OFF_CHOICES_HOURS }
-                ?: DEFAULT_COOLING_OFF_HOURS
-            if (hours >= current) {
-                prefs[COOLING_HOURS] = hours
-                prefs.remove(COOLING_PENDING_HOURS)
-                prefs.remove(COOLING_PENDING_AT)
-            } else if (prefs[COOLING_PENDING_HOURS] != hours) {
-                prefs[COOLING_PENDING_HOURS] = hours
-                prefs[COOLING_PENDING_AT] = nowMillis + current * HOUR_MILLIS
-            }
-        }
-    }
-
     /** Package → a loosening queued behind the cooling-off. */
     val pendingChanges: Flow<Map<String, PendingLimitChange>> = dataStore.data.map { prefs ->
         parsePending(prefs[PENDING] ?: emptySet())
@@ -111,11 +71,13 @@ class DistractionLimitRepository @Inject constructor(
      *
      * Anything that makes the cap STRICTER (a new cap, fewer minutes, Nudge →
      * Block) applies at once. Anything that LOOSENS it (removing it, more
-     * minutes, Block → Nudge) is queued and only lands [coolingOff] hours
-     * (24 or 48, the user's choice) later. The limit exists to overrule the person at the moment they want
-     * the app; if that same person can undo it in two taps at that same moment,
-     * it overrules nothing. A day is long enough for the urge to pass and short
-     * enough that a cap set wrongly is not a life sentence.
+     * minutes, Block → Nudge) is queued and only lands [COOLING_OFF_HOURS]
+     * (one week) later. The limit exists to overrule the person at the moment
+     * they want the app; if that same person can undo it in two taps at that
+     * same moment, it overrules nothing. It was 24 h, then a 24/48 h choice —
+     * the user found a day or two short enough to simply wait out on a bad
+     * week, so it is now a week and not a setting: a choice of wait is itself
+     * something to loosen.
      *
      * Returns the queued change, or null when it applied immediately.
      */
@@ -128,18 +90,19 @@ class DistractionLimitRepository @Inject constructor(
         val proposed = minutes?.takeIf { it > 0 }?.let { AppLimit(it, mode) }
         var queued: PendingLimitChange? = null
         dataStore.edit { prefs ->
+            // Before queueing anything new, or the one-off below would mistake a
+            // change queued under the week for one queued under the old wait.
+            moveOntoWeek(prefs)
             val current = parseLimits(prefs[LIMITS] ?: emptySet())[packageName]
             val pending = parsePending(prefs[PENDING] ?: emptySet())
             val otherPending = pending - packageName
-            val waitHours = prefs[COOLING_HOURS]?.takeIf { it in COOLING_OFF_CHOICES_HOURS }
-                ?: DEFAULT_COOLING_OFF_HOURS
             if (isLoosening(current, proposed)) {
                 // Asking again for the same loosening keeps its clock; asking for
                 // a different one restarts it, or a small queued change could be
                 // swapped for "remove" on the eve of landing.
                 val existing = pending[packageName]
                 val change = if (existing != null && existing.limit == proposed) existing
-                else PendingLimitChange(proposed, nowMillis + waitHours * HOUR_MILLIS)
+                else PendingLimitChange(proposed, nowMillis + COOLING_OFF_HOURS * HOUR_MILLIS)
                 prefs[PENDING] = encodePending(otherPending + (packageName to change))
                 queued = change
             } else {
@@ -166,13 +129,7 @@ class DistractionLimitRepository @Inject constructor(
     suspend fun promoteDuePending(nowMillis: Long = System.currentTimeMillis()): Boolean {
         var changed = false
         dataStore.edit { prefs ->
-            val queuedHours = prefs[COOLING_PENDING_HOURS]
-            if (queuedHours != null && (prefs[COOLING_PENDING_AT] ?: 0L) <= nowMillis) {
-                prefs[COOLING_HOURS] = queuedHours
-                prefs.remove(COOLING_PENDING_HOURS)
-                prefs.remove(COOLING_PENDING_AT)
-                changed = true
-            }
+            moveOntoWeek(prefs)
             val pending = parsePending(prefs[PENDING] ?: emptySet())
             val due = pending.filterValues { it.effectiveAtMillis <= nowMillis }
             if (due.isEmpty()) return@edit
@@ -183,6 +140,25 @@ class DistractionLimitRepository @Inject constructor(
             changed = true
         }
         return changed
+    }
+
+    /**
+     * One-off: the old 24/48 h wait dies with this build, and a loosening queued
+     * under it is moved onto the week, counted from when it was asked for. An
+     * install that never touched the old picker stored no wait at all and was
+     * on the 24 h default.
+     */
+    private fun moveOntoWeek(prefs: MutablePreferences) {
+        if (prefs[MOVED_ONTO_WEEK] == true) return
+        val legacyHours = prefs[LEGACY_COOLING_HOURS] ?: 24
+        val moved = parsePending(prefs[PENDING] ?: emptySet()).mapValues { (_, change) ->
+            change.copy(effectiveAtMillis = movedOntoWeek(change.effectiveAtMillis, legacyHours))
+        }
+        prefs[PENDING] = encodePending(moved)
+        prefs.remove(LEGACY_COOLING_HOURS)
+        prefs.remove(LEGACY_COOLING_PENDING_HOURS)
+        prefs.remove(LEGACY_COOLING_PENDING_AT)
+        prefs[MOVED_ONTO_WEEK] = true
     }
 
     /** True once per package per [epochDay]; marks as notified as a side effect. */
@@ -203,17 +179,26 @@ class DistractionLimitRepository @Inject constructor(
         private val NOTIFIED = stringSetPreferencesKey("notified")
         private val PENDING = stringSetPreferencesKey("pending")
 
-        private val COOLING_HOURS = intPreferencesKey("cooling_off_hours")
-        private val COOLING_PENDING_HOURS = intPreferencesKey("cooling_off_pending_hours")
-        private val COOLING_PENDING_AT = longPreferencesKey("cooling_off_pending_at")
+        /** The 24/48 h wait the user could once pick; read only to migrate off it. */
+        private val LEGACY_COOLING_HOURS = intPreferencesKey("cooling_off_hours")
+        private val LEGACY_COOLING_PENDING_HOURS = intPreferencesKey("cooling_off_pending_hours")
+        private val LEGACY_COOLING_PENDING_AT = longPreferencesKey("cooling_off_pending_at")
+        private val MOVED_ONTO_WEEK = booleanPreferencesKey("cooling_off_moved_onto_week")
 
         private const val HOUR_MILLIS = 60L * 60 * 1000
 
-        /** How long a loosening waits before it lands, unless the user chose longer. */
-        const val DEFAULT_COOLING_OFF_HOURS = 24
+        /** How long every loosening waits before it lands: one week, fixed. */
+        const val COOLING_OFF_HOURS = 7 * 24
 
-        /** The waits on offer. Anything else stored is read as the default. */
-        val COOLING_OFF_CHOICES_HOURS = listOf(24, 48)
+        /**
+         * Where a loosening queued under the old [legacyWaitHours] lands under the
+         * week: the same request time plus the new wait. Never earlier than it was
+         * already due — moving a change off the old rule must not loosen anything.
+         */
+        fun movedOntoWeek(effectiveAtMillis: Long, legacyWaitHours: Int): Long {
+            val requestedAt = effectiveAtMillis - legacyWaitHours.coerceAtLeast(0) * HOUR_MILLIS
+            return maxOf(effectiveAtMillis, requestedAt + COOLING_OFF_HOURS * HOUR_MILLIS)
+        }
 
         /**
          * True when [proposed] lets the app be used more than [current] does:

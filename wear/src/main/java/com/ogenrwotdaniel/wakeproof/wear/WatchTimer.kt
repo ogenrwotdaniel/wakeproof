@@ -50,8 +50,10 @@ data class WatchTimerState(
     val durations: WatchDurations = WatchDurations(),
     /** The phone's active study subject at start, carried onto every block. */
     val subject: String? = null,
-    /** Focus blocks this session runs before stopping itself; 0 = free run until stopped. */
-    val targetFocusBlocks: Int = 0
+    /** Focus blocks this session runs before stopping itself. */
+    val targetFocusBlocks: Int = 0,
+    /** A long break follows every this-many focus blocks (3 in the 3-hour preset). */
+    val longBreakEvery: Int = WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK
 ) {
     fun remainingMillisAt(now: Long): Long =
         if (running) (phaseEndsAt - now).coerceAtLeast(0L) else remainingMillis
@@ -88,12 +90,19 @@ data class Advance(
     val sessionFinished: Boolean = false
 )
 
-/** The session lengths offered on the watch — the same four the phone offers. */
+/**
+ * The session lengths offered on the watch — the same four the phone offers.
+ *
+ * No free run, as on the phone (2026-10-27): a session has no pause and no stop
+ * any more, so it must end by itself. [THREE_HOURS] replaced it and, like the
+ * phone's, is a fixed recipe rather than a target: three 25-minute pomodoros,
+ * a 15-minute break, three more — whatever the phone's length settings say.
+ */
 enum class WatchSession(val label: String, val minutes: Int) {
-    FREE("Free focus", 0),
     ONE_HOUR("1 hour", 60),
     NINETY("1 h 30 min", 90),
-    TWO_HOURS("2 hours", 120)
+    TWO_HOURS("2 hours", 120),
+    THREE_HOURS("3 hours", 180)
 }
 
 /**
@@ -105,28 +114,37 @@ object WatchTimer {
     /** Same cadence as the phone: a long break after every fourth focus block. */
     const val FOCUS_BLOCKS_PER_LONG_BREAK = 4
 
+    /** The 3-hour recipe's lengths. A COPY of the phone's `sessionPlan` — keep in step by hand. */
+    val THREE_HOUR_DURATIONS = WatchDurations(25, 5, 15)
+    const val THREE_HOUR_BLOCKS = 6
+    const val THREE_HOUR_LONG_BREAK_EVERY = 3
+
     fun start(
         durations: WatchDurations,
         subject: String?,
         now: Long,
-        session: WatchSession = WatchSession.FREE
-    ) = WatchTimerState(
-        active = true,
-        running = true,
-        phase = WatchPhase.FOCUS,
-        phaseEndsAt = now + durations.millisOf(WatchPhase.FOCUS),
-        focusStartedAt = now,
-        durations = durations,
-        subject = subject,
-        targetFocusBlocks = focusBlocksForSession(
-            session.minutes, durations.focusMinutes, durations.shortBreakMinutes
+        session: WatchSession = WatchSession.ONE_HOUR
+    ): WatchTimerState {
+        val threeHours = session == WatchSession.THREE_HOURS
+        val used = if (threeHours) THREE_HOUR_DURATIONS else durations
+        return WatchTimerState(
+            active = true,
+            running = true,
+            phase = WatchPhase.FOCUS,
+            phaseEndsAt = now + used.millisOf(WatchPhase.FOCUS),
+            focusStartedAt = now,
+            durations = used,
+            subject = subject,
+            targetFocusBlocks = if (threeHours) THREE_HOUR_BLOCKS
+            else focusBlocksForSession(session.minutes, used.focusMinutes, used.shortBreakMinutes),
+            longBreakEvery = if (threeHours) THREE_HOUR_LONG_BREAK_EVERY else FOCUS_BLOCKS_PER_LONG_BREAK
         )
-    )
+    }
 
     /**
      * How many focus blocks a timed session runs: the whole number whose real
      * length (k focus + (k-1) breaks — a session ends on focus, no trailing
-     * break) lands closest to what was asked for. 0 for a free run.
+     * break) lands closest to what was asked for.
      *
      * A COPY of the phone's `pomodoro/focusBlocksForSession` — no shared module,
      * so keep the two in step by hand, like the Data Layer contracts.
@@ -138,15 +156,19 @@ object WatchTimer {
         return ((sessionMinutes + breakMinutes + cycle / 2) / cycle).coerceAtLeast(1)
     }
 
-    fun pause(state: WatchTimerState, now: Long): WatchTimerState =
-        if (!state.active || !state.running) state
-        else state.copy(running = false, remainingMillis = state.remainingMillisAt(now))
-
+    /**
+     * There is no pause (nuclear focus, as on the phone). Resume remains for a
+     * run paused by a build from before that rule, which would otherwise be
+     * stuck paused forever with no way to stop it either.
+     */
     fun resume(state: WatchTimerState, now: Long): WatchTimerState =
         if (!state.active || state.running) state
         else state.copy(running = true, phaseEndsAt = now + state.remainingMillis)
 
-    /** A stop mid-focus credits nothing, as on the phone: only whole blocks count. */
+    /**
+     * The idle state. Reached only when a session finishes, or an overdue one
+     * is closed after a reboot — never by the user, who has no stop.
+     */
     fun stop(): WatchTimerState = WatchTimerState()
 
     /** Ends a break early and starts the next focus block. A focus block cannot be skipped. */
@@ -181,7 +203,7 @@ object WatchTimer {
         if (state.targetFocusBlocks in 1..done) {
             return Advance(stop(), block, sessionFinished = true)
         }
-        val next = if (done % FOCUS_BLOCKS_PER_LONG_BREAK == 0) WatchPhase.LONG_BREAK
+        val next = if (done % state.longBreakEvery.coerceAtLeast(1) == 0) WatchPhase.LONG_BREAK
         else WatchPhase.SHORT_BREAK
         return Advance(
             state.copy(

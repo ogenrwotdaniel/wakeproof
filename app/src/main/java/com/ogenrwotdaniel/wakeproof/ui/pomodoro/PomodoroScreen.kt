@@ -54,16 +54,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.ogenrwotdaniel.wakeproof.music.MusicSelection
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusQuote
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusQuotes
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusTree
-import com.ogenrwotdaniel.wakeproof.pomodoro.NowPlaying
 import androidx.compose.ui.text.font.FontStyle
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroPhase
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.pomodoro.THREE_HOUR_SESSION_MINUTES
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.theme.BreakGreen
 import java.util.Calendar
@@ -87,8 +86,7 @@ fun PomodoroScreen(
     val chat by viewModel.chat.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val thoughts by viewModel.thoughts.collectAsStateWithLifecycle()
-    val library by viewModel.library.collectAsStateWithLifecycle()
-    val nowPlaying by viewModel.nowPlaying.collectAsStateWithLifecycle()
+    val spotifyError by viewModel.spotifyError.collectAsStateWithLifecycle()
     val quote = remember(timer.completedFocusSessions) {
         FocusQuotes.forBlock(java.time.LocalDate.now().toEpochDay(), timer.completedFocusSessions)
     }
@@ -114,12 +112,7 @@ fun PomodoroScreen(
                 subject = settings.activeSubject,
                 quote = quote.takeIf { settings.focusQuotes },
                 showTree = settings.deepFocus,
-                nowPlaying = nowPlaying,
-                onPreviousTrack = { PomodoroTimerService.previousTrack(context) },
-                onNextTrack = { PomodoroTimerService.nextTrack(context) },
                 onPark = viewModel::parkThought,
-                onPause = { PomodoroTimerService.pause(context) },
-                onStop = { PomodoroTimerService.stop(context) },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
@@ -200,8 +193,9 @@ fun PomodoroScreen(
                 Spacer(Modifier.height(8.dp))
             }
             if (!timer.active) {
-                // Timed sessions auto-loop focus/break cycles and stop themselves;
-                // "Free" keeps looping until stopped.
+                // Every session is timed and stops itself — there is no Free:
+                // with no pause or stop, a session that never ends would never
+                // let go of the phone.
                 // FlowRow, not Row: four buttons of these labels do not fit
                 // across a phone, and a Row would simply cut the last one off.
                 FlowRow(
@@ -213,28 +207,26 @@ fun PomodoroScreen(
                             Text(label)
                         }
                     }
-                    OutlinedButton(onClick = { PomodoroTimerService.start(context) }) {
-                        Text("Free")
-                    }
                 }
                 Text(
                     text = "${settings.focusMinutes} min focus · ${settings.shortBreakMinutes} min " +
-                        "break · loops automatically. A timed session runs whole " +
-                        "pomodoros and stops itself; Free keeps cycling until you stop it.",
+                        "break. 3 h is 3 × 25 min, a 15 min break, then 3 × 25 min. Once " +
+                        "started, a session cannot be paused or stopped, and only your " +
+                        "focus list (Settings → Study apps) opens until it ends — breaks " +
+                        "included.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
+            } else if (!timer.running) {
+                // Only reachable for a session paused before pausing was removed.
+                Button(onClick = { PomodoroTimerService.resume(context) }) { Text("Resume") }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (timer.running) {
-                        Button(onClick = { PomodoroTimerService.pause(context) }) { Text("Pause") }
-                    } else {
-                        Button(onClick = { PomodoroTimerService.resume(context) }) { Text("Resume") }
-                    }
-                    OutlinedButton(onClick = { PomodoroTimerService.reset(context) }) { Text("Reset") }
-                    OutlinedButton(onClick = { PomodoroTimerService.stop(context) }) { Text("Stop") }
-                }
+                Text(
+                    text = "Locked in until the last pomodoro ends.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -250,29 +242,23 @@ fun PomodoroScreen(
                 focusEnabled = settings.focusMusicEnabled,
                 breakEnabled = settings.breakMusicEnabled,
                 soundId = settings.focusSoundId,
+                spotifyInstalled = viewModel.spotifyInstalled,
                 onFocusChange = viewModel::setMusicEnabled,
                 onBreakChange = viewModel::setBreakMusicEnabled,
                 onSoundChange = viewModel::setFocusSound
             )
-            if ((settings.focusMusicEnabled || settings.breakMusicEnabled) &&
-                FocusSound.isLibrary(settings.focusSoundId)
-            ) {
-                Spacer(Modifier.height(4.dp))
-                MusicLibraryControls(
-                    library = library,
-                    selection = MusicSelection.decode(settings.musicSelection),
-                    shuffle = settings.musicShuffle,
-                    nowPlaying = nowPlaying,
-                    sessionActive = timer.active,
-                    onLoad = viewModel::loadLibrary,
-                    onSelect = viewModel::setMusicSelection,
-                    onFolderPicked = viewModel::onFolderPicked,
-                    onShuffleChange = viewModel::setMusicShuffle,
-                    onPrevious = { PomodoroTimerService.previousTrack(context) },
-                    onNext = { PomodoroTimerService.nextTrack(context) }
-                )
-            }
+
             Spacer(Modifier.height(8.dp))
+            SpotifyControls(
+                installed = viewModel.spotifyInstalled,
+                hasPlaylist = settings.spotifyPlaylistUri.isNotBlank(),
+                followsTimer = FocusSound.isSpotify(settings.focusSoundId),
+                error = spotifyError,
+                onOpen = viewModel::openSpotify,
+                onPlayPause = viewModel::spotifyPlayPause,
+                onNext = viewModel::spotifyNext,
+                onPrevious = viewModel::spotifyPrevious
+            )
             if (settings.focusLockPhone) {
                 Text(
                     text = if (timer.active && timer.running) {
@@ -325,10 +311,11 @@ fun PomodoroScreen(
  * * **Parking a thought.** The one interaction that exists *because* you are
  *   mid-focus: it is how a distraction gets written down in two taps instead of
  *   being chased. Removing it would push people back to the thing it replaces.
- * * **Pause and stop.** Deliberately plain text, at the bottom, with no colour
- *   drawing the eye — an alarm clock app should make quitting possible and
- *   unappealing, not impossible. A phone call, a person at the door, and a real
- *   emergency all outrank a pomodoro.
+ *
+ * Pause and stop used to survive here too, as plain text at the bottom. They
+ * are gone (2026-10-27, the user's call): a session now runs to its end with
+ * no way out. A phone call still works — the dialer and in-call screen are
+ * essential apps that no wall ever covers.
  *
  * Everything else comes back by itself at the break.
  */
@@ -338,12 +325,7 @@ private fun FocusMode(
     subject: String,
     quote: FocusQuote?,
     showTree: Boolean,
-    nowPlaying: NowPlaying?,
-    onPreviousTrack: () -> Unit,
-    onNextTrack: () -> Unit,
     onPark: (String) -> Unit,
-    onPause: () -> Unit,
-    onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var parking by remember { mutableStateOf(false) }
@@ -389,18 +371,6 @@ private fun FocusMode(
             Spacer(Modifier.height(20.dp))
             QuoteLine(quote = it, modifier = Modifier.widthIn(max = 420.dp))
         }
-        // The one control that is not about the timer: a song you cannot stand
-        // is a bigger distraction than a button to skip it.
-        nowPlaying?.let {
-            Spacer(Modifier.height(16.dp))
-            NowPlayingRow(
-                nowPlaying = it,
-                onPrevious = onPreviousTrack,
-                onNext = onNextTrack,
-                centered = true,
-                modifier = Modifier.widthIn(max = 420.dp)
-            )
-        }
 
         Spacer(Modifier.height(32.dp))
         if (parking) {
@@ -430,12 +400,8 @@ private fun FocusMode(
         }
 
         Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            TextButton(onClick = onPause) { Text("Pause") }
-            TextButton(onClick = onStop) { Text("End session") }
-        }
         Text(
-            text = "Everything else is back at the break.",
+            text = "No pause, no stop. Only your focus list opens until the session ends.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -528,13 +494,14 @@ private fun CountdownRing(
  * focus/break lengths, so these are targets rather than promises: 90 minutes
  * at 25+5 is three pomodoros, which is the nearest whole number of blocks that
  * fits. 1 h 30 exists because two pomodoros is short for real work and four is
- * more than most sittings — it was the length people were building by hand out
- * of a Free session and a clock.
+ * more than most sittings. 3 h replaced Free and is a fixed recipe, not a
+ * target — see [sessionPlan].
  */
 private val SESSION_LENGTHS = listOf(
     "1 h" to 60,
     "1 h 30" to 90,
-    "2 h" to 120
+    "2 h" to 120,
+    "3 h" to THREE_HOUR_SESSION_MINUTES
 )
 
 /**
@@ -675,8 +642,9 @@ private fun ThoughtParking(
 /**
  * Study-sound controls: independent focus/break toggles plus the source picker
  * (shown while either toggle is on). The picker is exclusive — one of the
- * bundled loops *or* the user's own music, never both. Turning both toggles off
- * frees the audio output entirely.
+ * bundled loops *or* Spotify, never both — so choosing Spotify silences the
+ * ambient loop and hands the same phase toggles to Spotify instead. Turning
+ * both toggles off frees the audio output entirely.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -684,12 +652,13 @@ private fun MusicControls(
     focusEnabled: Boolean,
     breakEnabled: Boolean,
     soundId: String,
+    spotifyInstalled: Boolean,
     onFocusChange: (Boolean) -> Unit,
     onBreakChange: (Boolean) -> Unit,
     onSoundChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val libraryPicked = FocusSound.isLibrary(soundId)
+    val spotifyPicked = FocusSound.isSpotify(soundId)
     Column(modifier = modifier.fillMaxWidth()) {
         Text(text = "Study sound", style = MaterialTheme.typography.titleSmall)
         Row(
@@ -717,16 +686,26 @@ private fun MusicControls(
                         label = { Text(sound.label) }
                     )
                 }
-                // The user's own music sits in the same row as the loops
-                // because it is the same choice: whatever is selected here is
-                // the only sound.
-                FilterChip(
-                    selected = libraryPicked,
-                    onClick = { onSoundChange(FocusSound.LIBRARY_ID) },
-                    label = { Text("🎵 My music") }
-                )
+                // Spotify sits in the same row as the loops because it is the
+                // same choice: whatever is selected here is the only sound.
+                // Kept visible when already picked, even if Spotify got removed.
+                if (spotifyInstalled || spotifyPicked) {
+                    FilterChip(
+                        selected = spotifyPicked,
+                        onClick = { onSoundChange(FocusSound.SPOTIFY_ID) },
+                        label = { Text("🎧 Spotify") }
+                    )
+                }
             }
-            if (!libraryPicked) {
+            if (spotifyPicked) {
+                Text(
+                    text = "Spotify is your study sound — no ambient loop plays. Open the " +
+                        "playlist once below so Spotify owns playback; after that the timer " +
+                        "plays and pauses it for you.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
                 // Seven chips of two words each say nothing about what they
                 // sound like, and there is no auditioning a loop without
                 // starting a session. One line under the picker is the cheapest
@@ -739,6 +718,66 @@ private fun MusicControls(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Spotify hand-off row: one button to jump into the saved playlist (or the app),
+ * plus transport keys that work without leaving WakeProof — the useful half when
+ * "Lock phone during focus" makes switching apps impossible. Media keys reach
+ * whichever app currently owns the media session, so they only hit Spotify while
+ * Spotify is the phone's active player.
+ */
+@Composable
+private fun SpotifyControls(
+    installed: Boolean,
+    hasPlaylist: Boolean,
+    followsTimer: Boolean,
+    error: String?,
+    onOpen: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onOpen) {
+                Text(
+                    when {
+                        !installed -> "Get Spotify"
+                        hasPlaylist -> "🎧 Focus playlist"
+                        else -> "🎧 Spotify"
+                    }
+                )
+            }
+            if (installed) {
+                OutlinedButton(onClick = onPrevious) { Text("⏮") }
+                OutlinedButton(onClick = onPlayPause) { Text("⏯") }
+                OutlinedButton(onClick = onNext) { Text("⏭") }
+            }
+        }
+        Text(
+            text = when {
+                !installed -> "Spotify isn't installed on this phone."
+                followsTimer -> "Spotify is your study sound: it plays and pauses with the timer."
+                hasPlaylist -> "Controls work while the phone is pinned to WakeProof."
+                else -> "Set a focus playlist in Settings to open it in one tap."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        error?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
         }
     }
 }

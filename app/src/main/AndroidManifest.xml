@@ -26,20 +26,21 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
-    <!-- The user's own music library, played by the Pomodoro timer. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
 
-    <!-- Visibility of launcher apps: labels screen-time entries, lists apps on
-         the minimalist home screen, and covers opening Samsung Music. -->
+    <!-- Visibility of launcher apps: labels screen-time entries and lists apps on
+         the minimalist home screen. Spotify is named explicitly so the
+         study-music button can tell whether it is installed and deep-link
+         straight into it. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <package android:name="com.spotify.music" />
     </queries>
 
     <!-- allowBackup=false: restoring EncryptedSharedPreferences from a backup of another
@@ -109,6 +110,19 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleTask"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WakeProof" />
+
+        <!-- The five-minute wait in front of social, video and messaging apps.
+             Same isolation as the wall above; noHistory plus finishing in onStop
+             means leaving it resets the wait. Standard launch mode, not
+             singleTask: a wait for a second app must be a new wait, and the
+             one it covers finishes itself on stop. -->
+        <activity
+            android:name=".distraction.GateActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@style/Theme.WakeProof" />

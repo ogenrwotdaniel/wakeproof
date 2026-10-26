@@ -71,24 +71,24 @@ enum class FocusSound(
 
     companion object {
         /**
-         * Sentinel sound id meaning "the user's own music is the study sound".
-         * Stored in the same setting as the bundled loops so the choice is
-         * exclusive: picking it silences the loops instead of stacking a second
-         * track on top.
+         * Sentinel sound id meaning "Spotify is the study sound". Stored in the
+         * same setting as the bundled loops so the choice is exclusive: picking
+         * Spotify silences the loops instead of stacking a second track on top.
          */
-        const val LIBRARY_ID = "library"
+        const val SPOTIFY_ID = "spotify"
 
         /**
-         * Spotify's old sentinel. Spotify was replaced by the in-app library
-         * player in 1.5, and someone who had picked an outside music source
-         * wanted music, not a rain loop — so it reads as [LIBRARY_ID].
+         * The 1.5 in-app music player's sentinel. That player was removed again
+         * in favour of Spotify (user's choice), and someone who had picked their
+         * own music wanted music, not a rain loop — so it reads as [SPOTIFY_ID].
+         * Without this, `fromId` would have fallen through to the ambient loop.
          */
-        private const val LEGACY_SPOTIFY_ID = "spotify"
+        private const val LEGACY_LIBRARY_ID = "library"
 
-        fun isLibrary(id: String?): Boolean = id == LIBRARY_ID || id == LEGACY_SPOTIFY_ID
+        fun isSpotify(id: String?): Boolean = id == SPOTIFY_ID || id == LEGACY_LIBRARY_ID
 
-        /** null when [id] selects the user's music library over a bundled loop. */
+        /** null when [id] selects Spotify (an outside player) over a bundled loop. */
         fun fromId(id: String?): FocusSound? =
-            if (isLibrary(id)) null else entries.firstOrNull { it.id == id } ?: AMBIENT
+            if (isSpotify(id)) null else entries.firstOrNull { it.id == id } ?: AMBIENT
     }
 }

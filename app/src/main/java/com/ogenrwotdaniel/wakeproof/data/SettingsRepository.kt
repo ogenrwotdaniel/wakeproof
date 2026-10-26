@@ -60,17 +60,15 @@ data class WakeProofSettings(
      * boundary the loop starts receding — a 60 s fade only makes sense on a
      * phase comfortably longer than a minute.
      *
-     * Applies to the bundled loops and to the user's own music alike.
+     * Spotify is driven by media keys, which carry no volume, so it is unaffected.
      */
     val soundFadeSeconds: Int = 5,
     /**
      * The single study-sound source: a [com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound]
-     * id, or `library` to play the user's own music from the phone instead.
+     * id, or `spotify` to let Spotify be the sound instead of a bundled loop.
+     * The 1.5 own-music id `library` also reads as Spotify — see `FocusSound.isSpotify`.
      */
     val focusSoundId: String = "focus_ambient",
-    /** Encoded [com.ogenrwotdaniel.wakeproof.music.MusicSelection]: what part of the library plays. */
-    val musicSelection: String = "all",
-    val musicShuffle: Boolean = true,
     /**
      * Pin the phone to WakeProof (screen pinning) while a session runs — focus
      * *and* break phases, released only by pause or stop. The break is part of
@@ -88,6 +86,8 @@ data class WakeProofSettings(
     val focusFloatingTimer: Boolean = true,
     /** Screen never times out while a session runs — focus *and* break phases. */
     val sessionKeepScreenOn: Boolean = true,
+    /** Playlist/album link or `spotify:` URI the Spotify button opens; blank = just the app. */
+    val spotifyPlaylistUri: String = "",
     val dailyFocusGoalMinutes: Int = 120,
     val studySubjects: Set<String> = setOf("General"),
     val activeSubject: String = "General",
@@ -143,12 +143,11 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             breakMusicEnabled = prefs[BREAK_MUSIC_ENABLED] ?: false,
             soundFadeSeconds = prefs[SOUND_FADE_SECONDS] ?: 5,
             focusSoundId = prefs[FOCUS_SOUND_ID] ?: "focus_ambient",
-            musicSelection = prefs[MUSIC_SELECTION] ?: "all",
-            musicShuffle = prefs[MUSIC_SHUFFLE] ?: true,
             focusLockPhone = prefs[FOCUS_LOCK_PHONE] ?: true,
             focusImmersiveTimer = prefs[FOCUS_IMMERSIVE_TIMER] ?: true,
             focusFloatingTimer = prefs[FOCUS_FLOATING_TIMER] ?: true,
             sessionKeepScreenOn = prefs[SESSION_KEEP_SCREEN_ON] ?: true,
+            spotifyPlaylistUri = prefs[SPOTIFY_PLAYLIST_URI] ?: "",
             dailyFocusGoalMinutes = prefs[DAILY_FOCUS_GOAL_MINUTES] ?: 120,
             studySubjects = prefs[STUDY_SUBJECTS]?.takeIf { it.isNotEmpty() } ?: setOf("General"),
             activeSubject = prefs[ACTIVE_SUBJECT] ?: "General",
@@ -186,8 +185,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun setFocusFloatingTimer(value: Boolean) = dataStore.edit { it[FOCUS_FLOATING_TIMER] = value }
     suspend fun setSessionKeepScreenOn(value: Boolean) =
         dataStore.edit { it[SESSION_KEEP_SCREEN_ON] = value }
-    suspend fun setMusicSelection(value: String) = dataStore.edit { it[MUSIC_SELECTION] = value }
-    suspend fun setMusicShuffle(value: Boolean) = dataStore.edit { it[MUSIC_SHUFFLE] = value }
+    suspend fun setSpotifyPlaylistUri(value: String) =
+        dataStore.edit { it[SPOTIFY_PLAYLIST_URI] = value.trim() }
     suspend fun setStudyApps(value: Set<String>) = dataStore.edit { it[STUDY_APPS] = value }
     suspend fun setFocusCreditApp(value: String) = dataStore.edit { it[FOCUS_CREDIT_APP] = value }
     suspend fun setFocusQuotes(value: Boolean) = dataStore.edit { it[FOCUS_QUOTES] = value }
@@ -262,8 +261,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         // Key name kept from when this only covered focus phases, so existing
         // installs keep their choice.
         val SESSION_KEEP_SCREEN_ON = booleanPreferencesKey("focus_keep_screen_on")
-        val MUSIC_SELECTION = stringPreferencesKey("music_selection")
-        val MUSIC_SHUFFLE = booleanPreferencesKey("music_shuffle")
+        // Survived the 1.5 own-music detour untouched, so a playlist saved
+        // before it is still there when Spotify comes back.
+        val SPOTIFY_PLAYLIST_URI = stringPreferencesKey("spotify_playlist_uri")
         val STUDY_APPS = stringSetPreferencesKey("study_apps")
         val FOCUS_CREDIT_APP = stringPreferencesKey("focus_credit_app")
         val FOCUS_QUOTES = booleanPreferencesKey("focus_quotes")

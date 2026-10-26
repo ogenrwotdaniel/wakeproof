@@ -1,6 +1,16 @@
 package com.ogenrwotdaniel.wakeproof.launcher
 
 import androidx.activity.compose.BackHandler
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
+import java.time.LocalDate
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -20,7 +30,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,8 +55,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
-import com.ogenrwotdaniel.wakeproof.data.LimitMode
-import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import java.time.Instant
@@ -80,20 +87,37 @@ private val MINDFUL_PAUSE_LINES = listOf(
     "Still here? The urge usually passes before the timer does."
 )
 
+/** How often "Other apps" reshuffles. Long enough to read, too short to learn. */
+private const val SHUFFLE_SECONDS = 4
+
+/** Agenda rows shown before "+ n more", so the list cannot take over the screen. */
+private const val AGENDA_MAX_ROWS = 6
+
 /**
- * The home screen proper. Two views: HOME (clock, today, favourites) and ALL
- * APPS (search + alphabetical list). Back from ALL APPS returns home; back on
- * HOME does nothing, as on any launcher.
+ * The home screen proper. Two views: HOME (clock, today, agenda, the permanent
+ * tools and a few pins) and OTHER APPS. Back from OTHER APPS returns home; back
+ * on HOME does nothing, as on any launcher.
+ *
+ * Built to be the least interesting screen on the phone. There is no search
+ * and no alphabetical list on purpose: both exist to get to an app as fast as
+ * possible, which is the habit this screen is trying to break. "Other apps" is
+ * a plain grey list that reshuffles every [SHUFFLE_SECONDS] seconds, so no app
+ * has a place to be found by muscle memory — you read the list or you give up.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun LauncherScreen(
     viewModel: LauncherViewModel,
     onLaunch: (String) -> Unit,
+    onWait: (InstalledApp) -> Unit,
     onOpenWakeProof: () -> Unit,
     onAppInfo: (String) -> Unit
 ) {
     val apps by viewModel.apps.collectAsStateWithLifecycle()
+    val pinned by viewModel.pinned.collectAsStateWithLifecycle()
+    val gated by viewModel.gated.collectAsStateWithLifecycle()
+    val agenda by viewModel.agenda.collectAsStateWithLifecycle()
+    val doneKeys by viewModel.doneEventKeys.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val today by viewModel.today.collectAsStateWithLifecycle()
@@ -101,14 +125,27 @@ fun LauncherScreen(
     val timer by viewModel.timer.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var showAll by remember { mutableStateOf(false) }
+    var showOthers by remember { mutableStateOf(false) }
     var pausing by remember { mutableStateOf<InstalledApp?>(null) }
-    BackHandler(enabled = showAll) { showAll = false }
+    BackHandler(enabled = showOthers) { showOthers = false }
 
-    // Capped apps go through the mindful pause; everything else opens at once.
+    var calendarAllowed by remember { mutableStateOf(viewModel.hasCalendarPermission()) }
+    val askCalendar = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        calendarAllowed = granted
+        if (granted) viewModel.refresh()
+    }
+
+    // Social, video and messaging apps sit out the five-minute wait — the same
+    // one AppBlockService throws up however else they are opened. Other capped
+    // apps get the shorter mindful pause; everything else opens at once.
     val open: (InstalledApp) -> Unit = { app ->
-        if (app.packageName in limits) pausing = app
-        else onLaunch(app.packageName)
+        when {
+            app.packageName in gated -> onWait(app)
+            app.packageName in limits -> pausing = app
+            else -> onLaunch(app.packageName)
+        }
     }
 
     Box(
@@ -118,15 +155,15 @@ fun LauncherScreen(
             .safeDrawingPadding()
             .padding(horizontal = 28.dp, vertical = 24.dp)
     ) {
-        if (showAll) {
-            AllApps(
-                apps = apps,
-                favorites = settings.launcherFavorites,
-                limits = limits,
-                onOpen = { open(it); showAll = false },
-                onToggleFavorite = viewModel::toggleFavorite,
+        if (showOthers) {
+            val pinnedPackages = pinned.map { it.packageName }.toSet() + settings.launcherFavorites
+            OtherApps(
+                apps = apps.filter { it.packageName !in pinnedPackages },
+                canPin = viewModel::canPin,
+                onOpen = { open(it); showOthers = false },
+                onPin = viewModel::toggleFavorite,
                 onAppInfo = onAppInfo,
-                onClose = { showAll = false }
+                onClose = { showOthers = false }
             )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -151,49 +188,61 @@ fun LauncherScreen(
                     modifier = Modifier.combinedClickable(onClick = onOpenWakeProof)
                 )
                 Text(
-                    text = when {
-                        timer.active -> "${timer.phase.label} running — open"
-                        else -> "Start focusing ›"
-                    },
+                    text = if (timer.active) "${timer.phase.label} running — open"
+                    else "Start focusing ›",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
+                    // A session cannot be stopped once started, so starting one
+                    // is a choice made on the timer screen, never a stray tap here.
                     modifier = Modifier
                         .padding(top = 6.dp)
-                        .combinedClickable(
-                            onClick = {
-                                if (timer.active) onOpenWakeProof()
-                                else PomodoroTimerService.start(context)
-                            }
-                        )
+                        .combinedClickable(onClick = onOpenWakeProof)
+                )
+
+                Spacer(Modifier.height(20.dp))
+                Agenda(
+                    events = agenda,
+                    doneKeys = doneKeys,
+                    allowed = calendarAllowed,
+                    onAllow = { askCalendar.launch(Manifest.permission.READ_CALENDAR) },
+                    onToggleDone = viewModel::setEventDone
                 )
 
                 Spacer(Modifier.weight(1f))
 
                 val byPackage = apps.associateBy { it.packageName }
-                val favorites = settings.launcherFavorites.mapNotNull { byPackage[it] }
-                if (favorites.isEmpty()) {
-                    Text(
-                        text = "Long-press any app in the list to pin it here.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
-                    )
-                }
-                favorites.forEach { app ->
-                    AppRow(
-                        app = app,
-                        limit = limits[app.packageName],
-                        big = true,
-                        isFavorite = true,
-                        onOpen = { open(app) },
-                        onToggleFavorite = { viewModel.toggleFavorite(app.packageName) },
-                        onAppInfo = { onAppInfo(app.packageName) }
-                    )
+                val favorites = settings.launcherFavorites
+                    .filter { it !in gated && it !in limits }
+                    .mapNotNull { byPackage[it] }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    pinned.forEach { app ->
+                        AppRow(
+                            app = app,
+                            big = true,
+                            pinMenu = null,
+                            onOpen = { open(app) },
+                            onAppInfo = { onAppInfo(app.packageName) }
+                        )
+                    }
+                    favorites.forEach { app ->
+                        AppRow(
+                            app = app,
+                            big = true,
+                            pinMenu = "Remove from home",
+                            onOpen = { open(app) },
+                            onPinMenu = { viewModel.toggleFavorite(app.packageName) },
+                            onAppInfo = { onAppInfo(app.packageName) }
+                        )
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = onOpenWakeProof) { Text("WakeProof", color = Color.Gray) }
-                    TextButton(onClick = { showAll = true }) { Text("All apps ›", color = Color.White) }
+                    TextButton(onClick = { showOthers = true }) { Text("Other apps", color = Color.Gray) }
                 }
             }
         }
@@ -208,6 +257,81 @@ fun LauncherScreen(
                     onLaunch(app.packageName)
                 },
                 onCancel = { pausing = null }
+            )
+        }
+    }
+}
+
+/**
+ * Today and the next two days from the phone's calendar, as plain lines. A
+ * tap ticks an event off (the same done-state as the Agenda screen in the
+ * app). Without the calendar permission it is one line offering to ask.
+ */
+@Composable
+private fun Agenda(
+    events: List<AgendaEvent>,
+    doneKeys: Set<String>,
+    allowed: Boolean,
+    onAllow: () -> Unit,
+    onToggleDone: (AgendaEvent, Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    if (!allowed) {
+        Text(
+            text = "Show my calendar here ›",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.Gray,
+            modifier = Modifier.clickable(onClick = onAllow)
+        )
+        return
+    }
+    if (events.isEmpty()) {
+        Text(
+            text = "Nothing on the calendar for the next three days.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.DarkGray
+        )
+        return
+    }
+    val todayDate = LocalDate.now()
+    var lastDay: LocalDate? = null
+    Column {
+        events.take(AGENDA_MAX_ROWS).forEach { event ->
+            val day = eventDay(event)
+            if (day != lastDay) {
+                lastDay = day
+                Text(
+                    text = when (day) {
+                        todayDate -> "Today"
+                        todayDate.plusDays(1) -> "Tomorrow"
+                        else -> day.format(DateTimeFormatter.ofPattern("EEEE"))
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                )
+            }
+            val done = event.key in doneKeys
+            val start = Instant.ofEpochMilli(event.beginMillis).atZone(ZoneId.systemDefault())
+            Text(
+                text = (if (event.allDay) "All day" else formatAlarmTime(context, start.hour, start.minute)) +
+                    "   " + event.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (done) Color.DarkGray else Color.LightGray,
+                textDecoration = if (done) TextDecoration.LineThrough else null,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggleDone(event, !done) }
+                    .padding(vertical = 3.dp)
+            )
+        }
+        if (events.size > AGENDA_MAX_ROWS) {
+            Text(
+                text = "+ ${events.size - AGENDA_MAX_ROWS} more",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.DarkGray
             )
         }
     }
@@ -237,41 +361,42 @@ private fun Clock() {
     )
 }
 
+/**
+ * One app as a line of text. Long-press offers App info, plus the pin action
+ * named by [pinMenu] when there is one (null for the permanent tools and for
+ * apps that may not be pinned).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AppRow(
     app: InstalledApp,
-    limit: AppLimit?,
     big: Boolean,
-    isFavorite: Boolean,
+    pinMenu: String?,
     onOpen: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onAppInfo: () -> Unit
+    onAppInfo: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPinMenu: () -> Unit = {}
 ) {
     var menu by remember { mutableStateOf(false) }
-    Box {
+    Box(modifier) {
         Text(
-            text = app.label + when (limit?.mode) {
-                LimitMode.BLOCK -> "  🔒"
-                LimitMode.NUDGE -> "  ⏳"
-                null -> ""
-            },
-            fontSize = if (big) 28.sp else 20.sp,
-            // Capped apps are drawn dim: still there, just not inviting.
-            color = if (limit != null) Color.Gray else Color.White,
+            text = app.label,
+            fontSize = if (big) 22.sp else 17.sp,
+            color = if (big) Color.White else Color.Gray,
             modifier = Modifier
-                .fillMaxWidth()
                 .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
-                .padding(vertical = if (big) 8.dp else 10.dp)
+                .padding(vertical = if (big) 6.dp else 9.dp)
         )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(
-                text = { Text(if (isFavorite) "Remove from home" else "Pin to home") },
-                onClick = {
-                    menu = false
-                    onToggleFavorite()
-                }
-            )
+            if (pinMenu != null) {
+                DropdownMenuItem(
+                    text = { Text(pinMenu) },
+                    onClick = {
+                        menu = false
+                        onPinMenu()
+                    }
+                )
+            }
             DropdownMenuItem(
                 text = { Text("App info") },
                 onClick = {
@@ -283,29 +408,35 @@ private fun AppRow(
     }
 }
 
+/**
+ * Every other app, in an order that changes every [SHUFFLE_SECONDS] seconds.
+ * No search, no alphabet, no icons, no usage badges: nothing that helps an
+ * app be found fast, because finding one fast is the reflex being starved.
+ */
 @Composable
-private fun AllApps(
+private fun OtherApps(
     apps: List<InstalledApp>,
-    favorites: List<String>,
-    limits: Map<String, AppLimit>,
+    canPin: (String) -> Boolean,
     onOpen: (InstalledApp) -> Unit,
-    onToggleFavorite: (String) -> Unit,
+    onPin: (String) -> Unit,
     onAppInfo: (String) -> Unit,
     onClose: () -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
-    val shown = remember(apps, query) {
-        if (query.isBlank()) apps else apps.filter { it.label.contains(query, ignoreCase = true) }
+    var round by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(SHUFFLE_SECONDS * 1_000L)
+            round++
+        }
     }
+    val shown = remember(apps, round) { apps.shuffled() }
     Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Search apps") },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Other apps", color = Color.DarkGray, style = MaterialTheme.typography.bodyMedium)
             TextButton(onClick = onClose) { Text("Close", color = Color.Gray) }
         }
         Spacer(Modifier.height(8.dp))
@@ -313,12 +444,12 @@ private fun AllApps(
             items(shown, key = { it.packageName }) { app ->
                 AppRow(
                     app = app,
-                    limit = limits[app.packageName],
                     big = false,
-                    isFavorite = app.packageName in favorites,
+                    pinMenu = if (canPin(app.packageName)) "Pin to home" else null,
                     onOpen = { onOpen(app) },
-                    onToggleFavorite = { onToggleFavorite(app.packageName) },
-                    onAppInfo = { onAppInfo(app.packageName) }
+                    onPinMenu = { onPin(app.packageName) },
+                    onAppInfo = { onAppInfo(app.packageName) },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }

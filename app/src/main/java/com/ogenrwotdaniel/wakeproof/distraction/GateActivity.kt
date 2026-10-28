@@ -29,11 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ogenrwotdaniel.wakeproof.alarm.encodeSnoozeCount
-import com.ogenrwotdaniel.wakeproof.alarm.snoozesTakenOn
 import com.ogenrwotdaniel.wakeproof.ui.theme.WakeProofTheme
 import kotlinx.coroutines.delay
-import java.time.LocalDate
+import kotlinx.coroutines.runBlocking
 
 /**
  * The five-minute wait in front of a social, video or messaging app (see
@@ -47,8 +45,9 @@ import java.time.LocalDate
  * Only when they are up does "Open" appear, and it grants a [GatePasses] pass
  * good for that one visit.
  *
- * Every wait abandoned before "Open" is counted ([WalkedAwayTally]) and the
- * day's count is shown, so turning away reads as a score rather than nothing.
+ * Every wait abandoned before "Open" is counted ([GateLog]) and the day's
+ * count is shown, so turning away reads as a score rather than nothing. Each
+ * visit let through today makes the next wait longer ([gateWaitSeconds]).
  */
 class GateActivity : ComponentActivity() {
 
@@ -64,7 +63,17 @@ class GateActivity : ComponentActivity() {
         val startedAt = savedInstanceState?.getLong(STATE_STARTED_AT)
             ?: SystemClock.elapsedRealtime()
         this.startedAt = startedAt
-        val walkedAway = WalkedAwayTally.today(this)
+        val today = GateLog.today(this)
+        // Fixed when the wait starts, so a visit granted elsewhere meanwhile
+        // cannot stretch a wait already running. Survives rotation with it.
+        val waitSeconds = savedInstanceState?.getInt(STATE_WAIT_SECONDS)?.takeIf { it > 0 }
+            ?: gateWaitSeconds(
+                opensToday = today.opened,
+                // One small DataStore read; the screen cannot be drawn without it.
+                escalating = runBlocking { WallRulesRepository(applicationContext).current() }
+                    .escalatingWait
+            )
+        this.waitSeconds = waitSeconds
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = goHome()
@@ -75,7 +84,8 @@ class GateActivity : ComponentActivity() {
                 GateScreen(
                     label = label,
                     startedAt = startedAt,
-                    walkedAwayToday = walkedAway,
+                    waitSeconds = waitSeconds,
+                    walkedAwayToday = today.walkedAway,
                     onOpen = { open(packageName) },
                     onLeave = ::goHome
                 )
@@ -84,6 +94,7 @@ class GateActivity : ComponentActivity() {
     }
 
     private var startedAt = 0L
+    private var waitSeconds = 0
 
     /** Set by "Open", so leaving through it is not counted as walking away. */
     private var opened = false
@@ -91,6 +102,7 @@ class GateActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putLong(STATE_STARTED_AT, startedAt)
+        outState.putInt(STATE_WAIT_SECONDS, waitSeconds)
     }
 
     override fun onStop() {
@@ -102,13 +114,14 @@ class GateActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (!opened && !isChangingConfigurations && intent.hasExtra(EXTRA_PACKAGE)) {
-            WalkedAwayTally.record(this)
+            GateLog.recordWalkedAway(this)
         }
         super.onDestroy()
     }
 
     private fun open(packageName: String) {
         opened = true
+        GateLog.recordOpened(this)
         GatePasses.grant(packageName, System.currentTimeMillis())
         packageManager.getLaunchIntentForPackage(packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -129,36 +142,13 @@ class GateActivity : ComponentActivity() {
         private const val EXTRA_PACKAGE = "package"
         private const val EXTRA_LABEL = "label"
         private const val STATE_STARTED_AT = "started_at"
+        private const val STATE_WAIT_SECONDS = "wait_seconds"
 
         fun intent(context: Context, packageName: String, label: String): Intent =
             Intent(context, GateActivity::class.java)
                 .putExtra(EXTRA_PACKAGE, packageName)
                 .putExtra(EXTRA_LABEL, label)
     }
-}
-
-/**
- * How many waits were abandoned today, in plain SharedPreferences as
- * `epochDay:count` — the same encoding as the snooze allowance, and for the
- * same reason: a count from another day is simply stale, so nothing has to
- * run at midnight to reset it.
- */
-private object WalkedAwayTally {
-    private const val PREFS = "gate_tally"
-    private const val KEY = "walked_away"
-
-    fun today(context: Context): Int =
-        snoozesTakenOn(prefs(context).getString(KEY, null), LocalDate.now().toEpochDay())
-
-    fun record(context: Context) {
-        val day = LocalDate.now().toEpochDay()
-        prefs(context).edit()
-            .putString(KEY, encodeSnoozeCount(day, today(context) + 1))
-            .apply()
-    }
-
-    private fun prefs(context: Context) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }
 
 /** How long each of [WAIT_LINES] stays up. Slow on purpose. */
@@ -183,6 +173,7 @@ private val WAIT_LINES = listOf(
 private fun GateScreen(
     label: String,
     startedAt: Long,
+    waitSeconds: Int,
     walkedAwayToday: Int,
     onOpen: () -> Unit,
     onLeave: () -> Unit
@@ -195,7 +186,7 @@ private fun GateScreen(
         }
     }
     val elapsed = ((now - startedAt) / 1_000).toInt().coerceAtLeast(0)
-    val left = (AppGate.GATE_WAIT_SECONDS - elapsed).coerceAtLeast(0)
+    val left = (waitSeconds - elapsed).coerceAtLeast(0)
     val grey = Color(0xFF8A8A8A)
 
     Column(
@@ -243,7 +234,8 @@ private fun GateScreen(
                 Text("Open $label", color = grey, textAlign = TextAlign.Start)
             }
             Text(
-                text = "Good for one visit. Close it or switch away and the next one waits five minutes again.",
+                text = "Good for one visit. Close it or switch away and the next one waits " +
+                    "again — longer each time today.",
                 color = grey.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(start = 12.dp, top = 8.dp)

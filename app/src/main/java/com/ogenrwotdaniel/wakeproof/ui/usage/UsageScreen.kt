@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,6 +49,13 @@ import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
 import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
+import com.ogenrwotdaniel.wakeproof.data.WallDay
+import com.ogenrwotdaniel.wakeproof.distraction.PendingRule
+import com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF
+import com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.RULE_ON
+import com.ogenrwotdaniel.wakeproof.distraction.WallRule
+import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
 import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
@@ -80,6 +88,12 @@ fun UsageScreen(
     val reportUi by viewModel.reportUi.collectAsStateWithLifecycle()
     var limitDialogFor by remember { mutableStateOf<InstalledApp?>(null) }
     var showAppPicker by remember { mutableStateOf(false) }
+    val wallRules by viewModel.wallRules.collectAsStateWithLifecycle()
+    val wallPending by viewModel.wallPending.collectAsStateWithLifecycle()
+    val wallWeek by viewModel.wallWeek.collectAsStateWithLifecycle()
+    val otherProfileApps by viewModel.otherProfileApps.collectAsStateWithLifecycle()
+    val dndAccess by viewModel.dndAccess.collectAsStateWithLifecycle()
+    var editingRule by remember { mutableStateOf<WallRule?>(null) }
     val context = LocalContext.current
 
     LifecycleResumeEffect(Unit) {
@@ -304,6 +318,24 @@ fun UsageScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    if (otherProfileApps.isNotEmpty()) {
+                        OtherProfileWarning(otherProfileApps)
+                    }
+                    WallRulesSection(
+                        rules = wallRules,
+                        pending = wallPending,
+                        dndAccess = dndAccess,
+                        onToggle = { rule, on -> viewModel.requestRule(rule, if (on) RULE_ON else RULE_OFF) },
+                        onEdit = { editingRule = it },
+                        onKeep = viewModel::cancelRulePending,
+                        onGrantDnd = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                            )
+                        }
+                    )
+                    if (wallWeek.isNotEmpty()) WallWeekCard(wallWeek)
+
                     Text(
                         text = "Weekly coach report",
                         style = MaterialTheme.typography.titleSmall,
@@ -361,6 +393,18 @@ fun UsageScreen(
                 limitDialogFor = null
             },
             onDismiss = { limitDialogFor = null }
+        )
+    }
+
+    editingRule?.let { rule ->
+        RuleValueDialog(
+            rule = rule,
+            current = wallRules.value(rule),
+            onSet = { value ->
+                viewModel.requestRule(rule, value)
+                editingRule = null
+            },
+            onDismiss = { editingRule = null }
         )
     }
 
@@ -605,4 +649,209 @@ private fun UsageWeekChart(week: List<DayUsage>, modifier: Modifier = Modifier) 
         },
         modifier = modifier
     )
+}
+
+/**
+ * The rules in front of the waiting apps. Same contract as a limit: switching
+ * one on, or making it stricter, is immediate; anything looser waits a week,
+ * and the row says when it lands.
+ */
+@Composable
+private fun WallRulesSection(
+    rules: WallRules,
+    pending: Map<WallRule, PendingRule>,
+    dndAccess: Boolean,
+    onToggle: (WallRule, Boolean) -> Unit,
+    onEdit: (WallRule) -> Unit,
+    onKeep: (WallRule) -> Unit,
+    onGrantDnd: () -> Unit
+) {
+    val context = LocalContext.current
+    Text(
+        text = "Walls",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    WallRule.entries.forEach { rule ->
+        val value = rules.value(rule)
+        val switchable = rule != WallRule.DAILY_BUDGET_MINUTES && rule != WallRule.BEDTIME_START_MINUTES
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(text = ruleTitle(rule, value, context), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = ruleSubtitle(rule),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (rule == WallRule.SESSION_DND && value != RULE_OFF && !dndAccess) {
+                    TextButton(onClick = onGrantDnd) { Text("Allow Do Not Disturb access") }
+                }
+                pending[rule]?.let { change ->
+                    Text(
+                        text = "⌛ ${pendingRuleText(rule, change.value, context)} on " +
+                            landsAt(context, change.effectiveAtMillis),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
+            if (rule in pending) TextButton(onClick = { onKeep(rule) }) { Text("Keep") }
+            if (switchable) {
+                Switch(checked = value != RULE_OFF, onCheckedChange = { onToggle(rule, it) })
+            } else {
+                TextButton(onClick = { onEdit(rule) }) { Text("Edit") }
+            }
+        }
+    }
+    Text(
+        text = "Turning a wall off or loosening it waits a week. Tightening applies at once.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Context): String = when (rule) {
+    WallRule.GATE_BROWSERS -> "Browsers wait too"
+    WallRule.ESCALATING_WAIT -> "Each wait today is longer"
+    WallRule.DAILY_BUDGET_MINUTES ->
+        if (value <= 0) "Daily budget: off" else "Daily budget: $value min"
+    WallRule.EARN_THE_FEED -> "Earn the feed"
+    WallRule.BEDTIME_START_MINUTES ->
+        if (value < 0) "Bedtime wall: off"
+        else "Bedtime wall from ${formatAlarmTime(context, value / 60, value % 60)}"
+    WallRule.SESSION_DND -> "Do Not Disturb in sessions"
+}
+
+private fun ruleSubtitle(rule: WallRule): String = when (rule) {
+    WallRule.GATE_BROWSERS -> "Chrome, Samsung Internet and the rest wait like social apps."
+    WallRule.ESCALATING_WAIT -> "5 min, then 10, 15… up to 30 min for each visit today."
+    WallRule.DAILY_BUDGET_MINUTES -> "Shared by every waiting app. Spent = shut until midnight."
+    WallRule.EARN_THE_FEED -> "Waiting apps stay shut until today's first focus block."
+    WallRule.BEDTIME_START_MINUTES -> "Waiting apps shut until your morning alarm is verified."
+    WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
+}
+
+private fun pendingRuleText(rule: WallRule, value: Int, context: android.content.Context): String =
+    when (rule) {
+        WallRule.DAILY_BUDGET_MINUTES -> if (value <= 0) "Budget off" else "Becomes $value min"
+        WallRule.BEDTIME_START_MINUTES ->
+            if (value < 0) "Bedtime wall off"
+            else "Moves to ${formatAlarmTime(context, value / 60, value % 60)}"
+        else -> if (value == RULE_OFF) "Turns off" else "Turns on"
+    }
+
+/** Slider for the two rules that are a number rather than a switch. */
+@Composable
+private fun RuleValueDialog(
+    rule: WallRule,
+    current: Int,
+    onSet: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val budget = rule == WallRule.DAILY_BUDGET_MINUTES
+    // Budget: 5–120 min in 5s. Bedtime: 12:00–23:45 in quarter hours.
+    val range = if (budget) 5f..120f else (12 * 60f)..(23 * 60f + 45)
+    val step = if (budget) 5 else 15
+    var picked by remember {
+        mutableFloatStateOf(
+            (if (current < 0 || (budget && current == 0)) if (budget) 25 else 17 * 60 else current)
+                .toFloat().coerceIn(range)
+        )
+    }
+    val value = (picked / step).toInt() * step
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (budget) "Daily budget" else "Bedtime wall") },
+        text = {
+            Column {
+                Text(
+                    if (budget) "$value min a day across every waiting app."
+                    else "From ${formatAlarmTime(context, value / 60, value % 60)} until your " +
+                        "morning alarm is verified."
+                )
+                Slider(
+                    value = picked,
+                    onValueChange = { picked = it },
+                    valueRange = range,
+                    steps = ((range.endInclusive - range.start) / step).toInt() - 1
+                )
+                Text(
+                    text = "More time or a later start waits a week. Less applies now.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSet(value) }) { Text("Set") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSet(if (budget) 0 else RULE_OFF_MINUTES) }) {
+                    Text("Turn off in 7 days")
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
+}
+
+/** Waiting apps WakeProof cannot see, because they live in another profile. */
+@Composable
+private fun OtherProfileWarning(apps: List<String>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "Outside the walls",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.error
+            )
+            Text(
+                text = "${apps.joinToString()} ${if (apps.size == 1) "is" else "are"} also " +
+                    "installed in Secure Folder, Dual Messenger or a work profile. WakeProof " +
+                    "can't see that copy, so it has no wait, no budget and no focus wall. " +
+                    "Uninstall it there.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+/** The last 7 days at the wall, today last. */
+@Composable
+private fun WallWeekCard(week: List<WallDay>) {
+    val walked = week.sumOf { it.walkedAway }
+    val opened = week.sumOf { it.opened }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(text = "This week at the wall", style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = "Walked away $walked · opened $opened · " +
+                    "${formatMinutes(week.sumOf { it.waitingAppMinutes })} in waiting apps",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            week.forEach { day ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        text = chartDayLabel(day.epochDay, LocalDate.now().toEpochDay()),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "↩ ${day.walkedAway} · ✓ ${day.opened} · ${formatMinutes(day.waitingAppMinutes)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Text(
+                text = "↩ walked away from the wait · ✓ waited and opened",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }

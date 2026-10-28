@@ -36,6 +36,7 @@ class DistractionLimitWorker(
         val usageRepository = UsageStatsRepository(applicationContext)
         // Land any loosening whose cooling-off (24 or 48 h) has run out.
         limitsRepository.promoteDuePending()
+        WallRulesRepository(applicationContext).promoteDue()
 
         // Blocked apps get a wall instead, so a nudge for them would only be a
         // notification about something the user has already been shown.

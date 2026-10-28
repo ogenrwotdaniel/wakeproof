@@ -23,7 +23,17 @@ import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
 import com.ogenrwotdaniel.wakeproof.data.db.SubjectMinutes
 import com.ogenrwotdaniel.wakeproof.data.studyTimeSummary
 import com.ogenrwotdaniel.wakeproof.data.sync.StudyUsageSync
+import com.ogenrwotdaniel.wakeproof.data.WallDay
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
+import com.ogenrwotdaniel.wakeproof.distraction.AppGate
+import com.ogenrwotdaniel.wakeproof.distraction.GateLog
+import com.ogenrwotdaniel.wakeproof.distraction.PendingRule
+import com.ogenrwotdaniel.wakeproof.distraction.WallRule
+import com.ogenrwotdaniel.wakeproof.distraction.WallRules
+import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
+import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
+import com.ogenrwotdaniel.wakeproof.distraction.gatedAppsInOtherProfiles
+import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -37,6 +47,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Backs the phone-usage screen; [refresh] re-checks the special-access grant. */
 @HiltViewModel
@@ -47,6 +59,7 @@ class UsageViewModel @Inject constructor(
     private val reportRepository: WeeklyReportRepository,
     private val settingsRepository: SettingsRepository,
     private val studyUsageSync: StudyUsageSync,
+    private val wallRulesRepository: WallRulesRepository,
     statsRepository: StatsRepository,
     completionRepository: CompletionRepository,
     @ApplicationContext private val context: Context
@@ -83,8 +96,37 @@ class UsageViewModel @Inject constructor(
         focusBySubject = subjectMinutes.value,
         screenByDay = _snapshot.value?.week.orEmpty(),
         topApps = _snapshot.value?.topApps.orEmpty(),
-        dailyGoalMinutes = settingsRepository.settings.first().dailyFocusGoalMinutes
+        dailyGoalMinutes = settingsRepository.settings.first().dailyFocusGoalMinutes,
+        wall = _wallWeek.value
     )
+
+    /** The rules in front of the waiting apps, and the loosenings queued behind them. */
+    val wallRules: StateFlow<WallRules> = wallRulesRepository.rules
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WallRules())
+    val wallPending: StateFlow<Map<WallRule, PendingRule>> = wallRulesRepository.pending
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Stricter applies now; looser waits the week, like a limit. */
+    fun requestRule(rule: WallRule, value: Int) {
+        viewModelScope.launch { wallRulesRepository.request(rule, value) }
+    }
+
+    fun cancelRulePending(rule: WallRule) {
+        viewModelScope.launch { wallRulesRepository.cancelPending(rule) }
+    }
+
+    private val _wallWeek = MutableStateFlow<List<WallDay>>(emptyList())
+
+    /** The last 7 days at the wall, oldest first. */
+    val wallWeek: StateFlow<List<WallDay>> = _wallWeek.asStateFlow()
+
+    private val _otherProfileApps = MutableStateFlow<List<String>>(emptyList())
+
+    /** Waiting apps in Secure Folder / Dual Messenger, which nothing here can see. */
+    val otherProfileApps: StateFlow<List<String>> = _otherProfileApps.asStateFlow()
+
+    private val _dndAccess = MutableStateFlow(SessionDnd.hasAccess(context))
+    val dndAccess: StateFlow<Boolean> = _dndAccess.asStateFlow()
 
     /** Package → daily distraction cap. */
     val limits: StateFlow<Map<String, AppLimit>> = limitRepository.limits
@@ -196,10 +238,34 @@ class UsageViewModel @Inject constructor(
     val today: StateFlow<TodayStatus> = statsRepository.observeToday()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TodayStatus())
 
+    /** Gate counts from this device's log, joined with the time spent in waiting apps. */
+    private suspend fun measureWallWeek(): List<WallDay> {
+        val gateBrowsers = wallRulesRepository.current().gateBrowsers
+        val waiting = withContext(Dispatchers.IO) {
+            val essentials = essentialPackages(context)
+            val browsers = AppGate.browserPackages(context)
+            usageStatsRepository.installedApps().map { it.packageName }.filter {
+                AppGate.isGated(context, it, essentials, browsers, gateBrowsers)
+            }.toSet()
+        }
+        val minutes = usageStatsRepository.weekMinutesFor(waiting).associate { it.epochDay to it.minutes }
+        return GateLog.lastDays(context).map { day ->
+            WallDay(day.epochDay, day.opened, day.walkedAway, minutes[day.epochDay] ?: 0L)
+        }
+    }
+
     /** Called on every resume: the user may have just granted usage access. */
     fun refresh() {
         viewModelScope.launch {
             if (limitRepository.promoteDuePending()) AppBlockService.sync(context)
+            wallRulesRepository.promoteDue()
+        }
+        _dndAccess.value = SessionDnd.hasAccess(context)
+        viewModelScope.launch {
+            val gateBrowsers = wallRulesRepository.current().gateBrowsers
+            _otherProfileApps.value = withContext(Dispatchers.IO) {
+                gatedAppsInOtherProfiles(context, gateBrowsers)
+            }
         }
         _hasAccess.value = usageStatsRepository.hasAccess()
         if (!_hasAccess.value) return
@@ -210,6 +276,7 @@ class UsageViewModel @Inject constructor(
             val capped = limitRepository.currentLimits().keys
             _limitUsage.value = usageStatsRepository.todayForegroundMillisFor(capped)
                 .mapValues { (_, millis) -> millis / 60_000 }
+            _wallWeek.value = measureWallWeek()
             val study = studyUsageSync.localMinutesToday()
             _localStudy.value = study
             // Publish ours before reading theirs, so a peer opening its card

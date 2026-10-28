@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.UserManager
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +44,9 @@ class BootReceiver : BroadcastReceiver() {
                 // App blocking used to wait for the next 15-minute worker run
                 // after a reboot, leaving capped apps open in the meantime.
                 runCatching { AppBlockService.sync(context.applicationContext) }
+                // A reboot does not end a focus session; it resumes, minus the
+                // tree of the block it interrupted.
+                runCatching { PomodoroTimerService.restore(context.applicationContext) }
             } finally {
                 pendingResult.finish()
             }

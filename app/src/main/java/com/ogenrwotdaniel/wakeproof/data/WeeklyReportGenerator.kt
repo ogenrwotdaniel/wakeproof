@@ -16,7 +16,17 @@ data class WeekStats(
     val screenByDay: List<DayUsage> = emptyList(),
     /** Today's heaviest apps, longest first; empty without usage access. */
     val topApps: List<AppUsage> = emptyList(),
-    val dailyGoalMinutes: Int = 120
+    val dailyGoalMinutes: Int = 120,
+    /** The wait and the waiting apps, day by day; empty when not measured. */
+    val wall: List<WallDay> = emptyList()
+)
+
+/** One day in front of the wall: waits sat out vs walked away, and time spent past them. */
+data class WallDay(
+    val epochDay: Long,
+    val opened: Int = 0,
+    val walkedAway: Int = 0,
+    val waitingAppMinutes: Long = 0
 )
 
 /**
@@ -62,6 +72,11 @@ class WeeklyReportGenerator @Inject constructor() {
             lines += "Most time went to ${top.subject ?: "untagged work"} " +
                 "(${formatDuration(top.minutes)})."
         }
+        val walkedAway = stats.wall.sumOf { it.walkedAway }
+        if (walkedAway > 0) {
+            lines += "Walked away from the wait $walkedAway ${if (walkedAway == 1) "time" else "times"}" +
+                " instead of opening the app."
+        }
         val pushupDays = stats.days.count { it.pushupDone }
         if (pushupDays > 0) {
             lines += "Pushups verified on $pushupDays ${dayWord(pushupDays)}."
@@ -96,6 +111,11 @@ class WeeklyReportGenerator @Inject constructor() {
         if (screenTotal > 0 && focusTotal > 0 && screenTotal > focusTotal * 2) {
             lines += "Screen time (${formatDuration(screenTotal.toInt())}) ran more than double " +
                 "your focus time this week."
+        }
+        val waiting = stats.wall.sumOf { it.waitingAppMinutes }
+        if (waiting > 0 && waiting > focusTotal) {
+            lines += "Social, video and messaging apps took ${formatDuration(waiting.toInt())} " +
+                "this week — more than your focus time."
         }
         stats.topApps.firstOrNull()?.takeIf { it.minutes >= 60 }?.let { app ->
             lines += "${app.label} alone took ${formatDuration(app.minutes.toInt())} today."

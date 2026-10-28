@@ -38,7 +38,9 @@ import java.time.LocalDateTime
  * that wants around it. It lifts at midnight on its own.
  *
  * Also the nuclear-focus wall: during a focus session, any app not on the
- * focus list lands here instead, until the session ends ([focusIntent]).
+ * focus list lands here instead, until the session ends ([focusIntent]); and
+ * the walls of [WallRules] — bedtime, the feed not yet earned, the shared
+ * budget spent — which say their own piece ([ruleIntent]).
  */
 class BlockedActivity : ComponentActivity() {
 
@@ -48,6 +50,8 @@ class BlockedActivity : ComponentActivity() {
         val used = intent.getIntExtra(EXTRA_USED, 0)
         val cap = intent.getIntExtra(EXTRA_CAP, 0)
         val focus = intent.getBooleanExtra(EXTRA_FOCUS, false)
+        val ruleTitle = intent.getStringExtra(EXTRA_TITLE)
+        val ruleBody = intent.getStringExtra(EXTRA_BODY).orEmpty()
 
         // Back must leave, not fall through to the app behind this screen.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -56,7 +60,8 @@ class BlockedActivity : ComponentActivity() {
 
         setContent {
             WakeProofTheme {
-                if (focus) FocusWall(label = label, onLeave = ::goHome)
+                if (ruleTitle != null) RuleWall(title = ruleTitle, body = ruleBody, onLeave = ::goHome)
+                else if (focus) FocusWall(label = label, onLeave = ::goHome)
                 else BlockedWall(label = label, usedMinutes = used, capMinutes = cap, onLeave = ::goHome)
             }
         }
@@ -76,6 +81,8 @@ class BlockedActivity : ComponentActivity() {
         private const val EXTRA_USED = "used"
         private const val EXTRA_CAP = "cap"
         private const val EXTRA_FOCUS = "focus"
+        private const val EXTRA_TITLE = "title"
+        private const val EXTRA_BODY = "body"
 
         fun intent(context: Context, label: String, usedMinutes: Int, capMinutes: Int): Intent =
             Intent(context, BlockedActivity::class.java)
@@ -88,6 +95,46 @@ class BlockedActivity : ComponentActivity() {
             Intent(context, BlockedActivity::class.java)
                 .putExtra(EXTRA_LABEL, label)
                 .putExtra(EXTRA_FOCUS, true)
+
+        /** A [WallRules] wall: a headline and one plain paragraph. */
+        fun ruleIntent(context: Context, title: String, body: String): Intent =
+            Intent(context, BlockedActivity::class.java)
+                .putExtra(EXTRA_TITLE, title)
+                .putExtra(EXTRA_BODY, body)
+    }
+}
+
+/** Grey on black like the focus wall: nothing here to argue with. */
+@Composable
+private fun RuleWall(title: String, body: String, onLeave: () -> Unit) {
+    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center,
+                color = Color(0xFFBDBDBD)
+            )
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = Color(0xFF8A8A8A),
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            Button(
+                onClick = onLeave,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 40.dp)
+            ) { Text("Back to it") }
+        }
     }
 }
 

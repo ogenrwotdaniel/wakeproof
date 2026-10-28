@@ -161,6 +161,24 @@ class DistractionLimitRepository @Inject constructor(
         prefs[MOVED_ONTO_WEEK] = true
     }
 
+    /**
+     * One-off (2026-10-28): WhatsApp Business is exempt from the wait, which
+     * makes it the one messaging app with no friction at all — exactly where a
+     * habit moves to. A 45-minute NUDGE cap does not stop it; it makes the
+     * time spent there visible. Set once, only when no cap exists, so a cap the
+     * user chose (or removed later) is never overwritten.
+     */
+    suspend fun seedWhatsAppBusinessCap() {
+        dataStore.edit { prefs ->
+            if (prefs[WHATSAPP_BUSINESS_SEEDED] == true) return@edit
+            val limits = prefs[LIMITS] ?: emptySet()
+            if (WHATSAPP_BUSINESS !in parseLimits(limits)) {
+                prefs[LIMITS] = withLimit(limits, WHATSAPP_BUSINESS, AppLimit(45, LimitMode.NUDGE))
+            }
+            prefs[WHATSAPP_BUSINESS_SEEDED] = true
+        }
+    }
+
     /** True once per package per [epochDay]; marks as notified as a side effect. */
     suspend fun tryMarkNotified(packageName: String, epochDay: Long): Boolean {
         var first = false
@@ -184,6 +202,8 @@ class DistractionLimitRepository @Inject constructor(
         private val LEGACY_COOLING_PENDING_HOURS = intPreferencesKey("cooling_off_pending_hours")
         private val LEGACY_COOLING_PENDING_AT = longPreferencesKey("cooling_off_pending_at")
         private val MOVED_ONTO_WEEK = booleanPreferencesKey("cooling_off_moved_onto_week")
+        private val WHATSAPP_BUSINESS_SEEDED = booleanPreferencesKey("whatsapp_business_cap_seeded")
+        private const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
 
         private const val HOUR_MILLIS = 60L * 60 * 1000
 

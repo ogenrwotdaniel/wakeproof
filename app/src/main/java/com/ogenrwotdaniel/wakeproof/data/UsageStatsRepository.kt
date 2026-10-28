@@ -183,6 +183,23 @@ class UsageStatsRepository @Inject constructor(
     }
 
     /**
+     * Minutes per day over the last 7 days (oldest first) for [packages]
+     * together, measured like [snapshot]. Feeds the week card: time in the
+     * waiting apps, day by day.
+     */
+    suspend fun weekMinutesFor(packages: Set<String>): List<DayUsage> = withContext(Dispatchers.IO) {
+        if (!hasAccess() || packages.isEmpty()) return@withContext emptyList()
+        val usm = context.getSystemService(UsageStatsManager::class.java)
+        val zone = ZoneId.systemDefault()
+        val now = System.currentTimeMillis()
+        val days = (6 downTo 0).map { LocalDate.now().minusDays(it.toLong()) }
+        val edges = days.map { it.atStartOfDay(zone).toInstant().toEpochMilli() } + now
+        val events = collectForegroundEvents(usm, edges.first(), now, packages)
+        val spans = foregroundMillisPerSpan(events, edges, now)
+        days.mapIndexed { index, day -> DayUsage(day.toEpochDay(), spans[index].values.sum() / 60_000) }
+    }
+
+    /**
      * Today's foreground minutes for specific [packages] — the nudge path.
      * Shares [todayForegroundMillisFor] with the block path so a nudge and a
      * block never disagree about how long an app has been open.

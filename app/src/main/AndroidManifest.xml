@@ -26,6 +26,8 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Do Not Disturb for the length of a focus session (special grant). -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -41,6 +43,12 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
         <package android:name="com.spotify.music" />
+        <!-- Finding the browsers, which wait like social apps. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
     </queries>
 
     <!-- allowBackup=false: restoring EncryptedSharedPreferences from a backup of another

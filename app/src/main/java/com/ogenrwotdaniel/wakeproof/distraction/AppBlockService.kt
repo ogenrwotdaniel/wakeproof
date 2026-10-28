@@ -23,6 +23,8 @@ import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
+import com.ogenrwotdaniel.wakeproof.data.StatsRepository
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveFocusSession
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
@@ -35,9 +37,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
+import java.time.LocalTime
 
 /**
  * The one thing that stands in front of other apps. Three jobs, decided per
@@ -50,6 +57,12 @@ import java.time.LocalDate
  *   [BlockedActivity] is thrown in front of it until midnight. No override.
  * * The WAIT — social, video and messaging apps ([AppGate]) open only after
  *   five minutes on [GateActivity], however they were opened.
+ * * The [WallRules] in front of those same waiting apps: shut at bedtime, shut
+ *   until the day's first focus block, shut once the shared daily budget is
+ *   spent.
+ *
+ * Losing either grant ends enforcement, so it is announced loudly
+ * ([announceWallDown]) and, mid-session, costs the block's tree.
  *
  * Watching happens by polling usage events rather than through an
  * AccessibilityService. Accessibility would be the more precise hook, but Play
@@ -65,12 +78,16 @@ import java.time.LocalDate
  * spent it is remembered as spent until midnight, so walking back into it is
  * walled on the very next tick instead of after another measurement.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @AndroidEntryPoint
 class AppBlockService : Service() {
 
     @Inject lateinit var limitRepository: DistractionLimitRepository
     @Inject lateinit var usageRepository: UsageStatsRepository
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var wallRulesRepository: WallRulesRepository
+    @Inject lateinit var statsRepository: StatsRepository
+    @Inject lateinit var liveFocusSession: LiveFocusSession
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -82,6 +99,32 @@ class AppBlockService : Service() {
 
     /** The focus list (study apps, plus Spotify when it is the study sound). */
     @Volatile private var focusList: Set<String> = emptySet()
+
+    @Volatile private var rules: WallRules = WallRules()
+
+    /** A focus block is logged today: the feed is earned ([WallRules.earnTheFeed]). */
+    @Volatile private var focusDoneToday = false
+
+    /** A morning alarm was verified today, which lifts the bedtime wall. */
+    @Volatile private var alarmVerifiedToday = false
+
+    /** When a session on another of the user's devices ends; null = none known. */
+    @Volatile private var peerSessionEndsAt: Long? = null
+
+    /** Every installed app that waits — the pool the daily budget is spent from. */
+    @Volatile private var allGated: Set<String> = emptySet()
+
+    /** Budget measurement, kept apart from the per-app cap's. */
+    private var budgetBaselineMillis = 0L
+    private var budgetBaselineAt = 0L
+    private var budgetBaselineValid = false
+    /** The budget (minutes) found spent today; a raised budget re-measures. */
+    private var budgetSpentAgainst: Int? = null
+
+    private var ticks = 0L
+
+    /** Web browsers on this phone, resolved once. */
+    private val browsers: Set<String> by lazy { AppGate.browserPackages(this) }
 
     /** PackageManager lookups, resolved once — they cannot change under us. */
     private val untouchable: Set<String> by lazy { undismissablePackages() }
@@ -147,6 +190,48 @@ class AppBlockService : Service() {
             }
         }
         scope.launch {
+            wallRulesRepository.rules.collect { next ->
+                val browsersChanged = next.gateBrowsers != rules.gateBrowsers
+                rules = next
+                if (browsersChanged) {
+                    gatedCache.clear()
+                    refreshAllGated()
+                }
+            }
+        }
+        // Re-subscribed at each new day: today's numbers only change when a log
+        // is written, and nothing is written at midnight.
+        scope.launch {
+            flow {
+                while (true) {
+                    emit(LocalDate.now().toEpochDay())
+                    delay(60_000)
+                }
+            }.distinctUntilChanged()
+                .flatMapLatest { statsRepository.observeToday() }
+                .collect { today ->
+                    focusDoneToday = today.focusMinutes > 0
+                    alarmVerifiedToday =
+                        today.pushupCount > 0 || today.mathCount > 0 || today.waterCount > 0
+                }
+        }
+        scope.launch { liveFocusSession.peerSessionEndsAt().collect { peerSessionEndsAt = it } }
+        scope.launch {
+            // Queued loosenings land here too, not only when a screen opens.
+            while (true) {
+                runCatching { wallRulesRepository.promoteDue() }
+                runCatching { limitRepository.promoteDuePending() }
+                delay(PROMOTE_EVERY_MILLIS)
+            }
+        }
+        scope.launch {
+            runCatching { limitRepository.seedWhatsAppBusinessCap() }
+            refreshAllGated()
+        }
+        // A session the process lost (a reboot, a force-stop) comes back here
+        // too: this service is restarted by boot and by the 15-minute worker.
+        PomodoroTimerService.restore(applicationContext)
+        scope.launch {
             limitRepository.limits.collect { all ->
                 blockedLimits = all
                     .filterValues { it.mode == LimitMode.BLOCK }
@@ -181,8 +266,12 @@ class AppBlockService : Service() {
         // Give the collectors a tick to land before the first decision.
         delay(POLL_MILLIS)
         while (true) {
-            // The grant went away: nothing can be seen, so stop burning cycles.
-            if (!usageRepository.hasAccess()) {
+            // A grant went away: nothing can be seen or covered any more. Say
+            // so loudly, and stop burning cycles.
+            if (!usageRepository.hasAccess() ||
+                (ticks++ % OVERLAY_CHECK_EVERY == 0L && !Settings.canDrawOverlays(this))
+            ) {
+                announceWallDown()
                 stopSelf()
                 return
             }
@@ -205,6 +294,8 @@ class AppBlockService : Service() {
             if (today != spentDay) {
                 spentToday.clear()
                 spentDay = today
+                budgetSpentAgainst = null
+                budgetBaselineValid = false
             }
 
             // Still reading events while the lock screen is up keeps the fold
@@ -229,15 +320,27 @@ class AppBlockService : Service() {
             // a re-entry should be walled at once rather than debounced.
             if (current != lastBlockedPackage) lastBlockedPackage = null
 
-            val gated = gatedCache.getOrPut(current) { AppGate.isGated(this, current, untouchable) }
+            val gated = gatedCache.getOrPut(current) {
+                AppGate.isGated(this, current, untouchable, browsers, rules.gateBrowsers)
+            }
+            if (!gated) budgetBaselineValid = false
             val limit = blockedLimits[current]
+            val wallClock = System.currentTimeMillis()
             val verdict = gateVerdict(
                 essential = current in untouchable,
-                focusSessionActive = PomodoroTimerService.state.value.active,
+                focusSessionActive = PomodoroTimerService.state.value.active ||
+                    (peerSessionEndsAt ?: 0L) > wallClock,
                 onFocusList = current in focusList,
                 capSpent = limit != null && capSpent(current, limit),
                 gated = gated,
-                hasPass = GatePasses.isValid(current)
+                hasPass = GatePasses.isValid(current),
+                bedtime = gated && bedtimeActive(
+                    minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute },
+                    startMinutes = rules.bedtimeStartMinutes,
+                    alarmVerifiedToday = alarmVerifiedToday
+                ),
+                feedEarned = !rules.earnTheFeed || focusDoneToday,
+                budgetSpent = gated && budgetSpent(current)
             )
             logVerdict(current, verdict)
             when (verdict) {
@@ -251,6 +354,31 @@ class AppBlockService : Service() {
                         label = usageRepository.appLabel(current),
                         usedMinutes = limit!!.minutes,
                         capMinutes = limit.minutes
+                    )
+                }
+                GateVerdict.BEDTIME_WALL -> wall(current) {
+                    BlockedActivity.ruleIntent(
+                        this,
+                        "Bedtime",
+                        "${usageRepository.appLabel(current)} and every other waiting app are shut " +
+                            "for the night. They open once your morning alarm is verified, or at " +
+                            "07:00 on a day without one."
+                    )
+                }
+                GateVerdict.EARN_WALL -> wall(current) {
+                    BlockedActivity.ruleIntent(
+                        this,
+                        "Earn it first",
+                        "${usageRepository.appLabel(current)} opens after today's first focus " +
+                            "block. One pomodoro, then the feed."
+                    )
+                }
+                GateVerdict.BUDGET_WALL -> wall(current) {
+                    BlockedActivity.ruleIntent(
+                        this,
+                        "Today's budget is spent",
+                        "${rules.dailyBudgetMinutes} minutes across every waiting app are used " +
+                            "up. ${usageRepository.appLabel(current)} opens again at midnight."
                     )
                 }
                 GateVerdict.WAIT -> wall(current) {
@@ -279,6 +407,74 @@ class AppBlockService : Service() {
         if (usedMillis < limit.minutes * 60_000L) return false
         spentToday[current] = limit.minutes
         return true
+    }
+
+    /**
+     * Whether today's shared budget ([WallRules.dailyBudgetMinutes]) is spent.
+     * Measured across every waiting app on entering one, then extrapolated
+     * while a waiting app stays in front, like a single app's cap.
+     */
+    private suspend fun budgetSpent(current: String): Boolean {
+        val budget = rules.dailyBudgetMinutes
+        if (budget <= 0) return false
+        budgetSpentAgainst?.let { if (budget <= it) return true }
+        val now = SystemClock.elapsedRealtime()
+        if (!budgetBaselineValid || now - budgetBaselineAt > BASELINE_REFRESH_MILLIS) {
+            budgetBaselineMillis = usageRepository
+                .todayForegroundMillisFor(allGated + current).values.sum()
+            budgetBaselineAt = SystemClock.elapsedRealtime()
+            budgetBaselineValid = true
+        }
+        val used = budgetBaselineMillis + (SystemClock.elapsedRealtime() - budgetBaselineAt)
+        if (used < budget * 60_000L) return false
+        budgetSpentAgainst = budget
+        return true
+    }
+
+    /** Recomputes [allGated] from the installed apps; the budget is measured over it. */
+    private fun refreshAllGated() {
+        scope.launch {
+            val gateBrowsers = rules.gateBrowsers
+            allGated = runCatching {
+                usageRepository.installedApps().map { it.packageName }.filter {
+                    AppGate.isGated(this@AppBlockService, it, untouchable, browsers, gateBrowsers)
+                }.toSet()
+            }.getOrDefault(emptySet())
+        }
+    }
+
+    /**
+     * Usage access or draw-over-apps was taken away, which switches every wall
+     * off at once. Not stoppable from here, so at least never silent; and in
+     * the middle of a focus block it costs that block's tree — the session
+     * itself carries on, since it cannot be stopped.
+     */
+    private fun announceWallDown() {
+        val treeLost = PomodoroTimerService.breakout()
+        val text = "WakeProof lost usage access or draw-over-apps, so nothing is walled." +
+            if (treeLost) " This focus block's tree withered." else ""
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                ALERT_CHANNEL_ID, "Walls switched off", NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "When WakeProof loses the access its walls need" }
+        )
+        manager.notify(
+            ALERT_NOTIFICATION_ID,
+            Notification.Builder(this, ALERT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("Your walls are down")
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setContentIntent(
+                    PendingIntent.getActivity(
+                        this, 1, Intent(this, MainActivity::class.java),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                )
+                .setAutoCancel(true)
+                .build()
+        )
     }
 
     /**
@@ -348,6 +544,14 @@ class AppBlockService : Service() {
         private const val CHANNEL_ID = "wakeproof_app_block_quiet"
         private const val LEGACY_CHANNEL_ID = "wakeproof_app_block"
         private const val NOTIFICATION_ID = 43
+        private const val ALERT_CHANNEL_ID = "wakeproof_walls_down"
+        private const val ALERT_NOTIFICATION_ID = 44
+
+        /** canDrawOverlays is a binder call, so it is checked every 5 s, not every tick. */
+        private const val OVERLAY_CHECK_EVERY = 10L
+
+        /** How often queued loosenings are checked for landing. */
+        private const val PROMOTE_EVERY_MILLIS = 5 * 60_000L
 
         /**
          * Foreground checks per tick. Halved from 1 s once the wait had to beat

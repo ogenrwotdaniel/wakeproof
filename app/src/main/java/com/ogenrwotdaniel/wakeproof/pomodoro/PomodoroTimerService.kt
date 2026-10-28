@@ -25,7 +25,9 @@ import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveFocusSession
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
+import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
 import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.wear.WearTimerSync
@@ -44,6 +46,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -95,6 +98,8 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var wearStatsSync: WearStatsSync
     @Inject lateinit var spotify: SpotifyController
     @Inject lateinit var usageStatsRepository: UsageStatsRepository
+    @Inject lateinit var wallRules: WallRulesRepository
+    @Inject lateinit var liveFocusSession: LiveFocusSession
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
@@ -173,6 +178,14 @@ class PomodoroTimerService : Service() {
                 if (guarding) guardTree() else clearTreeWarning()
             }
         }
+        // Every change that matters to a restart — a phase, a finished block,
+        // a withered tree — is written to disk, so a reboot or a force-stop
+        // resumes the session instead of ending it (see recoverSession).
+        scope.launch {
+            state.map { Triple(it.active, it.phase to it.completedFocusSessions, it.treeWithered) }
+                .distinctUntilChanged()
+                .collect { if (_state.value.active) persistSession() }
+        }
         // Floating countdown bubble: visible whenever a timer is active but the
         // app UI isn't. Runs on Main (scope's dispatcher), as WindowManager requires.
         scope.launch {
@@ -249,7 +262,23 @@ class PomodoroTimerService : Service() {
                     syncWatch()
                     // The focus wall lives in AppBlockService; make sure it is up.
                     AppBlockService.sync(applicationContext)
+                    onSessionUnderway()
                 }
+            }
+            ACTION_RESTORE -> {
+                createChannel()
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification("Resuming session…"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+                if (_state.value.active) return START_NOT_STICKY
+                val saved = SessionStore.load(this)
+                if (saved == null) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                scope.launch { resumeSaved(saved) }
             }
             // NUCLEAR FOCUS: once a session starts there is no pause, no reset
             // and no stop, from any caller — this screen, the notification, the
@@ -550,6 +579,7 @@ class PomodoroTimerService : Service() {
                         .build()
                 )
                 runCatching { wearTimerSync.clear() }
+                endSession()
                 stopSelf()
                 return
             }
@@ -579,6 +609,107 @@ class PomodoroTimerService : Service() {
             armDeadline()
         }
         syncWatch()
+    }
+
+    /**
+     * What every session does once it is running, fresh or recovered: quiet the
+     * phone and tell the user's other devices how long the focus wall lasts.
+     */
+    private suspend fun onSessionUnderway() {
+        if (wallRules.current().sessionDnd) SessionDnd.enter(this)
+        val s = _state.value
+        val remaining = sessionRemainingSeconds(
+            phase = s.phase,
+            remainingSeconds = s.remainingSeconds,
+            completedFocusSessions = s.completedFocusSessions,
+            targetFocusBlocks = s.targetFocusBlocks,
+            focusSeconds = focusSeconds,
+            shortBreakSeconds = shortBreakSeconds,
+            longBreakSeconds = longBreakSeconds,
+            longBreakEvery = longBreakEvery
+        )
+        runCatching { liveFocusSession.publish(System.currentTimeMillis() + remaining * 1_000L) }
+    }
+
+    /**
+     * The session is over for good: nothing left to recover, DND handed back,
+     * other devices released. The cloud write outlives [scope], which
+     * [onDestroy] is about to cancel.
+     */
+    private fun endSession() {
+        SessionStore.clear(this)
+        SessionDnd.exit(this)
+        CoroutineScope(Dispatchers.IO).launch { runCatching { liveFocusSession.publish(0L) } }
+    }
+
+    private fun persistSession() {
+        val s = _state.value
+        val msLeft = if (s.running) (phaseDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        else s.remainingSeconds * 1_000L
+        SessionStore.save(
+            this,
+            SavedSession(
+                focusSeconds = focusSeconds,
+                shortBreakSeconds = shortBreakSeconds,
+                longBreakSeconds = longBreakSeconds,
+                longBreakEvery = longBreakEvery,
+                targetFocusBlocks = s.targetFocusBlocks,
+                completedFocusSessions = s.completedFocusSessions,
+                phase = s.phase,
+                phaseEndsAtMillis = System.currentTimeMillis() + msLeft,
+                treeWithered = s.treeWithered
+            )
+        )
+    }
+
+    /** Picks up a session the process lost; see [recoverSession] for the rules. */
+    private suspend fun resumeSaved(saved: SavedSession) {
+        val now = System.currentTimeMillis()
+        val outcome = recoverSession(saved, now)
+        if (outcome.witheredBlock) {
+            runCatching {
+                completionRepository.log(
+                    GoalKind.FOCUS,
+                    CompletionStatus.SKIPPED,
+                    amount = saved.focusSeconds / 60,
+                    subject = settingsRepository.settings.first().activeSubject
+                )
+            }
+        }
+        val resume = outcome.resume
+        if (resume == null) {
+            endSession()
+            stopSelf()
+            return
+        }
+        focusSeconds = resume.focusSeconds
+        shortBreakSeconds = resume.shortBreakSeconds
+        longBreakSeconds = resume.longBreakSeconds
+        longBreakEvery = resume.longBreakEvery
+        val left = ((resume.phaseEndsAtMillis - now + 999) / 1_000).toInt().coerceAtLeast(1)
+        _state.value = PomodoroState(
+            active = true,
+            running = true,
+            phase = resume.phase,
+            remainingSeconds = left,
+            totalSeconds = durationOf(resume.phase),
+            completedFocusSessions = resume.completedFocusSessions,
+            targetFocusBlocks = resume.targetFocusBlocks,
+            treeWithered = resume.treeWithered
+        )
+        startTicker()
+        updateNotification()
+        syncWatch()
+        AppBlockService.sync(applicationContext)
+        onSessionUnderway()
+        notifyTree(
+            "Session resumed",
+            if (outcome.witheredBlock || resume.treeWithered) {
+                "Closing WakeProof doesn't end a session — it cost this block's tree."
+            } else {
+                "Closing WakeProof doesn't end a session."
+            }
+        )
     }
 
     private fun durationOf(phase: PomodoroPhase) = when (phase) {
@@ -712,6 +843,7 @@ class PomodoroTimerService : Service() {
         private const val ACTION_PAUSE = "com.ogenrwotdaniel.wakeproof.action.POMODORO_PAUSE"
         private const val ACTION_RESUME = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESUME"
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.POMODORO_STOP"
+        private const val ACTION_RESTORE = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESTORE"
         private const val CHANNEL_ID = "wakeproof_pomodoro"
         private const val ALERT_CHANNEL_ID = "wakeproof_pomodoro_alerts"
         private const val NOTIFICATION_ID = 2
@@ -760,6 +892,28 @@ class PomodoroTimerService : Service() {
         fun resume(context: Context) = context.startService(intent(context, ACTION_RESUME))
         /** Refused while a session is active — kept for the watch's command path. */
         fun stop(context: Context) = context.startService(intent(context, ACTION_STOP))
+
+        /**
+         * Brings back a session the process lost (reboot, force-stop, killed).
+         * Cheap and safe to call from every start-up path: does nothing unless a
+         * session is saved and none is running.
+         */
+        fun restore(context: Context) {
+            if (_state.value.active || SessionStore.load(context) == null) return
+            runCatching { context.startForegroundService(intent(context, ACTION_RESTORE)) }
+        }
+
+        /**
+         * The walls lost a permission mid-session. The session carries on — it
+         * cannot be stopped — but the block being dodged does not count.
+         * Returns true when a tree was lost.
+         */
+        fun breakout(): Boolean {
+            val s = _state.value
+            if (!s.active || s.phase != PomodoroPhase.FOCUS || s.treeWithered) return false
+            _state.update { it.copy(treeWithered = true, treeAtRisk = false) }
+            return true
+        }
 
         private fun intent(context: Context, action: String) =
             Intent(context, PomodoroTimerService::class.java).setAction(action)

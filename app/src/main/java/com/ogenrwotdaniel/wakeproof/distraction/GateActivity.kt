@@ -29,8 +29,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ogenrwotdaniel.wakeproof.alarm.encodeSnoozeCount
+import com.ogenrwotdaniel.wakeproof.alarm.snoozesTakenOn
 import com.ogenrwotdaniel.wakeproof.ui.theme.WakeProofTheme
 import kotlinx.coroutines.delay
+import java.time.LocalDate
 
 /**
  * The five-minute wait in front of a social, video or messaging app (see
@@ -41,7 +44,11 @@ import kotlinx.coroutines.delay
  * Leaving it for anything — Home, Recents, the Edge panel, the screen going
  * off — finishes it, so the five minutes have to be sat through in one go and
  * cannot be run down in the background while the user does something else.
- * Only when they are up does "Open" appear, and it grants a [GatePasses] pass.
+ * Only when they are up does "Open" appear, and it grants a [GatePasses] pass
+ * good for that one visit.
+ *
+ * Every wait abandoned before "Open" is counted ([WalkedAwayTally]) and the
+ * day's count is shown, so turning away reads as a score rather than nothing.
  */
 class GateActivity : ComponentActivity() {
 
@@ -57,6 +64,7 @@ class GateActivity : ComponentActivity() {
         val startedAt = savedInstanceState?.getLong(STATE_STARTED_AT)
             ?: SystemClock.elapsedRealtime()
         this.startedAt = startedAt
+        val walkedAway = WalkedAwayTally.today(this)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = goHome()
@@ -67,6 +75,7 @@ class GateActivity : ComponentActivity() {
                 GateScreen(
                     label = label,
                     startedAt = startedAt,
+                    walkedAwayToday = walkedAway,
                     onOpen = { open(packageName) },
                     onLeave = ::goHome
                 )
@@ -75,6 +84,9 @@ class GateActivity : ComponentActivity() {
     }
 
     private var startedAt = 0L
+
+    /** Set by "Open", so leaving through it is not counted as walking away. */
+    private var opened = false
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
@@ -88,7 +100,15 @@ class GateActivity : ComponentActivity() {
         if (!isChangingConfigurations) finish()
     }
 
+    override fun onDestroy() {
+        if (!opened && !isChangingConfigurations && intent.hasExtra(EXTRA_PACKAGE)) {
+            WalkedAwayTally.record(this)
+        }
+        super.onDestroy()
+    }
+
     private fun open(packageName: String) {
+        opened = true
         GatePasses.grant(packageName, System.currentTimeMillis())
         packageManager.getLaunchIntentForPackage(packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -117,6 +137,30 @@ class GateActivity : ComponentActivity() {
     }
 }
 
+/**
+ * How many waits were abandoned today, in plain SharedPreferences as
+ * `epochDay:count` — the same encoding as the snooze allowance, and for the
+ * same reason: a count from another day is simply stale, so nothing has to
+ * run at midnight to reset it.
+ */
+private object WalkedAwayTally {
+    private const val PREFS = "gate_tally"
+    private const val KEY = "walked_away"
+
+    fun today(context: Context): Int =
+        snoozesTakenOn(prefs(context).getString(KEY, null), LocalDate.now().toEpochDay())
+
+    fun record(context: Context) {
+        val day = LocalDate.now().toEpochDay()
+        prefs(context).edit()
+            .putString(KEY, encodeSnoozeCount(day, today(context) + 1))
+            .apply()
+    }
+
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+}
+
 /** How long each of [WAIT_LINES] stays up. Slow on purpose. */
 private const val LINE_SECONDS = 20
 
@@ -139,6 +183,7 @@ private val WAIT_LINES = listOf(
 private fun GateScreen(
     label: String,
     startedAt: Long,
+    walkedAwayToday: Int,
     onOpen: () -> Unit,
     onLeave: () -> Unit
 ) {
@@ -177,6 +222,18 @@ private fun GateScreen(
             color = grey,
             style = MaterialTheme.typography.bodyMedium
         )
+        if (walkedAwayToday > 0) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = if (walkedAwayToday == 1) {
+                    "You walked away once today already."
+                } else {
+                    "You walked away $walkedAwayToday times today already."
+                },
+                color = grey,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
         Spacer(Modifier.height(48.dp))
         TextButton(onClick = onLeave) {
             Text("Not now", color = Color.White)
@@ -185,6 +242,12 @@ private fun GateScreen(
             TextButton(onClick = onOpen) {
                 Text("Open $label", color = grey, textAlign = TextAlign.Start)
             }
+            Text(
+                text = "Good for one visit. Close it or switch away and the next one waits five minutes again.",
+                color = grey.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 12.dp, top = 8.dp)
+            )
         } else {
             Text(
                 text = "Leaving this screen starts the wait again.",

@@ -22,11 +22,40 @@ object AppGate {
     const val GATE_WAIT_SECONDS = 5 * 60
 
     /**
-     * How long a pass outlives the app leaving the screen. Covers a glance at a
-     * notification or the in-call screen and back; anything longer and the next
-     * visit waits again.
+     * How long a fresh pass may go unused while the app is still launching. Past
+     * it, a pass that never reached the screen (the launch failed, or the user
+     * went elsewhere first) is dropped.
      */
-    const val PASS_GRACE_MILLIS = 60_000L
+    const val PASS_LAUNCH_MILLIS = 10_000L
+
+    /**
+     * WhatsApp Business: the user's main line of communication, so it never
+     * waits (2026-10-28) even though it would otherwise match as messaging or
+     * by a social category. Still behind the focus wall during a session unless
+     * it is put on the focus list. Plain WhatsApp still waits.
+     */
+    const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
+
+    /** Never wait, whatever their category says. See [WHATSAPP_BUSINESS]. */
+    val EXEMPT_PACKAGES = setOf(WHATSAPP_BUSINESS)
+
+    /**
+     * Screens that sit over an app for a moment without the user having left
+     * it: the shade, permission prompts, the share sheet, the system file and
+     * photo pickers an "attach" button opens. Seeing one of these in front does
+     * not end a pass. Anything else does — see [GatePasses.track].
+     */
+    val PASS_TRANSIENT_PACKAGES = setOf(
+        "com.android.systemui",
+        "android",
+        "com.google.android.permissioncontroller",
+        "com.android.permissioncontroller",
+        "com.google.android.documentsui",
+        "com.android.documentsui",
+        "com.google.android.providers.media.module",
+        "com.android.providers.media.module",
+        "com.google.android.photopicker"
+    )
 
     /**
      * Named outright because an app's declared category is optional and many
@@ -43,7 +72,7 @@ object AppGate {
         // Video
         "com.google.android.youtube", "com.netflix.mediaclient", "tv.twitch.android.app",
         // Messaging
-        "com.whatsapp", "com.whatsapp.w4b", "com.facebook.orca", "org.telegram.messenger",
+        "com.whatsapp", "com.facebook.orca", "org.telegram.messenger",
         "org.thoughtcrime.securesms", "com.discord", "com.kakao.talk",
         "jp.naver.line.android", "com.tencent.mm", "com.viber.voip"
     )
@@ -59,7 +88,7 @@ object AppGate {
      * the notification.
      */
     fun isGated(packageName: String, category: Int, defaultSmsPackage: String?): Boolean =
-        packageName != defaultSmsPackage && (
+        packageName != defaultSmsPackage && packageName !in EXEMPT_PACKAGES && (
             packageName in KNOWN_GATED_PACKAGES ||
                 category == ApplicationInfo.CATEGORY_SOCIAL ||
                 category == ApplicationInfo.CATEGORY_VIDEO
@@ -81,29 +110,63 @@ object AppGate {
  * [GateActivity] grants them and [AppBlockService] reads them, and both run in
  * the app's process. Losing them to process death only means waiting again,
  * which is the strict direction.
+ *
+ * A pass is good for ONE visit (2026-10-28, user's request). Closing the app,
+ * switching to another, going home or turning the screen off ends it, and the
+ * next visit sits through the whole five minutes again. It used to survive a
+ * minute off screen, which made "just check one more thing" free.
  */
 object GatePasses {
-    private val lastSeen = mutableMapOf<String, Long>()
+    private val passes = mutableMapOf<String, GatePass>()
 
     @Synchronized
     fun grant(packageName: String, now: Long) {
-        lastSeen[packageName] = now
+        passes[packageName] = GatePass(grantedAt = now, used = false)
     }
 
-    /** Called every tick the app is on screen, so the pass lasts while in use. */
+    /**
+     * Called every tick with what is in front. Marks a pass used once its app
+     * is seen and drops every pass whose visit is over.
+     */
     @Synchronized
-    fun seen(packageName: String, now: Long) {
-        if (packageName in lastSeen) lastSeen[packageName] = now
+    fun track(foreground: String, now: Long) {
+        val entries = passes.entries.iterator()
+        while (entries.hasNext()) {
+            val entry = entries.next()
+            val next = passAfter(entry.value, entry.key, foreground, now)
+            if (next == null) entries.remove() else entry.setValue(next)
+        }
     }
 
+    /** The screen went off or locked: every visit is over. */
     @Synchronized
-    fun isValid(packageName: String, now: Long): Boolean =
-        passStillValid(lastSeen[packageName], now)
+    fun revokeAll() = passes.clear()
 
-    /** Pure: a pass holds until the app has been off screen for the grace. */
-    fun passStillValid(lastSeenAt: Long?, now: Long): Boolean =
-        lastSeenAt != null && now - lastSeenAt <= AppGate.PASS_GRACE_MILLIS
+    @Synchronized
+    fun isValid(packageName: String): Boolean = packageName in passes
+
+    /**
+     * Pure: what is left of [pass] (for [passPackage]) once [foreground] is
+     * seen in front. Null means the visit is over.
+     *
+     * - Its own app in front: the visit is on, and from now on leaving ends it.
+     * - A [AppGate.PASS_TRANSIENT_PACKAGES] screen: a moment over the app, not
+     *   a departure.
+     * - Anything else before the app was ever seen: still launching (WakeProof's
+     *   own wait screen is in front then), allowed for [AppGate.PASS_LAUNCH_MILLIS].
+     * - Anything else after: the user left.
+     */
+    fun passAfter(pass: GatePass, passPackage: String, foreground: String, now: Long): GatePass? =
+        when {
+            foreground == passPackage -> pass.copy(used = true)
+            foreground in AppGate.PASS_TRANSIENT_PACKAGES -> pass
+            !pass.used && now - pass.grantedAt <= AppGate.PASS_LAUNCH_MILLIS -> pass
+            else -> null
+        }
 }
+
+/** One earned visit to a waiting app; [used] once the app reached the screen. */
+data class GatePass(val grantedAt: Long, val used: Boolean)
 
 /** What [AppBlockService] does about the app on screen. */
 enum class GateVerdict { ALLOW, FOCUS_WALL, CAP_WALL, WAIT }

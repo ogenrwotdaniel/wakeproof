@@ -57,10 +57,37 @@ class AppGateTest {
     }
 
     @Test
-    fun `a pass lasts while in use and lapses a minute after leaving`() {
-        assertFalse(GatePasses.passStillValid(null, 0))
-        assertTrue(GatePasses.passStillValid(1_000, 1_000 + AppGate.PASS_GRACE_MILLIS))
-        assertFalse(GatePasses.passStillValid(1_000, 1_001 + AppGate.PASS_GRACE_MILLIS))
+    fun `whatsapp business never waits, plain whatsapp still does`() {
+        assertFalse(AppGate.isGated("com.whatsapp.w4b", ApplicationInfo.CATEGORY_SOCIAL, null))
+        assertTrue(AppGate.isGated("com.whatsapp", ApplicationInfo.CATEGORY_UNDEFINED, null))
+    }
+
+    @Test
+    fun `a pass survives launching and use, and ends on leaving`() {
+        val fresh = GatePass(grantedAt = 1_000, used = false)
+        // Still launching: our own wait screen is in front.
+        val launching = GatePasses.passAfter(fresh, APP, WAKEPROOF, now = 2_000)
+        assertEquals(fresh, launching)
+        val inUse = GatePasses.passAfter(fresh, APP, APP, now = 3_000)
+        assertEquals(GatePass(1_000, used = true), inUse)
+        // Switching anywhere else, WakeProof included, ends the visit at once.
+        assertNull(GatePasses.passAfter(inUse!!, APP, "com.other", now = 3_500))
+        assertNull(GatePasses.passAfter(inUse, APP, WAKEPROOF, now = 3_500))
+    }
+
+    @Test
+    fun `the shade or a file picker over the app does not end the visit`() {
+        val inUse = GatePass(grantedAt = 1_000, used = true)
+        assertEquals(inUse, GatePasses.passAfter(inUse, APP, "com.android.systemui", now = 9_000))
+        assertEquals(inUse, GatePasses.passAfter(inUse, APP, "com.google.android.documentsui", now = 9_000))
+    }
+
+    @Test
+    fun `a pass the app never used lapses after the launch window`() {
+        val fresh = GatePass(grantedAt = 1_000, used = false)
+        assertNull(
+            GatePasses.passAfter(fresh, APP, WAKEPROOF, now = 1_001 + AppGate.PASS_LAUNCH_MILLIS)
+        )
     }
 
     @Test
@@ -115,5 +142,10 @@ class AppGateTest {
                 capSpent = false, gated = true, hasPass = true
             )
         )
+    }
+
+    private companion object {
+        const val APP = "com.instagram.android"
+        const val WAKEPROOF = "com.ogenrwotdaniel.wakeproof"
     }
 }

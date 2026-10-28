@@ -192,6 +192,8 @@ class AppBlockService : Service() {
             // sleep was ~19,000 foreground queries that could only ever answer
             // "no one is using anything".
             if (!powerManager.isInteractive) {
+                // Screen off ends a visit through the wait, like leaving the app.
+                GatePasses.revokeAll()
                 // Force a fresh measurement on wake rather than extrapolating
                 // across the whole time the phone was down.
                 baselineFor = null
@@ -210,6 +212,10 @@ class AppBlockService : Service() {
             val current = runCatching { tracker.current() }
                 .onFailure { Log.w(TAG, "foreground query failed", it) }
                 .getOrNull()
+            // Before the early exits below: WakeProof itself in front also ends
+            // a visit, once the app it was granted for has been on screen.
+            if (current != null) GatePasses.track(current, System.currentTimeMillis())
+            if (keyguardManager.isKeyguardLocked) GatePasses.revokeAll()
             if (current == null || keyguardManager.isKeyguardLocked) {
                 delay(POLL_MILLIS)
                 continue
@@ -223,9 +229,7 @@ class AppBlockService : Service() {
             // a re-entry should be walled at once rather than debounced.
             if (current != lastBlockedPackage) lastBlockedPackage = null
 
-            val now = System.currentTimeMillis()
             val gated = gatedCache.getOrPut(current) { AppGate.isGated(this, current, untouchable) }
-            if (gated) GatePasses.seen(current, now)
             val limit = blockedLimits[current]
             val verdict = gateVerdict(
                 essential = current in untouchable,
@@ -233,7 +237,7 @@ class AppBlockService : Service() {
                 onFocusList = current in focusList,
                 capSpent = limit != null && capSpent(current, limit),
                 gated = gated,
-                hasPass = GatePasses.isValid(current, now)
+                hasPass = GatePasses.isValid(current)
             )
             logVerdict(current, verdict)
             when (verdict) {

@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.telecom.TelecomManager
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
+import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -31,7 +32,8 @@ private const val EXPERT_RAW_LABEL = "Expert RAW"
 
 /**
  * The tools that are always on the home screen and cannot be unpinned, in
- * order: the phone, the cameras, notes, Claude, the bank, the clock and the
+ * order: the phone, WhatsApp Business (the user's main line of communication,
+ * 2026-10-28 — exempt from the wait too, see [AppGate.WHATSAPP_BUSINESS]), the cameras, notes, Claude, the bank, the clock and the
  * calendar.
  * Chosen by the user as things a phone is FOR rather than things it is used
  * to fill time with. Roles (phone, camera, clock, calendar) are resolved from
@@ -52,7 +54,10 @@ fun permanentPackages(context: Context): List<String> {
     val calendar = resolve(
         Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
     )
-    return listOfNotNull(dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, KAKAOBANK, clock, calendar)
+    return listOfNotNull(
+        dialer, AppGate.WHATSAPP_BUSINESS, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, KAKAOBANK,
+        clock, calendar
+    )
         .filter { it != context.packageName }
         .distinct()
 }

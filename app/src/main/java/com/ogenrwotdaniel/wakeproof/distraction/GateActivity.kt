@@ -31,7 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ogenrwotdaniel.wakeproof.ui.theme.WakeProofTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.lifecycle.lifecycleScope
 
 /**
  * The five-minute wait in front of a social, video or messaging app (see
@@ -75,6 +77,18 @@ class GateActivity : ComponentActivity() {
             )
         this.waitSeconds = waitSeconds
 
+        // Opened straight from the WakeProof home screen, this screen never went
+        // through the blocker — so ask it: outside the open window, at bedtime,
+        // before the feed is earned or with the budget spent, the answer is a
+        // wall, not a countdown.
+        lifecycleScope.launch {
+            val wall = runCatching { AppBlockService.wallBefore(packageName) }.getOrNull()
+                ?: return@launch
+            redirected = true
+            runCatching { startActivity(wall.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            finish()
+        }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = goHome()
         })
@@ -94,6 +108,9 @@ class GateActivity : ComponentActivity() {
     }
 
     private var startedAt = 0L
+
+    /** Replaced by a wall before the wait began; not a wait walked away from. */
+    private var redirected = false
     private var waitSeconds = 0
 
     /** Set by "Open", so leaving through it is not counted as walking away. */
@@ -113,7 +130,7 @@ class GateActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (!opened && !isChangingConfigurations && intent.hasExtra(EXTRA_PACKAGE)) {
+        if (!opened && !redirected && !isChangingConfigurations && intent.hasExtra(EXTRA_PACKAGE)) {
             GateLog.recordWalkedAway(this)
         }
         super.onDestroy()

@@ -171,6 +171,7 @@ class AppBlockService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createChannel()
         startForeground(
             NOTIFICATION_ID,
@@ -257,6 +258,7 @@ class AppBlockService : Service() {
     private val keyguardManager by lazy { getSystemService(KeyguardManager::class.java) }
 
     override fun onDestroy() {
+        if (instance === this) instance = null
         runCatching { unregisterReceiver(screenReceiver) }
         scope.cancel()
         super.onDestroy()
@@ -325,83 +327,118 @@ class AppBlockService : Service() {
             }
             if (!gated) budgetBaselineValid = false
             val limit = blockedLimits[current]
-            val wallClock = System.currentTimeMillis()
-            val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
-            val verdict = gateVerdict(
-                essential = current in untouchable,
-                focusSessionActive = PomodoroTimerService.state.value.active ||
-                    (peerSessionEndsAt ?: 0L) > wallClock,
-                onFocusList = current in focusList,
-                capSpent = limit != null && capSpent(current, limit),
+            val verdict = verdictFor(
+                current = current,
                 gated = gated,
                 hasPass = GatePasses.isValid(current),
-                outsideWindow = gated && outsideOpenWindow(
-                    minuteOfDay = minuteOfDay,
-                    startMinutes = rules.openWindowStartMinutes,
-                    endMinutes = rules.openWindowEndMinutes
-                ),
-                bedtime = gated && bedtimeActive(
-                    minuteOfDay = minuteOfDay,
-                    startMinutes = rules.bedtimeStartMinutes,
-                    alarmVerifiedToday = alarmVerifiedToday
-                ),
-                feedEarned = !rules.earnTheFeed || focusDoneToday,
+                capSpent = limit != null && capSpent(current, limit),
                 budgetSpent = gated && budgetSpent(current)
             )
             logVerdict(current, verdict)
-            when (verdict) {
-                GateVerdict.ALLOW -> Unit
-                GateVerdict.FOCUS_WALL -> wall(current) {
-                    BlockedActivity.focusIntent(this, usageRepository.appLabel(current))
-                }
-                GateVerdict.CAP_WALL -> wall(current) {
-                    BlockedActivity.intent(
-                        context = this,
-                        label = usageRepository.appLabel(current),
-                        usedMinutes = limit!!.minutes,
-                        capMinutes = limit.minutes
-                    )
-                }
-                GateVerdict.WINDOW_WALL -> wall(current) {
-                    BlockedActivity.ruleIntent(
-                        this,
-                        "Not open now",
-                        "${usageRepository.appLabel(current)} and every other waiting app open " +
-                            "only between ${clock(rules.openWindowStartMinutes)} and " +
-                            "${clock(rules.openWindowEndMinutes)}. WhatsApp Business and the " +
-                            "phone always work."
-                    )
-                }
-                GateVerdict.BEDTIME_WALL -> wall(current) {
-                    BlockedActivity.ruleIntent(
-                        this,
-                        "Bedtime",
-                        "${usageRepository.appLabel(current)} and every other waiting app are shut " +
-                            "for the night. They open once your morning alarm is verified, or at " +
-                            "07:00 on a day without one."
-                    )
-                }
-                GateVerdict.EARN_WALL -> wall(current) {
-                    BlockedActivity.ruleIntent(
-                        this,
-                        "Earn it first",
-                        "${usageRepository.appLabel(current)} opens after today's first focus " +
-                            "block. One pomodoro, then the feed."
-                    )
-                }
-                GateVerdict.BUDGET_WALL -> wall(current) {
-                    BlockedActivity.ruleIntent(
-                        this,
-                        "Today's budget is spent",
-                        "${rules.dailyBudgetMinutes} minutes across every waiting app are used " +
-                            "up. ${usageRepository.appLabel(current)} opens again at midnight."
-                    )
-                }
-                GateVerdict.WAIT -> wall(current) {
-                    GateActivity.intent(this, current, usageRepository.appLabel(current))
-                }
-            }
+            if (verdict != GateVerdict.ALLOW) wall(current) { wallIntent(current, verdict, limit) }
             delay(POLL_MILLIS)
+        }
+    }
+
+    /** [gateVerdict] with everything this service knows filled in. */
+    private fun verdictFor(
+        current: String,
+        gated: Boolean,
+        hasPass: Boolean,
+        capSpent: Boolean,
+        budgetSpent: Boolean
+    ): GateVerdict {
+        val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
+        return gateVerdict(
+            essential = current in untouchable,
+            focusSessionActive = PomodoroTimerService.state.value.active ||
+                (peerSessionEndsAt ?: 0L) > System.currentTimeMillis(),
+            onFocusList = current in focusList,
+            capSpent = capSpent,
+            gated = gated,
+            hasPass = hasPass,
+            outsideWindow = gated && outsideOpenWindow(
+                minuteOfDay = minuteOfDay,
+                startMinutes = rules.openWindowStartMinutes,
+                endMinutes = rules.openWindowEndMinutes
+            ),
+            bedtime = gated && bedtimeActive(
+                minuteOfDay = minuteOfDay,
+                startMinutes = rules.bedtimeStartMinutes,
+                alarmVerifiedToday = alarmVerifiedToday
+            ),
+            feedEarned = !rules.earnTheFeed || focusDoneToday,
+            budgetSpent = budgetSpent
+        )
+    }
+
+    /** The screen thrown in front of [current] for [verdict]; never called for ALLOW. */
+    private fun wallIntent(current: String, verdict: GateVerdict, limit: AppLimit?): Intent {
+        val label = usageRepository.appLabel(current)
+        return when (verdict) {
+            GateVerdict.ALLOW, GateVerdict.WAIT -> GateActivity.intent(this, current, label)
+            GateVerdict.FOCUS_WALL -> BlockedActivity.focusIntent(this, label)
+            GateVerdict.CAP_WALL -> BlockedActivity.intent(
+                context = this,
+                label = label,
+                usedMinutes = limit?.minutes ?: 0,
+                capMinutes = limit?.minutes ?: 0
+            )
+            GateVerdict.WINDOW_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Not open now",
+                "$label and every other waiting app open only between " +
+                    "${clock(rules.openWindowStartMinutes)} and " +
+                    "${clock(rules.openWindowEndMinutes)}. WhatsApp Business and the phone " +
+                    "always work."
+            )
+            GateVerdict.BEDTIME_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Bedtime",
+                "$label and every other waiting app are shut for the night. They open once " +
+                    "your morning alarm is verified, or at 07:00 on a day without one."
+            )
+            GateVerdict.EARN_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Earn it first",
+                "$label opens after today's first focus block. One pomodoro, then the feed."
+            )
+            GateVerdict.BUDGET_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Today's budget is spent",
+                "${rules.dailyBudgetMinutes} minutes across every waiting app are used up. " +
+                    "$label opens again at midnight."
+            )
+        }
+    }
+
+    /**
+     * The wall that stands BEFORE the wait for [packageName], if any. Asked by
+     * [GateActivity] as it opens: the WakeProof home screen launches the wait
+     * screen directly, and that path never passed through [watch] — so TikTok
+     * tapped there at 00:52 got a five-minute countdown instead of "not open
+     * now" (2026-10-29).
+     *
+     * Measures afresh and leaves the loop's usage baselines alone: those
+     * extrapolate as though the app were on screen, and it is not — the wait is.
+     */
+    private suspend fun wallBefore(packageName: String): Intent? {
+        val gated = gatedCache.getOrPut(packageName) {
+            AppGate.isGated(this, packageName, untouchable, browsers, rules.gateBrowsers)
+        }
+        val limit = blockedLimits[packageName]
+        val capSpent = limit != null &&
+            (usageRepository.todayForegroundMillisFor(setOf(packageName))[packageName] ?: 0L) >=
+            limit.minutes * 60_000L
+        val budget = rules.dailyBudgetMinutes
+        val budgetSpent = gated && budget > 0 &&
+            usageRepository.todayForegroundMillisFor(allGated + packageName).values.sum() >=
+            budget * 60_000L
+        val verdict = verdictFor(packageName, gated, hasPass = false, capSpent, budgetSpent)
+        logVerdict(packageName, verdict)
+        return when (verdict) {
+            GateVerdict.ALLOW, GateVerdict.WAIT -> null
+            else -> wallIntent(packageName, verdict, limit)
         }
     }
 
@@ -561,6 +598,15 @@ class AppBlockService : Service() {
 
     companion object {
         private const val TAG = "AppBlockService"
+
+        /** The running service, for [wallBefore]; same process, so a plain reference. */
+        @Volatile private var instance: AppBlockService? = null
+
+        /**
+         * The wall [packageName] should get instead of the wait, or null when the
+         * wait is the right screen (or the service is not running to say).
+         */
+        suspend fun wallBefore(packageName: String): Intent? = instance?.wallBefore(packageName)
         private const val CHANNEL_ID = "wakeproof_app_block_quiet"
         private const val LEGACY_CHANNEL_ID = "wakeproof_app_block"
         private const val NOTIFICATION_ID = 43

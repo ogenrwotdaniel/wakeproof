@@ -326,6 +326,7 @@ class AppBlockService : Service() {
             if (!gated) budgetBaselineValid = false
             val limit = blockedLimits[current]
             val wallClock = System.currentTimeMillis()
+            val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
             val verdict = gateVerdict(
                 essential = current in untouchable,
                 focusSessionActive = PomodoroTimerService.state.value.active ||
@@ -334,8 +335,13 @@ class AppBlockService : Service() {
                 capSpent = limit != null && capSpent(current, limit),
                 gated = gated,
                 hasPass = GatePasses.isValid(current),
+                outsideWindow = gated && outsideOpenWindow(
+                    minuteOfDay = minuteOfDay,
+                    startMinutes = rules.openWindowStartMinutes,
+                    endMinutes = rules.openWindowEndMinutes
+                ),
                 bedtime = gated && bedtimeActive(
-                    minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute },
+                    minuteOfDay = minuteOfDay,
                     startMinutes = rules.bedtimeStartMinutes,
                     alarmVerifiedToday = alarmVerifiedToday
                 ),
@@ -354,6 +360,16 @@ class AppBlockService : Service() {
                         label = usageRepository.appLabel(current),
                         usedMinutes = limit!!.minutes,
                         capMinutes = limit.minutes
+                    )
+                }
+                GateVerdict.WINDOW_WALL -> wall(current) {
+                    BlockedActivity.ruleIntent(
+                        this,
+                        "Not open now",
+                        "${usageRepository.appLabel(current)} and every other waiting app open " +
+                            "only between ${clock(rules.openWindowStartMinutes)} and " +
+                            "${clock(rules.openWindowEndMinutes)}. WhatsApp Business and the " +
+                            "phone always work."
                     )
                 }
                 GateVerdict.BEDTIME_WALL -> wall(current) {
@@ -430,6 +446,10 @@ class AppBlockService : Service() {
         budgetSpentAgainst = budget
         return true
     }
+
+    /** "14:00" or "2:00 PM", as the phone tells time. */
+    private fun clock(minutes: Int): String =
+        com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime(this, minutes / 60, minutes % 60)
 
     /** Recomputes [allGated] from the installed apps; the budget is measured over it. */
     private fun refreshAllGated() {

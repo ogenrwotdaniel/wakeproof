@@ -218,7 +218,9 @@ object GatePasses {
 data class GatePass(val grantedAt: Long, val used: Boolean)
 
 /** What [AppBlockService] does about the app on screen. */
-enum class GateVerdict { ALLOW, FOCUS_WALL, CAP_WALL, BEDTIME_WALL, EARN_WALL, BUDGET_WALL, WAIT }
+enum class GateVerdict {
+    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL, EARN_WALL, BUDGET_WALL, WAIT
+}
 
 /**
  * The single decision, in priority order:
@@ -228,8 +230,8 @@ enum class GateVerdict { ALLOW, FOCUS_WALL, CAP_WALL, BEDTIME_WALL, EARN_WALL, B
  *    whole session, breaks included, by the user's choice. A session running
  *    on another of the user's devices counts too.
  * 3. An app whose daily cap is spent is walled until midnight.
- * 4. Everything else here is about the waiting apps only:
- *    the bedtime wall, then the feed not yet earned by a focus block, then the
+ * 4. Everything else here is about the waiting apps only: shut outside the
+ *    open window (14:00–17:00 by default), then the bedtime wall, then the feed not yet earned by a focus block, then the
  *    shared daily budget spent, and finally the wait itself. A pass earned at
  *    the wait does not get past any of the walls before it.
  */
@@ -240,6 +242,7 @@ fun gateVerdict(
     capSpent: Boolean,
     gated: Boolean,
     hasPass: Boolean,
+    outsideWindow: Boolean = false,
     bedtime: Boolean = false,
     feedEarned: Boolean = true,
     budgetSpent: Boolean = false
@@ -248,6 +251,7 @@ fun gateVerdict(
     focusSessionActive && !onFocusList -> GateVerdict.FOCUS_WALL
     capSpent -> GateVerdict.CAP_WALL
     !gated -> GateVerdict.ALLOW
+    outsideWindow -> GateVerdict.WINDOW_WALL
     bedtime -> GateVerdict.BEDTIME_WALL
     !feedEarned -> GateVerdict.EARN_WALL
     budgetSpent -> GateVerdict.BUDGET_WALL

@@ -46,7 +46,18 @@ enum class WallRule(val key: String, val default: Int) {
     BEDTIME_START_MINUTES("bedtime_start_minutes", 17 * 60),
 
     /** Do Not Disturb for the whole of a focus session. */
-    SESSION_DND("session_dnd", RULE_ON);
+    SESSION_DND("session_dnd", RULE_ON),
+
+    /**
+     * Minute of the day the waiting apps' open window starts; [RULE_OFF_MINUTES]
+     * = no window, open all day (2026-10-29, user's choice: 14:00, covering
+     * social, video, messaging AND browsers). Outside the window they are shut;
+     * inside it every other rule still applies.
+     */
+    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 14 * 60),
+
+    /** Minute of the day the open window closes (exclusive). */
+    OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 17 * 60);
 
     /**
      * How loose [value] is for this rule; higher = lets the phone be used
@@ -56,6 +67,9 @@ enum class WallRule(val key: String, val default: Int) {
         DAILY_BUDGET_MINUTES -> if (value <= 0) Int.MAX_VALUE else value
         // A later start leaves more of the evening open.
         BEDTIME_START_MINUTES -> if (value < 0) Int.MAX_VALUE else value
+        // The window opening earlier, or closing later, leaves more of the day open.
+        OPEN_WINDOW_START_MINUTES -> if (value < 0) Int.MAX_VALUE else MINUTES_PER_DAY - value
+        OPEN_WINDOW_END_MINUTES -> value
         else -> if (value == RULE_OFF) 1 else 0
     }
 
@@ -67,6 +81,7 @@ enum class WallRule(val key: String, val default: Int) {
 const val RULE_ON = 1
 const val RULE_OFF = 0
 const val RULE_OFF_MINUTES = -1
+const val MINUTES_PER_DAY = 24 * 60
 
 /** A loosening waiting out the week. */
 data class PendingRule(val value: Int, val effectiveAtMillis: Long)
@@ -80,6 +95,8 @@ data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
     val earnTheFeed: Boolean get() = value(WallRule.EARN_THE_FEED) != RULE_OFF
     val bedtimeStartMinutes: Int get() = value(WallRule.BEDTIME_START_MINUTES)
     val sessionDnd: Boolean get() = value(WallRule.SESSION_DND) != RULE_OFF
+    val openWindowStartMinutes: Int get() = value(WallRule.OPEN_WINDOW_START_MINUTES)
+    val openWindowEndMinutes: Int get() = value(WallRule.OPEN_WINDOW_END_MINUTES)
 }
 
 /**
@@ -207,3 +224,12 @@ fun gateWaitSeconds(opensToday: Int, escalating: Boolean): Int =
     if (!escalating) AppGate.GATE_WAIT_SECONDS
     else (AppGate.GATE_WAIT_SECONDS * (opensToday.coerceAtLeast(0) + 1))
         .coerceAtMost(MAX_ESCALATED_WAIT_SECONDS)
+
+/**
+ * Pure: whether [minuteOfDay] falls outside the waiting apps' open window
+ * `[startMinutes, endMinutes)`. A negative start means no window — open all
+ * day. A window that ends at or before it starts is open at no time at all:
+ * the strict reading of a setting that makes no sense.
+ */
+fun outsideOpenWindow(minuteOfDay: Int, startMinutes: Int, endMinutes: Int): Boolean =
+    startMinutes >= 0 && minuteOfDay !in startMinutes until endMinutes

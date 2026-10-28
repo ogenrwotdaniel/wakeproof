@@ -674,7 +674,7 @@ private fun WallRulesSection(
     )
     WallRule.entries.forEach { rule ->
         val value = rules.value(rule)
-        val switchable = rule != WallRule.DAILY_BUDGET_MINUTES && rule != WallRule.BEDTIME_START_MINUTES
+        val switchable = rule !in NUMBER_RULES
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -724,7 +724,20 @@ private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Conte
         if (value < 0) "Bedtime wall: off"
         else "Bedtime wall from ${formatAlarmTime(context, value / 60, value % 60)}"
     WallRule.SESSION_DND -> "Do Not Disturb in sessions"
+    WallRule.OPEN_WINDOW_START_MINUTES ->
+        if (value < 0) "Open window: off (open all day)"
+        else "Open window starts ${formatAlarmTime(context, value / 60, value % 60)}"
+    WallRule.OPEN_WINDOW_END_MINUTES ->
+        "Open window ends ${formatAlarmTime(context, value / 60, value % 60)}"
 }
+
+/** Rules that are a number, edited with a slider rather than switched. */
+private val NUMBER_RULES = setOf(
+    WallRule.DAILY_BUDGET_MINUTES,
+    WallRule.BEDTIME_START_MINUTES,
+    WallRule.OPEN_WINDOW_START_MINUTES,
+    WallRule.OPEN_WINDOW_END_MINUTES
+)
 
 private fun ruleSubtitle(rule: WallRule): String = when (rule) {
     WallRule.GATE_BROWSERS -> "Chrome, Samsung Internet and the rest wait like social apps."
@@ -733,6 +746,9 @@ private fun ruleSubtitle(rule: WallRule): String = when (rule) {
     WallRule.EARN_THE_FEED -> "Waiting apps stay shut until today's first focus block."
     WallRule.BEDTIME_START_MINUTES -> "Waiting apps shut until your morning alarm is verified."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
+    WallRule.OPEN_WINDOW_START_MINUTES ->
+        "Outside the window every waiting app is shut, browsers and messaging included."
+    WallRule.OPEN_WINDOW_END_MINUTES -> "Inside it the wait, the budget and the rest still apply."
 }
 
 private fun pendingRuleText(rule: WallRule, value: Int, context: android.content.Context): String =
@@ -741,10 +757,15 @@ private fun pendingRuleText(rule: WallRule, value: Int, context: android.content
         WallRule.BEDTIME_START_MINUTES ->
             if (value < 0) "Bedtime wall off"
             else "Moves to ${formatAlarmTime(context, value / 60, value % 60)}"
+        WallRule.OPEN_WINDOW_START_MINUTES ->
+            if (value < 0) "Window off"
+            else "Opens at ${formatAlarmTime(context, value / 60, value % 60)}"
+        WallRule.OPEN_WINDOW_END_MINUTES ->
+            "Closes at ${formatAlarmTime(context, value / 60, value % 60)}"
         else -> if (value == RULE_OFF) "Turns off" else "Turns on"
     }
 
-/** Slider for the two rules that are a number rather than a switch. */
+/** Slider for the rules that are a number rather than a switch. */
 @Composable
 private fun RuleValueDialog(
     rule: WallRule,
@@ -754,25 +775,47 @@ private fun RuleValueDialog(
 ) {
     val context = LocalContext.current
     val budget = rule == WallRule.DAILY_BUDGET_MINUTES
-    // Budget: 5–120 min in 5s. Bedtime: 12:00–23:45 in quarter hours.
-    val range = if (budget) 5f..120f else (12 * 60f)..(23 * 60f + 45)
+    fun clock(minutes: Int) = formatAlarmTime(context, minutes / 60, minutes % 60)
+    // Budget: 5–120 min in 5s. Times: quarter hours across the useful span.
+    val range = when (rule) {
+        WallRule.DAILY_BUDGET_MINUTES -> 5f..120f
+        WallRule.BEDTIME_START_MINUTES -> (12 * 60f)..(23 * 60f + 45)
+        WallRule.OPEN_WINDOW_START_MINUTES -> 0f..(23 * 60f + 30)
+        else -> 15f..(23 * 60f + 45)
+    }
     val step = if (budget) 5 else 15
+    val fallback = when (rule) {
+        WallRule.DAILY_BUDGET_MINUTES -> 25
+        WallRule.BEDTIME_START_MINUTES -> 17 * 60
+        else -> rule.default
+    }
+    val turnedOff = current < 0 || (budget && current == 0)
     var picked by remember {
-        mutableFloatStateOf(
-            (if (current < 0 || (budget && current == 0)) if (budget) 25 else 17 * 60 else current)
-                .toFloat().coerceIn(range)
-        )
+        mutableFloatStateOf((if (turnedOff) fallback else current).toFloat().coerceIn(range))
     }
     val value = (picked / step).toInt() * step
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (budget) "Daily budget" else "Bedtime wall") },
+        title = {
+            Text(
+                when (rule) {
+                    WallRule.DAILY_BUDGET_MINUTES -> "Daily budget"
+                    WallRule.BEDTIME_START_MINUTES -> "Bedtime wall"
+                    WallRule.OPEN_WINDOW_START_MINUTES -> "Open window starts"
+                    else -> "Open window ends"
+                }
+            )
+        },
         text = {
             Column {
                 Text(
-                    if (budget) "$value min a day across every waiting app."
-                    else "From ${formatAlarmTime(context, value / 60, value % 60)} until your " +
-                        "morning alarm is verified."
+                    when (rule) {
+                        WallRule.DAILY_BUDGET_MINUTES -> "$value min a day across every waiting app."
+                        WallRule.BEDTIME_START_MINUTES ->
+                            "From ${clock(value)} until your morning alarm is verified."
+                        WallRule.OPEN_WINDOW_START_MINUTES -> "Waiting apps open at ${clock(value)}."
+                        else -> "Waiting apps shut again at ${clock(value)}."
+                    }
                 )
                 Slider(
                     value = picked,
@@ -781,7 +824,7 @@ private fun RuleValueDialog(
                     steps = ((range.endInclusive - range.start) / step).toInt() - 1
                 )
                 Text(
-                    text = "More time or a later start waits a week. Less applies now.",
+                    text = "Anything that leaves more time open waits a week. Less applies now.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -790,8 +833,11 @@ private fun RuleValueDialog(
         confirmButton = { TextButton(onClick = { onSet(value) }) { Text("Set") } },
         dismissButton = {
             Row {
-                TextButton(onClick = { onSet(if (budget) 0 else RULE_OFF_MINUTES) }) {
-                    Text("Turn off in 7 days")
+                // The window's end has no "off": switching the window off is its start's job.
+                if (rule != WallRule.OPEN_WINDOW_END_MINUTES) {
+                    TextButton(onClick = { onSet(if (budget) 0 else RULE_OFF_MINUTES) }) {
+                        Text("Turn off in 7 days")
+                    }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }

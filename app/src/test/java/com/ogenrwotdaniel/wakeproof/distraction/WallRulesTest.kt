@@ -119,3 +119,43 @@ class WallRulesTest {
         assertEquals(GateDay(today, 1, 2), parsed[today])
     }
 }
+
+class OpenWindowTest {
+
+    @Test
+    fun `waiting apps open only from two to five`() {
+        val start = 14 * 60
+        val end = 17 * 60
+        assertTrue(outsideOpenWindow(13 * 60 + 59, start, end))
+        assertFalse(outsideOpenWindow(14 * 60, start, end))
+        assertFalse(outsideOpenWindow(16 * 60 + 59, start, end))
+        assertTrue(outsideOpenWindow(17 * 60, start, end))
+        assertTrue(outsideOpenWindow(3 * 60, start, end))
+        assertFalse(outsideOpenWindow(3 * 60, RULE_OFF_MINUTES, end))
+        // A window that ends before it starts is open at no time.
+        assertTrue(outsideOpenWindow(15 * 60, 16 * 60, 15 * 60))
+    }
+
+    @Test
+    fun `opening earlier or closing later is loosening, narrowing is not`() {
+        val start = WallRule.OPEN_WINDOW_START_MINUTES
+        val end = WallRule.OPEN_WINDOW_END_MINUTES
+        assertTrue(WallRulesRepository.isLoosening(start, 14 * 60, 13 * 60))
+        assertTrue(WallRulesRepository.isLoosening(start, 14 * 60, RULE_OFF_MINUTES))
+        assertFalse(WallRulesRepository.isLoosening(start, 14 * 60, 15 * 60))
+        assertFalse(WallRulesRepository.isLoosening(start, RULE_OFF_MINUTES, 14 * 60))
+        assertTrue(WallRulesRepository.isLoosening(end, 17 * 60, 18 * 60))
+        assertFalse(WallRulesRepository.isLoosening(end, 17 * 60, 16 * 60))
+    }
+
+    @Test
+    fun `outside the window comes before every other wall, and only for waiting apps`() {
+        fun verdict(gated: Boolean) = gateVerdict(
+            essential = false, focusSessionActive = false, onFocusList = false,
+            capSpent = false, gated = gated, hasPass = true,
+            outsideWindow = true, bedtime = true, feedEarned = false, budgetSpent = true
+        )
+        assertEquals(GateVerdict.WINDOW_WALL, verdict(gated = true))
+        assertEquals(GateVerdict.ALLOW, verdict(gated = false))
+    }
+}

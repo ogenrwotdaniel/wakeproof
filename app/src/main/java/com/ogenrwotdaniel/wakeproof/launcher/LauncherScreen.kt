@@ -56,6 +56,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
+import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import java.time.Instant
@@ -138,10 +139,13 @@ fun LauncherScreen(
     // Social, video and messaging apps sit out the five-minute wait — the same
     // one AppBlockService throws up however else they are opened. Other capped
     // apps get the shorter mindful pause; everything else opens at once.
+    // Exempt apps (WhatsApp Business) skip the pause too: their cap is a nudge
+    // to make the time visible, not a reason to stand in front of them.
     val open: (InstalledApp) -> Unit = { app ->
         when {
             app.packageName in gated -> onWait(app)
-            app.packageName in limits -> pausing = app
+            app.packageName in limits && app.packageName !in AppGate.EXEMPT_PACKAGES ->
+                pausing = app
             else -> onLaunch(app.packageName)
         }
     }

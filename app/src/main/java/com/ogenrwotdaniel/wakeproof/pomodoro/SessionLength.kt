@@ -54,7 +54,13 @@ data class SessionPlan(
     val longBreakMinutes: Int,
     val focusBlocks: Int,
     /** A long break follows every this-many focus blocks. */
-    val longBreakEvery: Int
+    val longBreakEvery: Int,
+    /**
+     * The LAST focus block's length; the others run [focusMinutes]. Differs
+     * only in an [exactSessionPlan], which trims it so the session ends on the
+     * minute asked for.
+     */
+    val lastFocusMinutes: Int = focusMinutes
 )
 
 /**
@@ -91,3 +97,50 @@ fun sessionPlan(
         longBreakEvery = 4
     )
 }
+
+/** Focus and break lengths of an [exactSessionPlan]: the classic 25 + 5. */
+const val EXACT_FOCUS_MINUTES = 25
+const val EXACT_BREAK_MINUTES = 5
+
+/**
+ * The shortest exact session offered — under it, an event is ticked off
+ * rather than focused for — and the shortest last block it will trim to.
+ */
+const val MIN_EXACT_SESSION_MINUTES = 10
+
+/**
+ * Pure: a session lasting EXACTLY [totalMinutes] (2026-11-01), for focusing
+ * through a calendar event: 25-minute blocks with 5-minute breaks and no long
+ * break, the last block trimmed (or, when trimming would leave a stub under
+ * [MIN_EXACT_SESSION_MINUTES], stretched) so the whole thing ends on the
+ * minute. 1 h 25 m is three full blocks; 1 h 02 m is 25 + 5 + 32, not
+ * 25 + 5 + 25 + 5 + 2. Ends on a focus block like every session; never
+ * shorter than the floor, so a caller below it still gets a sane plan.
+ */
+fun exactSessionPlan(totalMinutes: Int): SessionPlan {
+    val total = totalMinutes.coerceAtLeast(MIN_EXACT_SESSION_MINUTES)
+    val cycle = EXACT_FOCUS_MINUTES + EXACT_BREAK_MINUTES
+    // n blocks take n × focus + (n − 1) × break = n × cycle − break.
+    var blocks = ((total + EXACT_BREAK_MINUTES + cycle - 1) / cycle).coerceAtLeast(1)
+    var last = total - (blocks - 1) * cycle
+    if (last < MIN_EXACT_SESSION_MINUTES && blocks > 1) {
+        blocks -= 1
+        last += cycle
+    }
+    return SessionPlan(
+        focusMinutes = EXACT_FOCUS_MINUTES,
+        shortBreakMinutes = EXACT_BREAK_MINUTES,
+        longBreakMinutes = EXACT_BREAK_MINUTES,
+        focusBlocks = blocks,
+        longBreakEvery = Int.MAX_VALUE,
+        lastFocusMinutes = last
+    )
+}
+
+/**
+ * Pure: how long focus block number [block] (1-based) runs in a session of
+ * [targetFocusBlocks] — the last one [lastFocusSeconds], the rest
+ * [focusSeconds]. A session with no target never reaches a "last".
+ */
+fun focusSecondsForBlock(block: Int, targetFocusBlocks: Int, focusSeconds: Int, lastFocusSeconds: Int): Int =
+    if (targetFocusBlocks > 0 && block >= targetFocusBlocks) lastFocusSeconds else focusSeconds

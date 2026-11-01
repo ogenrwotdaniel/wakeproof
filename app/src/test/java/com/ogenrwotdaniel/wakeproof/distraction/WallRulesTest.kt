@@ -176,4 +176,22 @@ class OpenWindowTest {
         assertEquals(null, reopensTomorrowAtMinutes(true, RULE_OFF_MINUTES, 17 * 60))
         assertEquals(null, reopensTomorrowAtMinutes(true, 16 * 60, 15 * 60))
     }
+
+    @Test
+    fun `the open window defaults to 08 10 until 08 50`() {
+        val rules = WallRules()
+        assertEquals(8 * 60 + 10, rules.openWindowStartMinutes)
+        assertEquals(8 * 60 + 50, rules.openWindowEndMinutes)
+        assertFalse(outsideOpenWindow(8 * 60 + 10, rules.openWindowStartMinutes, rules.openWindowEndMinutes))
+        assertTrue(outsideOpenWindow(8 * 60 + 50, rules.openWindowStartMinutes, rules.openWindowEndMinutes))
+        assertTrue(outsideOpenWindow(14 * 60, rules.openWindowStartMinutes, rules.openWindowEndMinutes))
+    }
+
+    @Test
+    fun `the open window counts as earned, without one the focus block is needed`() {
+        assertTrue(feedEarned(earnTheFeed = true, focusDoneToday = false, windowStartMinutes = 490))
+        assertFalse(feedEarned(earnTheFeed = true, focusDoneToday = false, windowStartMinutes = RULE_OFF_MINUTES))
+        assertTrue(feedEarned(earnTheFeed = true, focusDoneToday = true, windowStartMinutes = RULE_OFF_MINUTES))
+        assertTrue(feedEarned(earnTheFeed = false, focusDoneToday = false, windowStartMinutes = RULE_OFF_MINUTES))
+    }
 }

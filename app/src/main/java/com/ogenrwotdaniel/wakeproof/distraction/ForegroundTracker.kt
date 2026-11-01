@@ -41,6 +41,13 @@ class ResumedActivities {
 
     /** The package in front, or null when nothing is known to be resumed. */
     fun foreground(): String? = resumed.keys.maxByOrNull { lastResumedAt[it] ?: 0L }
+
+    /**
+     * Whether [packageName] still has an activity resumed. Two packages are
+     * resumed at once when one sits in a pop-up window or split screen — which
+     * is how a walled app stays usable beside the wall thrown over it.
+     */
+    fun isResumed(packageName: String): Boolean = packageName in resumed
 }
 
 /**
@@ -75,6 +82,9 @@ class ForegroundTracker(private val usm: UsageStatsManager) {
         readUpTo = now
         return state.foreground()
     }
+
+    /** As of the last [current] call; see [ResumedActivities.isResumed]. */
+    fun isResumed(packageName: String): Boolean = state.isResumed(packageName)
 
     private companion object {
         /** `UsageEvents.Event.ACTIVITY_DESTROYED` is a hidden constant (API 29+). */

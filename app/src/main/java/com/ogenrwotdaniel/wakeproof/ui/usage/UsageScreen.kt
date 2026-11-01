@@ -708,7 +708,7 @@ private fun WallRulesSection(
                     !notificationAccess
                 ) {
                     TextButton(onClick = onGrantNotifications) {
-                        Text("Allow notification access to hide their notifications too")
+                        Text("Allow notification access to hide walled apps' notifications")
                     }
                 }
                 pending[rule]?.let { change ->
@@ -764,7 +764,8 @@ private fun ruleSubtitle(rule: WallRule): String = when (rule) {
     WallRule.GATE_BROWSERS -> "Chrome, Samsung Internet and the rest wait like social apps."
     WallRule.ESCALATING_WAIT -> "5 min, then 10, 15… up to 30 min for each visit today."
     WallRule.DAILY_BUDGET_MINUTES -> "Shared by every waiting app. Spent = shut until midnight."
-    WallRule.EARN_THE_FEED -> "Waiting apps stay shut until today's first focus block."
+    WallRule.EARN_THE_FEED ->
+        "Waiting apps stay shut until today's first focus block. The open window counts as earned."
     WallRule.BEDTIME_START_MINUTES -> "Waiting apps shut until your morning alarm is verified."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
     WallRule.OPEN_WINDOW_START_MINUTES ->
@@ -805,7 +806,14 @@ private fun RuleValueDialog(
         WallRule.OPEN_WINDOW_START_MINUTES -> 0f..(23 * 60f + 30)
         else -> 15f..(23 * 60f + 45)
     }
-    val step = if (budget) 5 else 15
+    // The window is set to the minute the user asked for (08:10), so it moves in 5s:
+    // a quarter-hour slider would round 08:10 down to 08:00 on Set, a loosening.
+    val step = when (rule) {
+        WallRule.DAILY_BUDGET_MINUTES,
+        WallRule.OPEN_WINDOW_START_MINUTES,
+        WallRule.OPEN_WINDOW_END_MINUTES -> 5
+        else -> 15
+    }
     val fallback = when (rule) {
         WallRule.DAILY_BUDGET_MINUTES -> 25
         WallRule.BEDTIME_START_MINUTES -> 17 * 60

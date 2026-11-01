@@ -47,6 +47,9 @@ class BootReceiver : BroadcastReceiver() {
                 // A reboot does not end a focus session; it resumes, minus the
                 // tree of the block it interrupted.
                 runCatching { PomodoroTimerService.restore(context.applicationContext) }
+                runCatching {
+                    com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(context.applicationContext)
+                }
             } finally {
                 pendingResult.finish()
             }

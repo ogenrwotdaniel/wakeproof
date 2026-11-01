@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.ui.home
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,7 +33,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.data.DayOutcome
@@ -75,6 +80,11 @@ fun HomeScreen(
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     val timer by viewModel.timer.collectAsStateWithLifecycle()
     val watchTimer by viewModel.watchTimer.collectAsStateWithLifecycle()
+    val missingGrants by viewModel.missingGrants.collectAsStateWithLifecycle()
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshGrants()
+        onPauseOrDispose { }
+    }
     var testArmed by remember { mutableStateOf(false) }
     var addingExam by remember { mutableStateOf(false) }
 
@@ -112,6 +122,7 @@ fun HomeScreen(
                 )
             }
             WatchSessionCard(watchTimer)
+            MissingGrantsCard(missingGrants)
 
             // A companion device holds the whole schedule and arms none of it.
             // Without this the tablet looks exactly like a phone whose alarms
@@ -353,6 +364,55 @@ private fun WatchSessionCard(timer: LiveWatchTimer?, modifier: Modifier = Modifi
                 text = "%d:%02d".format(display.remainingSeconds / 60, display.remainingSeconds % 60),
                 style = MaterialTheme.typography.headlineMedium
             )
+        }
+    }
+}
+
+/**
+ * One-tap rows for the special grants a wall needs and lacks. Without them the
+ * wall does nothing and nothing says so: Do Not Disturb during a session was
+ * "not working" for exactly this reason. Renders nothing once all are granted.
+ */
+@Composable
+private fun MissingGrantsCard(missing: MissingGrants, modifier: Modifier = Modifier) {
+    if (!missing.dnd && !missing.notifications) return
+    val context = LocalContext.current
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(text = "Some walls are switched off", style = MaterialTheme.typography.titleSmall)
+            if (missing.dnd) {
+                Text(
+                    text = "Do Not Disturb can't follow your focus sessions without access.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                    }
+                }) { Text("Allow Do Not Disturb") }
+            }
+            if (missing.notifications) {
+                Text(
+                    text = "Walled apps still show their notifications — in the shade, the " +
+                        "Edge panel and icon previews.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+                                Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                                WindowNotificationGuard.component(context).flattenToString()
+                            )
+                        )
+                    }
+                }) { Text("Allow notification access") }
+            }
         }
     }
 }

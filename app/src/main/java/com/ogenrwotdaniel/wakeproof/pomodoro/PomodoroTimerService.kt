@@ -112,6 +112,10 @@ class PomodoroTimerService : Service() {
      */
     private var phaseDeadline = 0L
     private var focusSeconds = 25 * 60
+    /** The last block's length; shorter only in an exact (calendar-event) session. */
+    private var lastFocusSeconds = 25 * 60
+    /** The calendar event this session is for, if any — for the end-of-event check-in. */
+    private var event: SessionEvent? = null
     private var shortBreakSeconds = 5 * 60
     private var longBreakSeconds = 15 * 60
     /** A long break after every this-many focus blocks; set per session. */
@@ -235,26 +239,35 @@ class PomodoroTimerService : Service() {
                 // a stop by another name.
                 if (_state.value.active) return START_NOT_STICKY
                 val sessionMinutes = intent.getIntExtra(EXTRA_SESSION_MINUTES, 0)
+                val exactMinutes = intent.getIntExtra(EXTRA_EXACT_MINUTES, 0)
+                val startedFor = intent.getStringExtra(EXTRA_EVENT_KEY)?.let { key ->
+                    SessionEvent(key, intent.getStringExtra(EXTRA_EVENT_TITLE).orEmpty())
+                }
                 scope.launch {
                     val settings = settingsRepository.settings.first()
                     // A "1 h" session with 25+5 settings = 2 focus blocks; "2 h" = 4;
-                    // "3 h" is its own fixed recipe. See sessionPlan.
-                    val plan = sessionPlan(
+                    // "3 h" is its own fixed recipe. See sessionPlan. A calendar
+                    // event's session lasts exactly as long as the event.
+                    val plan = if (exactMinutes > 0) exactSessionPlan(exactMinutes) else sessionPlan(
                         sessionMinutes = sessionMinutes,
                         focusMinutes = settings.focusMinutes,
                         shortBreakMinutes = settings.shortBreakMinutes,
                         longBreakMinutes = settings.longBreakMinutes
                     )
                     focusSeconds = plan.focusMinutes * 60
+                    lastFocusSeconds = plan.lastFocusMinutes * 60
                     shortBreakSeconds = plan.shortBreakMinutes * 60
                     longBreakSeconds = plan.longBreakMinutes * 60
                     longBreakEvery = plan.longBreakEvery
+                    event = startedFor
+                    SessionEventStore.save(this@PomodoroTimerService, startedFor)
+                    val first = blockSeconds(1, plan.focusBlocks)
                     _state.value = PomodoroState(
                         active = true,
                         running = true,
                         phase = PomodoroPhase.FOCUS,
-                        remainingSeconds = focusSeconds,
-                        totalSeconds = focusSeconds,
+                        remainingSeconds = first,
+                        totalSeconds = first,
                         targetFocusBlocks = plan.focusBlocks
                     )
                     startTicker()
@@ -559,7 +572,7 @@ class PomodoroTimerService : Service() {
                     // A withered block is still recorded, so the forest can show
                     // the dead tree, but SKIPPED keeps it out of focus time.
                     if (current.treeWithered) CompletionStatus.SKIPPED else CompletionStatus.VERIFIED,
-                    amount = focusSeconds / 60,
+                    amount = blockSeconds(current.completedFocusSessions + 1, current.targetFocusBlocks) / 60,
                     subject = settingsRepository.settings.first().activeSubject
                 )
             }
@@ -578,6 +591,7 @@ class PomodoroTimerService : Service() {
                         .setAutoCancel(true)
                         .build()
                 )
+                event?.let { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.postCheckIn(this, it) }
                 runCatching { wearTimerSync.clear() }
                 endSession()
                 stopSelf()
@@ -596,11 +610,12 @@ class PomodoroTimerService : Service() {
             }
             armDeadline()
         } else {
+            val length = blockSeconds(current.completedFocusSessions + 1, current.targetFocusBlocks)
             _state.update {
                 it.copy(
                     phase = PomodoroPhase.FOCUS,
-                    remainingSeconds = focusSeconds,
-                    totalSeconds = focusSeconds,
+                    remainingSeconds = length,
+                    totalSeconds = length,
                     // A fresh block, a fresh seedling.
                     treeWithered = false,
                     treeAtRisk = false
@@ -626,7 +641,8 @@ class PomodoroTimerService : Service() {
             focusSeconds = focusSeconds,
             shortBreakSeconds = shortBreakSeconds,
             longBreakSeconds = longBreakSeconds,
-            longBreakEvery = longBreakEvery
+            longBreakEvery = longBreakEvery,
+            lastFocusSeconds = lastFocusSeconds
         )
         runCatching { liveFocusSession.publish(System.currentTimeMillis() + remaining * 1_000L) }
     }
@@ -638,6 +654,8 @@ class PomodoroTimerService : Service() {
      */
     private fun endSession() {
         SessionStore.clear(this)
+        SessionEventStore.save(this, null)
+        event = null
         SessionDnd.exit(this)
         CoroutineScope(Dispatchers.IO).launch { runCatching { liveFocusSession.publish(0L) } }
     }
@@ -657,7 +675,8 @@ class PomodoroTimerService : Service() {
                 completedFocusSessions = s.completedFocusSessions,
                 phase = s.phase,
                 phaseEndsAtMillis = System.currentTimeMillis() + msLeft,
-                treeWithered = s.treeWithered
+                treeWithered = s.treeWithered,
+                lastFocusSeconds = lastFocusSeconds
             )
         )
     }
@@ -671,7 +690,10 @@ class PomodoroTimerService : Service() {
                 completionRepository.log(
                     GoalKind.FOCUS,
                     CompletionStatus.SKIPPED,
-                    amount = saved.focusSeconds / 60,
+                    amount = focusSecondsForBlock(
+                        saved.completedFocusSessions + 1, saved.targetFocusBlocks,
+                        saved.focusSeconds, saved.lastFocusSeconds
+                    ) / 60,
                     subject = settingsRepository.settings.first().activeSubject
                 )
             }
@@ -683,6 +705,8 @@ class PomodoroTimerService : Service() {
             return
         }
         focusSeconds = resume.focusSeconds
+        lastFocusSeconds = resume.lastFocusSeconds
+        event = SessionEventStore.load(this)
         shortBreakSeconds = resume.shortBreakSeconds
         longBreakSeconds = resume.longBreakSeconds
         longBreakEvery = resume.longBreakEvery
@@ -692,7 +716,11 @@ class PomodoroTimerService : Service() {
             running = true,
             phase = resume.phase,
             remainingSeconds = left,
-            totalSeconds = durationOf(resume.phase),
+            totalSeconds = if (resume.phase == PomodoroPhase.FOCUS) {
+                blockSeconds(resume.completedFocusSessions + 1, resume.targetFocusBlocks)
+            } else {
+                durationOf(resume.phase)
+            },
             completedFocusSessions = resume.completedFocusSessions,
             targetFocusBlocks = resume.targetFocusBlocks,
             treeWithered = resume.treeWithered
@@ -712,8 +740,13 @@ class PomodoroTimerService : Service() {
         )
     }
 
+    /** Focus block [block]'s length (1-based); see [focusSecondsForBlock]. */
+    private fun blockSeconds(block: Int, target: Int) =
+        focusSecondsForBlock(block, target, focusSeconds, lastFocusSeconds)
+
+    /** Break lengths; a FOCUS phase asks [blockSeconds] instead, which knows the trimmed last block. */
     private fun durationOf(phase: PomodoroPhase) = when (phase) {
-        PomodoroPhase.FOCUS -> focusSeconds
+        PomodoroPhase.FOCUS -> blockSeconds(_state.value.completedFocusSessions + 1, _state.value.targetFocusBlocks)
         PomodoroPhase.SHORT_BREAK -> shortBreakSeconds
         PomodoroPhase.LONG_BREAK -> longBreakSeconds
     }
@@ -872,6 +905,9 @@ class PomodoroTimerService : Service() {
         /** Ramp resolution. 20 Hz is well under the threshold where steps are audible. */
         private const val FADE_STEPS_PER_SECOND = 20
         private const val EXTRA_SESSION_MINUTES = "session_minutes"
+        private const val EXTRA_EXACT_MINUTES = "exact_minutes"
+        private const val EXTRA_EVENT_KEY = "event_key"
+        private const val EXTRA_EVENT_TITLE = "event_title"
 
         /** Alarm-stream routing, so timer alerts are heard over study music. */
         private val ALERT_AUDIO_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
@@ -887,6 +923,19 @@ class PomodoroTimerService : Service() {
         fun start(context: Context, sessionMinutes: Int = 0) = context.startForegroundService(
             intent(context, ACTION_START).putExtra(EXTRA_SESSION_MINUTES, sessionMinutes)
         )
+        /**
+         * Starts a session lasting exactly [minutes] for a calendar event
+         * (2026-11-01; see [exactSessionPlan]). As nuclear as any other: no
+         * pause, no stop. Ignored, like every start, while a session runs.
+         */
+        fun startForEvent(context: Context, minutes: Int, eventKey: String, eventTitle: String) =
+            context.startForegroundService(
+                intent(context, ACTION_START)
+                    .putExtra(EXTRA_EXACT_MINUTES, minutes)
+                    .putExtra(EXTRA_EVENT_KEY, eventKey)
+                    .putExtra(EXTRA_EVENT_TITLE, eventTitle)
+            )
+
         /** Refused while a session is active — kept for the watch's command path. */
         fun pause(context: Context) = context.startService(intent(context, ACTION_PAUSE))
         fun resume(context: Context) = context.startService(intent(context, ACTION_RESUME))

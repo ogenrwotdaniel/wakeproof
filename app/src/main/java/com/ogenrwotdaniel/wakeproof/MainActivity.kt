@@ -53,6 +53,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { runCatching { AppBlockService.sync(applicationContext) } }
         // A session lost to a force-stop comes back the moment the app opens.
         com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService.restore(applicationContext)
+        // The next calendar-event reminder, from a calendar that may have changed.
+        lifecycleScope.launch {
+            runCatching { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(applicationContext) }
+        }
         // Pull whatever the other device did before the user reads anything. This is
         // the case that matters: picking up the tablet after studying on the phone.
         // sync() is a no-op unless signed in and enabled, and never throws.

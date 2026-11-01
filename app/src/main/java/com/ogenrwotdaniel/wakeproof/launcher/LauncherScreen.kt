@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
+import com.ogenrwotdaniel.wakeproof.agenda.EventFocusDialog
+import com.ogenrwotdaniel.wakeproof.agenda.eventFocusMinutes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -210,6 +212,8 @@ fun LauncherScreen(
                     allowed = calendarAllowed,
                     onAllow = { askCalendar.launch(Manifest.permission.READ_CALENDAR) },
                     onToggleDone = viewModel::setEventDone,
+                    sessionRunning = timer.active,
+                    onFocus = viewModel::focusForEvent,
                     // Takes all the space between the focus line and the pins,
                     // so the whole day is visible at once; scrolls only on a day
                     // with more than fits.
@@ -271,12 +275,15 @@ fun LauncherScreen(
 }
 
 /**
- * All of today's events from the phone's calendar, as plain lines: all-day
+ * All of today's events from the phone's calendar, as a to-do list: all-day
  * ones first, then by start time, titles wrapping rather than cut off. Once
  * capped at six rows with "+ n more"; the user wanted the whole day in view,
- * and the home screen had the room. A tap ticks an event off (the same
- * done-state as the Agenda screen in the app). Without the calendar permission
- * it is one line offering to ask.
+ * and the home screen had the room. The box ticks an event off (the same
+ * done-state as the Agenda screen in the app); the title offers a focus
+ * session that ends with the event (2026-11-01) — after a confirm, since it
+ * cannot be stopped. All-day events, ones nearly over and anything while a
+ * session runs only tick. Without the calendar permission it is one line
+ * offering to ask.
  */
 @Composable
 private fun Agenda(
@@ -285,9 +292,27 @@ private fun Agenda(
     allowed: Boolean,
     onAllow: () -> Unit,
     onToggleDone: (AgendaEvent, Boolean) -> Unit,
+    sessionRunning: Boolean,
+    onFocus: (AgendaEvent) -> Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var confirming by remember { mutableStateOf<Pair<AgendaEvent, Int>?>(null) }
+    confirming?.let { (event, minutes) ->
+        EventFocusDialog(
+            title = event.title,
+            minutes = minutes,
+            onConfirm = {
+                confirming = null
+                if (!onFocus(event)) {
+                    android.widget.Toast.makeText(
+                        context, "Too little of it is left to focus for.", android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            onDismiss = { confirming = null }
+        )
+    }
     if (!allowed) {
         Text(
             text = "Show my calendar here ›",
@@ -317,19 +342,36 @@ private fun Agenda(
         ordered.forEach { event ->
             val done = event.key in doneKeys
             val start = Instant.ofEpochMilli(event.beginMillis).atZone(ZoneId.systemDefault())
-            Text(
-                text = (if (event.allDay) "All day" else formatAlarmTime(context, start.hour, start.minute)) +
-                    "   " + event.title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (done) Color.DarkGray else Color.LightGray,
-                textDecoration = if (done) TextDecoration.LineThrough else null,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggleDone(event, !done) }
-                    .padding(vertical = 3.dp)
-            )
+            Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = if (done) "☑" else "☐",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (done) Color.DarkGray else Color.Gray,
+                    modifier = Modifier
+                        .clickable { onToggleDone(event, !done) }
+                        .padding(vertical = 1.dp)
+                        .padding(end = 10.dp)
+                )
+                Text(
+                    text = (if (event.allDay) "All day" else formatAlarmTime(context, start.hour, start.minute)) +
+                        "   " + event.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (done) Color.DarkGray else Color.LightGray,
+                    textDecoration = if (done) TextDecoration.LineThrough else null,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            // Only what can actually be focused for opens the
+                            // confirm; the rest ticks, as the whole row used to.
+                            val minutes = eventFocusMinutes(event, System.currentTimeMillis())
+                            if (done || sessionRunning || minutes == null) onToggleDone(event, !done)
+                            else confirming = event to minutes
+                        }
+                        .padding(vertical = 3.dp)
+                )
+            }
         }
     }
 }

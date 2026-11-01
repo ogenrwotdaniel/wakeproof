@@ -53,7 +53,11 @@ class LiveCloudFeed @Inject constructor(
             (account as? SyncAccount.SignedIn)?.uid?.takeIf { enabled }
         }
 
-    private fun watchTimer(): Flow<LiveWatchTimer?> = uidWhileSyncing().flatMapLatest { uid ->
+    /**
+     * The watch's live timer on its own, with no log following: read by the
+     * app blocker, which walls this device while the watch runs a session.
+     */
+    fun watchTimer(): Flow<LiveWatchTimer?> = uidWhileSyncing().flatMapLatest { uid ->
         val db = firestore
         if (uid == null || db == null) return@flatMapLatest flowOf(null)
         callbackFlow {

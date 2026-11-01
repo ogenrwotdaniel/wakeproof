@@ -44,6 +44,8 @@ class DistractionLimitWorker(
         // Enforcement is separate from nudging and has to survive reboots, so every
         // periodic run also makes sure the guard service is in the right state.
         AppBlockService.sync(applicationContext)
+        // Calendar edits since the last reminder are picked up here at the latest.
+        runCatching { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(applicationContext) }
         if (limits.isEmpty() || !usageRepository.hasAccess()) return Result.success()
 
         val usedToday = usageRepository.todayMinutesFor(limits.keys)

@@ -19,7 +19,9 @@ data class SavedSession(
     val completedFocusSessions: Int,
     val phase: PomodoroPhase,
     val phaseEndsAtMillis: Long,
-    val treeWithered: Boolean
+    val treeWithered: Boolean,
+    /** The last focus block's length — shorter in an exact session ([exactSessionPlan]). */
+    val lastFocusSeconds: Int = focusSeconds
 )
 
 /** What picking a saved session back up comes to. */
@@ -54,7 +56,12 @@ fun recoverSession(saved: SavedSession, nowMillis: Long): RecoveredSession {
         return RecoveredSession(
             resume = saved.copy(
                 phase = PomodoroPhase.FOCUS,
-                phaseEndsAtMillis = nowMillis + saved.focusSeconds * 1_000L,
+                phaseEndsAtMillis = nowMillis + focusSecondsForBlock(
+                    block = saved.completedFocusSessions + 1,
+                    targetFocusBlocks = saved.targetFocusBlocks,
+                    focusSeconds = saved.focusSeconds,
+                    lastFocusSeconds = saved.lastFocusSeconds
+                ) * 1_000L,
                 treeWithered = false
             ),
             witheredBlock = false
@@ -89,7 +96,8 @@ fun sessionRemainingSeconds(
     focusSeconds: Int,
     shortBreakSeconds: Int,
     longBreakSeconds: Int,
-    longBreakEvery: Int
+    longBreakEvery: Int,
+    lastFocusSeconds: Int = focusSeconds
 ): Long {
     var total = remainingSeconds.toLong()
     if (targetFocusBlocks <= 0) return total
@@ -99,7 +107,7 @@ fun sessionRemainingSeconds(
     val current = if (phase == PomodoroPhase.FOCUS) completedFocusSessions + 1 else completedFocusSessions
     if (phase == PomodoroPhase.FOCUS && current < targetFocusBlocks) total += breakAfter(current)
     for (block in current + 1..targetFocusBlocks) {
-        total += focusSeconds
+        total += focusSecondsForBlock(block, targetFocusBlocks, focusSeconds, lastFocusSeconds)
         if (block < targetFocusBlocks) total += breakAfter(block)
     }
     return total
@@ -126,16 +134,18 @@ object SessionStore {
 internal fun encodeSession(s: SavedSession): String = listOf(
     s.focusSeconds, s.shortBreakSeconds, s.longBreakSeconds, s.longBreakEvery,
     s.targetFocusBlocks, s.completedFocusSessions, s.phase.name, s.phaseEndsAtMillis,
-    if (s.treeWithered) 1 else 0
+    if (s.treeWithered) 1 else 0, s.lastFocusSeconds
 ).joinToString("|")
 
 /** Null for anything unreadable: a corrupt record cannot be resumed honestly. */
 internal fun decodeSession(stored: String?): SavedSession? {
     val p = stored?.split('|') ?: return null
-    if (p.size != 9) return null
+    // Nine fields predate the exact session's trimmed last block (2026-11-01).
+    if (p.size != 9 && p.size != 10) return null
     return runCatching {
+        val focus = p[0].toInt()
         SavedSession(
-            focusSeconds = p[0].toInt(),
+            focusSeconds = focus,
             shortBreakSeconds = p[1].toInt(),
             longBreakSeconds = p[2].toInt(),
             longBreakEvery = p[3].toInt().coerceAtLeast(1),
@@ -143,7 +153,8 @@ internal fun decodeSession(stored: String?): SavedSession? {
             completedFocusSessions = p[5].toInt(),
             phase = PomodoroPhase.valueOf(p[6]),
             phaseEndsAtMillis = p[7].toLong(),
-            treeWithered = p[8] == "1"
+            treeWithered = p[8] == "1",
+            lastFocusSeconds = p.getOrNull(9)?.toInt() ?: focus
         )
     }.getOrNull()
 }

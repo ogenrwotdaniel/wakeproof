@@ -68,3 +68,14 @@ fun sharedSettingAction(localUpdatedAt: Long, remoteUpdatedAt: Long?): SharedSet
     localUpdatedAt > remoteUpdatedAt -> SharedSettingAction.PUSH
     else -> SharedSettingAction.NONE
 }
+
+/**
+ * Pure: what to do with a study-app list pulled from another device while
+ * [sessionActive] here. Outside a session, the remote list. During one, only
+ * its removals: the study apps are the focus list, and an app added elsewhere
+ * would open a hole in a running session — the same addition is refused on
+ * this device's own settings screen. The full list lands on the first pass
+ * after the session.
+ */
+fun studyAppsToApply(local: Set<String>, remote: Set<String>, sessionActive: Boolean): Set<String> =
+    if (sessionActive) local intersect remote else remote

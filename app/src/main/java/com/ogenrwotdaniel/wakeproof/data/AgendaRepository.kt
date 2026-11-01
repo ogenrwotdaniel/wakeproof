@@ -62,6 +62,14 @@ class AgendaRepository @Inject constructor(
         }
     }
 
+    /**
+     * Ticks [key] off without pruning — for the end-of-event check-in, which
+     * holds no list of the current window to prune against.
+     */
+    suspend fun markDone(key: String) {
+        dataStore.edit { prefs -> prefs[DONE_KEYS] = (prefs[DONE_KEYS] ?: emptySet()) + key }
+    }
+
     /** Event instances from the start of today through the next [WINDOW_DAYS] days. */
     suspend fun upcomingEvents(): List<AgendaEvent> = withContext(Dispatchers.IO) {
         if (!hasPermission()) return@withContext emptyList()

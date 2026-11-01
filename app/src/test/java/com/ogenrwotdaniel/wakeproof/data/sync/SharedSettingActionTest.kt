@@ -22,4 +22,14 @@ class SharedSettingActionTest {
         assertEquals(SharedSettingAction.PUSH, sharedSettingAction(localUpdatedAt = 300, remoteUpdatedAt = 200))
         assertEquals(SharedSettingAction.NONE, sharedSettingAction(localUpdatedAt = 200, remoteUpdatedAt = 200))
     }
+
+    @Test
+    fun `study apps pulled outside a session replace the local list`() {
+        assertEquals(setOf("b", "c"), studyAppsToApply(setOf("a", "b"), setOf("b", "c"), sessionActive = false))
+    }
+
+    @Test
+    fun `during a session a pulled list only removes, never adds`() {
+        assertEquals(setOf("b"), studyAppsToApply(setOf("a", "b"), setOf("b", "c"), sessionActive = true))
+    }
 }

@@ -74,6 +74,14 @@ object WearContract {
      * Mirrors the watch's `SessionContract`.
      */
     const val SESSION_PATH_PREFIX = "/wakeproof/session/"
+
+    /**
+     * The watch's running session: one DataItem holding when it ends (watch
+     * wall clock), 0 when none. Walls this phone and, relayed through the
+     * cloud, the tablet. MUST match wear `WatchSessionContract`.
+     */
+    const val WATCH_SESSION_PATH = "/wakeproof/watch_session"
+    const val KEY_WATCH_SESSION_ENDS_AT = "ws_ends_at"
     const val KEY_SESSION_ID = "s_id"
     const val KEY_SESSION_STARTED = "s_started"
     const val KEY_SESSION_ENDED = "s_ended"

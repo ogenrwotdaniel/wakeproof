@@ -18,13 +18,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Outside the open window (2026-10-29, the user's choice: every windowed app),
- * a windowed app shows nothing at all — its notifications are removed as they
- * arrive, and whatever is still in the shade when the window closes is swept.
+ * A walled app shows nothing at all — its notifications are removed as they
+ * arrive, and whatever is still in the shade when a wall goes up is swept.
  *
- * Windowed = the waiting apps plus [AppGate.WINDOWED_PACKAGES], the same set
- * [AppBlockService] walls with [GateVerdict.WINDOW_WALL]. Inside the window
- * nothing is touched.
+ * Was outside-the-open-window only (2026-10-29). Since 2026-11-01 it asks
+ * [AppBlockService.walledNow] and follows EVERY wall — a focus session (on any
+ * of the user's devices), a spent cap, bedtime, earn-the-feed, the budget —
+ * because a notification is a way to read an app the wall keeps shut: the
+ * shade, the Edge panel, Edge lighting and an icon's long-press preview all
+ * show it. The wait is not a wall and leaves notifications alone. With the
+ * blocker not running it falls back to the open window alone, for the
+ * windowed apps (the waiting apps plus [AppGate.WINDOWED_PACKAGES]).
  *
  * LIMIT, accepted: the system plays a notification's sound and vibration before
  * any listener hears of it, so a single buzz can still get through. What this
@@ -46,6 +50,14 @@ class WindowNotificationGuard : NotificationListenerService() {
     @Volatile private var rules: WallRules = WallRules()
     private val browsers: Set<String> by lazy { AppGate.browserPackages(this) }
     private val essentials: Set<String> by lazy { essentialPackages(this) }
+    /**
+     * Never stripped, though a focus session walls it: the default SMS app is
+     * where sign-in codes arrive, and a code that cannot be read mid-session
+     * locks the user out of something real. Opening the app stays walled.
+     */
+    private val smsApp: String? by lazy {
+        runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(this) }.getOrNull()
+    }
     private val windowedCache = mutableMapOf<String, Boolean>()
 
     override fun onCreate() {
@@ -60,8 +72,9 @@ class WindowNotificationGuard : NotificationListenerService() {
 
     override fun onListenerConnected() {
         sweeper?.cancel()
-        // Once a minute is enough: it is what catches the window closing on a
-        // shade that still holds notifications posted inside it.
+        // Once a minute is enough: it is what catches a wall going up (the
+        // window closing, a session starting) on a shade that already holds
+        // notifications posted before it.
         sweeper = scope.launch {
             while (true) {
                 sweep()
@@ -91,6 +104,8 @@ class WindowNotificationGuard : NotificationListenerService() {
 
     private fun shouldRemove(sbn: StatusBarNotification): Boolean {
         if (sbn.isOngoing || !sbn.isClearable) return false
+        if (sbn.packageName == smsApp) return false
+        AppBlockService.walledNow(sbn.packageName)?.let { return it }
         val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
         if (!outsideOpenWindow(minuteOfDay, rules.openWindowStartMinutes, rules.openWindowEndMinutes)) {
             return false
@@ -104,7 +119,7 @@ class WindowNotificationGuard : NotificationListenerService() {
 
     private fun remove(sbn: StatusBarNotification) {
         runCatching { cancelNotification(sbn.key) }
-            .onSuccess { Log.i(TAG, "${sbn.packageName} notification removed (outside open window)") }
+            .onSuccess { Log.i(TAG, "${sbn.packageName} notification removed (walled)") }
             .onFailure { Log.w(TAG, "could not remove ${sbn.packageName} notification", it) }
     }
 

@@ -4,6 +4,8 @@ import android.util.Log
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -14,6 +16,7 @@ import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.SYNC_BATCH
 import com.ogenrwotdaniel.wakeproof.data.db.SyncableEntity
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
@@ -150,6 +153,11 @@ class SyncEngine @Inject constructor(
     private suspend fun syncSharedSettings(db: FirebaseFirestore, uid: String): Boolean {
         val doc = collection(db, uid, SETTINGS).document(SHARED_SETTINGS)
         val remote = doc.get(Source.SERVER).await()
+        val studyChanged = syncStudyApps(doc, remote)
+        return syncFocusGoal(doc, remote) || studyChanged
+    }
+
+    private suspend fun syncFocusGoal(doc: DocumentReference, remote: DocumentSnapshot): Boolean {
         val remoteGoal = remote.getLong(FOCUS_GOAL)?.toInt()
         val remoteStamp = remote.getLong(FOCUS_GOAL_UPDATED_AT)?.takeIf { remoteGoal != null }
         val (localGoal, localStamp) = settings.focusGoalStamp()
@@ -174,6 +182,47 @@ class SyncEngine @Inject constructor(
             SharedSettingAction.PULL -> {
                 settings.applySyncedFocusGoal(remoteGoal!!, remoteStamp!!)
                 remoteGoal != localGoal
+            }
+
+            SharedSettingAction.NONE -> false
+        }
+    }
+
+    /**
+     * The study apps — which are also the focus list — ride the same document
+     * (2026-11-01), same newest-wins rule as the goal. A session walls every
+     * device, so every device has to agree on what it lets through.
+     */
+    private suspend fun syncStudyApps(doc: DocumentReference, remote: DocumentSnapshot): Boolean {
+        @Suppress("UNCHECKED_CAST")
+        val remoteApps = (remote.get(STUDY_APPS) as? List<String>)?.toSet()
+        val remoteStamp = remote.getLong(STUDY_APPS_UPDATED_AT)?.takeIf { remoteApps != null }
+        val (localApps, localStamp) = settings.studyAppsStamp()
+
+        return when (sharedSettingAction(localStamp, remoteStamp)) {
+            SharedSettingAction.PUSH -> {
+                val stamp = localStamp.takeIf { it > 0 } ?: System.currentTimeMillis()
+                doc.set(
+                    mapOf(
+                        STUDY_APPS to localApps.sorted(),
+                        STUDY_APPS_UPDATED_AT to stamp,
+                        SERVER_UPDATED_AT to FieldValue.serverTimestamp()
+                    ),
+                    SetOptions.merge()
+                ).await()
+                if (stamp != localStamp) settings.applySyncedStudyApps(localApps, stamp)
+                false
+            }
+
+            SharedSettingAction.PULL -> {
+                val apply = studyAppsToApply(
+                    local = localApps,
+                    remote = remoteApps!!,
+                    sessionActive = PomodoroTimerService.state.value.active
+                )
+                if (apply == remoteApps) settings.applySyncedStudyApps(apply, remoteStamp!!)
+                else settings.applyStudyAppsUnstamped(apply)
+                apply != localApps
             }
 
             SharedSettingAction.NONE -> false
@@ -290,6 +339,8 @@ class SyncEngine @Inject constructor(
         const val SHARED_SETTINGS = "shared"
         const val FOCUS_GOAL = "dailyFocusGoalMinutes"
         const val FOCUS_GOAL_UPDATED_AT = "dailyFocusGoalUpdatedAt"
+        const val STUDY_APPS = "studyApps"
+        const val STUDY_APPS_UPDATED_AT = "studyAppsUpdatedAt"
 
         /** Server-clock stamp, used only to order reads. */
         const val SERVER_UPDATED_AT = "serverUpdatedAt"

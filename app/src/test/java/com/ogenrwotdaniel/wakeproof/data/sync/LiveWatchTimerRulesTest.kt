@@ -87,4 +87,15 @@ class LiveWatchTimerRulesTest {
             )
         )
     }
+
+    @Test
+    fun `a running watch session walls this device, breaks included, until it goes quiet`() {
+        val now = 1_000_000L
+        assertTrue(LiveWatchTimerRules.walls(timer(phase = "SHORT_BREAK", phaseEndsAt = now + 60_000L), now))
+        assertTrue(LiveWatchTimerRules.walls(timer(phaseEndsAt = now - 60_000L), now))
+        assertFalse(LiveWatchTimerRules.walls(timer(phaseEndsAt = now - LiveWatchTimerRules.RUNNING_STALE_MILLIS - 1), now))
+        assertFalse(LiveWatchTimerRules.walls(timer(running = false, phaseEndsAt = now + 60_000L), now))
+        assertFalse(LiveWatchTimerRules.walls(timer(active = false, phaseEndsAt = now + 60_000L), now))
+        assertFalse(LiveWatchTimerRules.walls(null, now))
+    }
 }

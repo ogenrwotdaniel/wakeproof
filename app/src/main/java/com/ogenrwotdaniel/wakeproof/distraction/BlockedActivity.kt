@@ -93,7 +93,7 @@ class BlockedActivity : ComponentActivity() {
         private const val EXTRA_REOPENS_AT = "reopens_at"
 
         /**
-         * [reopensAt] is tomorrow's time ("14:00") when the open window keeps
+         * [reopensAt] is tomorrow's time ("08:10") when the open window keeps
          * the app shut past midnight; null counts down to midnight.
          */
         fun intent(

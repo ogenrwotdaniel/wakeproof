@@ -3,6 +3,7 @@ package com.ogenrwotdaniel.wakeproof.distraction
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -50,14 +51,16 @@ enum class WallRule(val key: String, val default: Int) {
 
     /**
      * Minute of the day the waiting apps' open window starts; [RULE_OFF_MINUTES]
-     * = no window, open all day (2026-10-29, user's choice: 14:00, covering
-     * social, video, messaging AND browsers). Outside the window they are shut;
-     * inside it every other rule still applies.
+     * = no window, open all day. Covers social, video, messaging, browsers and
+     * WhatsApp Business. Was 14:00–17:00 (2026-10-29); 08:10–08:50 since
+     * 2026-11-01, the user's choice ([WallRulesRepository.seedMorningWindow]).
+     * Outside the window they are shut; inside it every rule but earn-the-feed
+     * still applies (see [feedEarned]).
      */
-    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 14 * 60),
+    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 8 * 60 + 10),
 
     /** Minute of the day the open window closes (exclusive). */
-    OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 17 * 60);
+    OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 8 * 60 + 50);
 
     /**
      * How loose [value] is for this rule; higher = lets the phone be used
@@ -168,8 +171,26 @@ class WallRulesRepository @Inject constructor(@ApplicationContext context: Conte
 
     suspend fun current(): WallRules = rules.first()
 
+    /**
+     * One-off: the open window moves to 08:10–08:50 (2026-11-01, the user's
+     * explicit choice). Written straight in rather than through [request] —
+     * an earlier start reads as a loosening there and would wait a week —
+     * and any queued window change is dropped with it. Once per device under
+     * its own flag, so later edits from the Usage screen are never overwritten.
+     */
+    suspend fun seedMorningWindow() {
+        dataStore.edit { prefs ->
+            if (prefs[MORNING_WINDOW_SEEDED] == true) return@edit
+            val window = listOf(WallRule.OPEN_WINDOW_START_MINUTES, WallRule.OPEN_WINDOW_END_MINUTES)
+            window.forEach { prefs[keyOf(it)] = it.default }
+            prefs[PENDING] = encodePendingRules(parsePendingRules(prefs[PENDING] ?: emptySet()) - window.toSet())
+            prefs[MORNING_WINDOW_SEEDED] = true
+        }
+    }
+
     companion object {
         private val PENDING = stringSetPreferencesKey("pending")
+        private val MORNING_WINDOW_SEEDED = booleanPreferencesKey("open_window_morning")
         private fun keyOf(rule: WallRule) = intPreferencesKey(rule.key)
 
         private const val WEEK_MILLIS =
@@ -242,3 +263,12 @@ fun outsideOpenWindow(minuteOfDay: Int, startMinutes: Int, endMinutes: Int): Boo
  */
 fun reopensTomorrowAtMinutes(windowed: Boolean, startMinutes: Int, endMinutes: Int): Int? =
     if (windowed && startMinutes != RULE_OFF_MINUTES && endMinutes > startMinutes) startMinutes else null
+
+/**
+ * Pure: whether the feed is earned. The open window counts as earned
+ * (2026-11-01, user's choice): at 08:10 there is rarely a focus block done
+ * yet, so earn-the-feed would have kept a morning window shut almost every
+ * day. With the window off, earn-the-feed works as before.
+ */
+fun feedEarned(earnTheFeed: Boolean, focusDoneToday: Boolean, windowStartMinutes: Int): Boolean =
+    !earnTheFeed || focusDoneToday || windowStartMinutes >= 0

@@ -161,6 +161,8 @@ object WatchTimerEngine {
             WatchTimerStore.write(app, next)
             arm(app, next)
         }
+        // The phone (and through it the tablet) walls itself until this ends.
+        WatchSessionBeacon.publish(app, WatchTimerStore.read(app))
         TimerNotifier.refresh(app)
         TileService.getUpdater(app).requestUpdate(StatsTileService::class.java)
         // The tablet's "on your watch" card. Queued, not sent: a network call has

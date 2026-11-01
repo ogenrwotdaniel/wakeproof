@@ -242,7 +242,7 @@ enum class GateVerdict {
  *    whole session, breaks included, by the user's choice. A session running
  *    on another of the user's devices counts too.
  * 3. An app whose daily cap is spent is walled until midnight.
- * 4. Shut outside the open window (14:00–17:00 by default). The caller
+ * 4. Shut outside the open window (08:10–08:50 by default). The caller
  *    decides who [outsideWindow] applies to: the waiting apps plus
  *    [AppGate.WINDOWED_PACKAGES] (see [AppGate.keepsOpenWindow]).
  * 5. Everything else here is about the waiting apps only: the bedtime wall,

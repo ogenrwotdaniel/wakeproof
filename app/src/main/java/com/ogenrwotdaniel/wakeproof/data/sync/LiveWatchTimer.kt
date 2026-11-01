@@ -98,5 +98,14 @@ object LiveWatchTimerRules {
         )
     }
 
+    /**
+     * Whether [timer] is a session that walls this device: running, and not so
+     * far past its phase end that the watch has evidently gone quiet. Breaks
+     * count — the wall covers the whole session, as on the phone.
+     */
+    fun walls(timer: LiveWatchTimer?, now: Long): Boolean =
+        timer != null && timer.active && timer.running &&
+            timer.phaseEndsAt - now >= -RUNNING_STALE_MILLIS
+
     private val BREAKS = setOf("SHORT_BREAK", "LONG_BREAK")
 }

@@ -187,7 +187,31 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         dataStore.edit { it[SESSION_KEEP_SCREEN_ON] = value }
     suspend fun setSpotifyPlaylistUri(value: String) =
         dataStore.edit { it[SPOTIFY_PLAYLIST_URI] = value.trim() }
-    suspend fun setStudyApps(value: Set<String>) = dataStore.edit { it[STUDY_APPS] = value }
+    /**
+     * Study apps chosen on THIS device, stamped like the focus goal so cloud
+     * sync lets the newest list win (2026-11-01: the focus list is shared by
+     * every device, since a session on one walls them all).
+     */
+    suspend fun setStudyApps(value: Set<String>) = dataStore.edit {
+        it[STUDY_APPS] = value
+        it[STUDY_APPS_UPDATED_AT] = System.currentTimeMillis()
+    }
+
+    /** The study apps and when they were last changed here (0 = never). */
+    suspend fun studyAppsStamp(): Pair<Set<String>, Long> {
+        val prefs = dataStore.data.first()
+        return (prefs[STUDY_APPS] ?: WakeProofSettings.DEFAULT_STUDY_APPS) to
+            (prefs[STUDY_APPS_UPDATED_AT] ?: 0L)
+    }
+
+    /** Study apps downloaded from another device; keeps that device's timestamp. */
+    suspend fun applySyncedStudyApps(value: Set<String>, updatedAt: Long) = dataStore.edit {
+        it[STUDY_APPS] = value
+        it[STUDY_APPS_UPDATED_AT] = updatedAt
+    }
+
+    /** A partial pull (see `studyAppsToApply`): the list changes, the stamp does not. */
+    suspend fun applyStudyAppsUnstamped(value: Set<String>) = dataStore.edit { it[STUDY_APPS] = value }
     suspend fun setFocusCreditApp(value: String) = dataStore.edit { it[FOCUS_CREDIT_APP] = value }
     suspend fun setFocusQuotes(value: Boolean) = dataStore.edit { it[FOCUS_QUOTES] = value }
     suspend fun setDeepFocus(value: Boolean) = dataStore.edit { it[DEEP_FOCUS] = value }
@@ -265,6 +289,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         // before it is still there when Spotify comes back.
         val SPOTIFY_PLAYLIST_URI = stringPreferencesKey("spotify_playlist_uri")
         val STUDY_APPS = stringSetPreferencesKey("study_apps")
+        val STUDY_APPS_UPDATED_AT = longPreferencesKey("study_apps_updated_at")
         val FOCUS_CREDIT_APP = stringPreferencesKey("focus_credit_app")
         val FOCUS_QUOTES = booleanPreferencesKey("focus_quotes")
         val DEEP_FOCUS = booleanPreferencesKey("deep_focus")

@@ -36,8 +36,34 @@ class LiveFocusSession @Inject constructor(
     private val preferences: SyncPreferences
 ) {
 
+    /** This device's own session end; 0 = none. */
+    @Volatile private var ownEndsAt = 0L
+
+    /** The paired watch's session end, relayed by this phone; 0 = none. */
+    @Volatile private var watchEndsAt = 0L
+
     /** Announces a session on this device running until [endsAtMillis]; 0 = ended. */
     suspend fun publish(endsAtMillis: Long) {
+        ownEndsAt = endsAtMillis
+        write()
+    }
+
+    /**
+     * Passes the watch's session on to the tablet (2026-11-01): the watch talks
+     * to this phone over Bluetooth, and the tablet only hears the cloud. Shares
+     * the one document with this device's own session, so whichever ends later
+     * is what the peers wall until — the phone's own session ending must not
+     * release the tablet while the watch's still runs.
+     */
+    suspend fun relayWatch(endsAtMillis: Long) {
+        if (watchEndsAt == endsAtMillis) return
+        watchEndsAt = endsAtMillis
+        write()
+    }
+
+    private suspend fun write() {
+        val now = System.currentTimeMillis()
+        val endsAtMillis = maxOf(ownEndsAt, watchEndsAt.takeIf { it > now } ?: 0L)
         val db = firestore ?: return
         val uid = accounts.currentUid() ?: return
         if (!preferences.isEnabled()) return

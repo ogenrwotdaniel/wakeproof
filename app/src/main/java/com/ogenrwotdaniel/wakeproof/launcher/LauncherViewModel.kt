@@ -18,6 +18,8 @@ import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
+import com.ogenrwotdaniel.wakeproof.agenda.EventReminders
+import com.ogenrwotdaniel.wakeproof.agenda.eventFocusMinutes
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -145,7 +147,21 @@ class LauncherViewModel @Inject constructor(
     fun setEventDone(event: AgendaEvent, done: Boolean) {
         viewModelScope.launch {
             agendaRepository.setDone(event, done, _agenda.value.map { it.key }.toSet())
+            // A ticked event needs no reminder; an unticked one gets it back.
+            runCatching { EventReminders.reschedule(context) }
         }
+    }
+
+    /**
+     * Starts a session lasting as long as what is left of [event]
+     * (2026-11-01). Re-checked here rather than trusted from the dialog: the
+     * dialog may have sat open past the point where too little was left.
+     */
+    fun focusForEvent(event: AgendaEvent): Boolean {
+        if (PomodoroTimerService.state.value.active) return false
+        val minutes = eventFocusMinutes(event, System.currentTimeMillis()) ?: return false
+        PomodoroTimerService.startForEvent(context, minutes, event.key, event.title)
+        return true
     }
 
     companion object {

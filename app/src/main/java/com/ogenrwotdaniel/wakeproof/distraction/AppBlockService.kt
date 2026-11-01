@@ -3,6 +3,7 @@ package com.ogenrwotdaniel.wakeproof.distraction
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.app.PendingIntent
 import android.app.usage.UsageStatsManager
@@ -24,9 +25,14 @@ import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.StatsRepository
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveCloudFeed
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveFocusSession
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
+import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimerRules
+import com.ogenrwotdaniel.wakeproof.wear.WatchSessionFeed
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
 import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -88,6 +94,7 @@ class AppBlockService : Service() {
     @Inject lateinit var wallRulesRepository: WallRulesRepository
     @Inject lateinit var statsRepository: StatsRepository
     @Inject lateinit var liveFocusSession: LiveFocusSession
+    @Inject lateinit var liveCloudFeed: LiveCloudFeed
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -110,6 +117,12 @@ class AppBlockService : Service() {
 
     /** When a session on another of the user's devices ends; null = none known. */
     @Volatile private var peerSessionEndsAt: Long? = null
+
+    /** When the paired watch's session ends, heard over Bluetooth; 0 = none. */
+    @Volatile private var watchSessionEndsAt = 0L
+
+    /** The watch's own cloud timer: the tablet's way to hear of a watch session. */
+    @Volatile private var watchTimer: LiveWatchTimer? = null
 
     /** Every installed app that waits — the pool the daily budget is spent from. */
     @Volatile private var allGated: Set<String> = emptySet()
@@ -169,6 +182,15 @@ class AppBlockService : Service() {
     private var lastBlockedPackage: String? = null
     private var lastBlockedAt = 0L
 
+    /** The cover over a walled app left running in a pop-up; see [popupCoverWanted]. */
+    private val popupCover by lazy { PopupCover(this) }
+    /** The app last walled, for the cover and the Recents kill; null = none pending. */
+    private var coverFor: String? = null
+    private var coverWallAt = 0L
+    private var coverGraceUntil = 0L
+    /** Kill [coverFor]'s background process once it leaves the screen (not for a wait). */
+    private var killPending = false
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -217,6 +239,30 @@ class AppBlockService : Service() {
                 }
         }
         scope.launch { liveFocusSession.peerSessionEndsAt().collect { peerSessionEndsAt = it } }
+        // A session on the watch walls this device too (2026-11-01): over
+        // Bluetooth on the phone, which relays it to the tablet; the tablet also
+        // reads the watch's own cloud timer, for a watch with its own Wi-Fi.
+        scope.launch {
+            WatchSessionFeed.endsAt(applicationContext).collect { endsAt ->
+                watchSessionEndsAt = endsAt
+                runCatching { liveFocusSession.relayWatch(endsAt) }
+            }
+        }
+        scope.launch { liveCloudFeed.watchTimer().collect { watchTimer = it } }
+        // Do Not Disturb follows a session on ANY device (2026-11-01). The
+        // session's own device sets it in PomodoroTimerService; this covers the
+        // others. Level-triggered: SessionDnd only undoes what it did.
+        scope.launch {
+            while (true) {
+                val own = PomodoroTimerService.state.value.active
+                if (rules.sessionDnd && (own || otherDeviceSessionActive())) {
+                    SessionDnd.enter(applicationContext)
+                } else if (!own) {
+                    SessionDnd.exit(applicationContext)
+                }
+                delay(DND_CHECK_MILLIS)
+            }
+        }
         scope.launch {
             // Queued loosenings land here too, not only when a screen opens.
             while (true) {
@@ -227,6 +273,7 @@ class AppBlockService : Service() {
         }
         scope.launch {
             runCatching { limitRepository.seedWhatsAppBusinessCap() }
+            runCatching { wallRulesRepository.seedMorningWindow() }
             refreshAllGated()
         }
         // A session the process lost (a reboot, a force-stop) comes back here
@@ -259,6 +306,7 @@ class AppBlockService : Service() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        popupCover.hide()
         runCatching { unregisterReceiver(screenReceiver) }
         scope.cancel()
         super.onDestroy()
@@ -283,6 +331,7 @@ class AppBlockService : Service() {
             // sleep was ~19,000 foreground queries that could only ever answer
             // "no one is using anything".
             if (!powerManager.isInteractive) {
+                popupCover.hide()
                 // Screen off ends a visit through the wait, like leaving the app.
                 GatePasses.revokeAll()
                 // Force a fresh measurement on wake rather than extrapolating
@@ -310,9 +359,11 @@ class AppBlockService : Service() {
             if (current != null) GatePasses.track(current, System.currentTimeMillis())
             if (keyguardManager.isKeyguardLocked) GatePasses.revokeAll()
             if (current == null || keyguardManager.isKeyguardLocked) {
+                popupCover.hide()
                 delay(POLL_MILLIS)
                 continue
             }
+            followWalledApp(current)
             if (current == packageName) {
                 // Looking at our own wall (or WakeProof itself). Not a re-entry.
                 delay(POLL_MILLIS)
@@ -335,9 +386,26 @@ class AppBlockService : Service() {
                 budgetSpent = gated && budgetSpent(current)
             )
             logVerdict(current, verdict)
-            if (verdict != GateVerdict.ALLOW) wall(current) { wallIntent(current, verdict, limit) }
+            if (verdict != GateVerdict.ALLOW) {
+                wall(current, killAfter = verdict != GateVerdict.WAIT) { wallIntent(current, verdict, limit) }
+            }
             delay(POLL_MILLIS)
         }
+    }
+
+    /**
+     * A focus session anywhere the user has a device: this one, a peer phone or
+     * tablet (cloud), or the watch (Bluetooth, or its own cloud timer).
+     */
+    private fun anySessionActive(): Boolean =
+        PomodoroTimerService.state.value.active || otherDeviceSessionActive()
+
+    /** A session on one of the user's OTHER devices — what walls (and quiets) this one. */
+    private fun otherDeviceSessionActive(): Boolean {
+        val now = System.currentTimeMillis()
+        return (peerSessionEndsAt ?: 0L) > now ||
+            watchSessionEndsAt > now ||
+            LiveWatchTimerRules.walls(watchTimer, now)
     }
 
     /** [gateVerdict] with everything this service knows filled in. */
@@ -351,8 +419,7 @@ class AppBlockService : Service() {
         val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
         return gateVerdict(
             essential = current in untouchable,
-            focusSessionActive = PomodoroTimerService.state.value.active ||
-                (peerSessionEndsAt ?: 0L) > System.currentTimeMillis(),
+            focusSessionActive = anySessionActive(),
             onFocusList = current in focusList,
             capSpent = capSpent,
             gated = gated,
@@ -367,7 +434,7 @@ class AppBlockService : Service() {
                 startMinutes = rules.bedtimeStartMinutes,
                 alarmVerifiedToday = alarmVerifiedToday
             ),
-            feedEarned = !rules.earnTheFeed || focusDoneToday,
+            feedEarned = feedEarned(rules.earnTheFeed, focusDoneToday, rules.openWindowStartMinutes),
             budgetSpent = budgetSpent
         )
     }
@@ -444,6 +511,35 @@ class AppBlockService : Service() {
     }
 
     /**
+     * Whether [pkg] stands behind a wall right now — the focus wall, a spent
+     * cap, the window, bedtime, earn-the-feed or the budget; NOT the wait,
+     * which is a door rather than a wall. Asked by [WindowNotificationGuard]
+     * so a walled app's notifications go too (2026-11-01): the shade, the Edge
+     * panel and an icon's long-press preview were all ways to read an app the
+     * wall kept shut.
+     *
+     * No measuring: a cap or budget counts only once [watch] has found it
+     * spent today, so this can run on every posted notification.
+     */
+    private fun walledNow(pkg: String): Boolean {
+        if (pkg == packageName) return false
+        val gated = gatedCache.getOrPut(pkg) {
+            AppGate.isGated(this, pkg, untouchable, browsers, rules.gateBrowsers)
+        }
+        val capMinutes = blockedLimits[pkg]?.minutes
+        val spentAt = spentToday[pkg]
+        val budget = rules.dailyBudgetMinutes
+        val verdict = verdictFor(
+            current = pkg,
+            gated = gated,
+            hasPass = false,
+            capSpent = capMinutes != null && spentAt != null && capMinutes <= spentAt,
+            budgetSpent = gated && budget > 0 && budgetSpentAgainst?.let { budget <= it } == true
+        )
+        return verdict != GateVerdict.ALLOW && verdict != GateVerdict.WAIT
+    }
+
+    /**
      * Whether [current]'s BLOCK cap is spent today. Measures on entry and
      * extrapolates between [BASELINE_REFRESH_MILLIS] refreshes; a spent app is
      * remembered until midnight against a cap at least this strict.
@@ -495,7 +591,7 @@ class AppBlockService : Service() {
         )?.let(::clock)
     }
 
-    /** "14:00" or "2:00 PM", as the phone tells time. */
+    /** "08:10" or "8:10 AM", as the phone tells time. */
     private fun clock(minutes: Int): String =
         com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime(this, minutes / 60, minutes % 60)
 
@@ -550,13 +646,59 @@ class AppBlockService : Service() {
      * so the next tick sees WakeProof in front and leaves it alone. The debounce
      * only covers the tick or two before the wall's own resume lands.
      */
-    private fun wall(packageName: String, intent: () -> Intent) {
+    private fun wall(packageName: String, killAfter: Boolean, intent: () -> Intent) {
         val now = SystemClock.elapsedRealtime()
         if (packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS) return
         lastBlockedPackage = packageName
         lastBlockedAt = now
         runCatching { startActivity(intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onSuccess {
+                coverFor = packageName
+                coverWallAt = now
+                coverGraceUntil = 0L
+                killPending = killAfter
+            }
             .onFailure { Log.w(TAG, "could not raise the wall over $packageName", it) }
+    }
+
+    /**
+     * After a wall: covers the walled app if it is still running beside the
+     * wall in a pop-up or split screen ([popupCoverWanted]), and once it has
+     * left the screen, kills its background process (2026-11-01). Recents
+     * shows a thumbnail no ordinary app can blank, but a tap on a killed app
+     * cold-starts it, which gives the wall the second it needs to land first.
+     * Not after a wait — that app may be opened on a pass in a minute.
+     */
+    private fun followWalledApp(current: String) {
+        val pkg = coverFor ?: return popupCover.hide()
+        val now = SystemClock.elapsedRealtime()
+        val age = now - coverWallAt
+        val resumed = tracker.isResumed(pkg)
+        val want = popupCoverWanted(
+            wallAgeMillis = age,
+            ownWallInFront = current == packageName,
+            walledStillResumed = resumed,
+            inGrace = now < coverGraceUntil
+        )
+        // Logged on change, so one `adb logcat -s AppBlockService` run shows
+        // whether a pop-up really stays resumed beside its wall on this device.
+        if (want != popupCover.isShowing) {
+            Log.i(TAG, "popup cover ${if (want) "UP" else "down"} for $pkg (resumed=$resumed, age=${age}ms)")
+        }
+        if (want) {
+            popupCover.show(usageRepository.appLabel(pkg)) {
+                coverGraceUntil = SystemClock.elapsedRealtime() + COVER_GRACE_MILLIS
+                popupCover.hide()
+            }
+        } else {
+            popupCover.hide()
+        }
+        if (killPending && !resumed && age >= COVER_SETTLE_MILLIS) {
+            killPending = false
+            runCatching { getSystemService(ActivityManager::class.java).killBackgroundProcesses(pkg) }
+                .onFailure { Log.w(TAG, "could not stop $pkg in the background", it) }
+        }
+        if (age > COVER_MAX_MILLIS && !killPending) coverFor = null
     }
 
     /**
@@ -618,6 +760,13 @@ class AppBlockService : Service() {
          * wait is the right screen (or the service is not running to say).
          */
         suspend fun wallBefore(packageName: String): Intent? = instance?.wallBefore(packageName)
+
+        /**
+         * Whether [packageName] is walled right now; null when the service is
+         * not running (the caller falls back to the open window alone). Main
+         * thread only, like the service's own loop.
+         */
+        fun walledNow(packageName: String): Boolean? = instance?.walledNow(packageName)
         private const val CHANNEL_ID = "wakeproof_app_block_quiet"
         private const val LEGACY_CHANNEL_ID = "wakeproof_app_block"
         private const val NOTIFICATION_ID = 43
@@ -636,6 +785,8 @@ class AppBlockService : Service() {
          * lands. Cheap, because [ForegroundTracker] reads only new events.
          */
         private const val POLL_MILLIS = 500L
+        /** How often Do Not Disturb is lined up with sessions on other devices. */
+        private const val DND_CHECK_MILLIS = 5_000L
 
         /** How long an extrapolated usage figure is trusted before re-measuring. */
         private const val BASELINE_REFRESH_MILLIS = 30_000L

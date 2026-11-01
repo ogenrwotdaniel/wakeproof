@@ -19,16 +19,24 @@ import com.ogenrwotdaniel.wakeproof.data.db.Exam
 import com.ogenrwotdaniel.wakeproof.data.db.ExamDao
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveCloudFeed
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
+import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
+import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
+import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import java.time.LocalDate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/** Special grants Home asks for; true = needed and missing. */
+data class MissingGrants(val dnd: Boolean = false, val notifications: Boolean = false)
 
 /** Home dashboard state: alarms, today's goals, streak, 7-day history. */
 @HiltViewModel
@@ -40,8 +48,30 @@ class HomeViewModel @Inject constructor(
     private val examDao: ExamDao,
     statsRepository: StatsRepository,
     private val settingsRepository: SettingsRepository,
-    liveCloudFeed: LiveCloudFeed
+    liveCloudFeed: LiveCloudFeed,
+    wallRulesRepository: WallRulesRepository
 ) : ViewModel() {
+
+    private val grants = MutableStateFlow(readGrants())
+
+    private fun readGrants() =
+        SessionDnd.hasAccess(context) to WindowNotificationGuard.hasAccess(context)
+
+    /** Re-reads the special grants; called on every resume, since they change in Settings. */
+    fun refreshGrants() {
+        grants.value = readGrants()
+    }
+
+    /**
+     * Special grants a wall needs and does not have (2026-11-01). Do Not
+     * Disturb during a session had never been granted, so it silently did
+     * nothing and read as broken; notification access is what keeps a walled
+     * app from peeking through the shade, the Edge panel and icon previews.
+     */
+    val missingGrants: StateFlow<MissingGrants> =
+        combine(grants, wallRulesRepository.rules) { (dnd, notifications), rules ->
+            MissingGrants(dnd = rules.sessionDnd && !dnd, notifications = !notifications)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MissingGrants())
 
     /**
      * Claims the one review request this install gets, if [streakDays] has

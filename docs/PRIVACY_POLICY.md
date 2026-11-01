@@ -1,6 +1,6 @@
 # WakeProof Privacy Policy
 
-**Effective date:** 27 October 2026
+**Effective date:** 1 November 2026
 **Developer:** Ogenrwot Daniel
 **Contact:** ogenrwotdaniel@gmail.com
 
@@ -36,13 +36,15 @@ app:
   distracting app. None of this is stored beyond
   your own settings or sent anywhere.
 - **Notifications from apps you have walled.** With your permission
-  (Notification access), WakeProof removes notifications posted by the apps
-  kept shut outside your open hours, while those hours are closed. It looks
+  (Notification access), WakeProof removes notifications posted by an app
+  while one of your walls keeps it shut — outside your open hours, during a
+  focus session, at bedtime, or once its daily limit is spent. It looks
   only at which app posted a notification, never at its content, and stores
   and sends nothing.
 - **Calendar events.** With your permission, WakeProof reads event titles and
   times from your device calendar to show your agenda — in the app, and on the
-  WakeProof home screen if you use it. It never modifies your
+  WakeProof home screen if you use it — to remind you five minutes before an
+  event, and to time a focus session to an event's length. It never modifies your
   calendar and never transmits calendar data.
 - **Pushup verification video.** The camera feed used to count pushups is
   processed entirely on-device (Google ML Kit pose detection). No video or
@@ -130,9 +132,10 @@ network requests at all** — and water verification still works, on the device.
 | Camera | Counting pushups (on-device) and photographing your water container |
 | Notifications, exact alarms, full-screen alarms | Making the alarm ring reliably, including on the lock screen |
 | Usage access (special) | Showing you your own screen-time stats, applying the daily app limits you set (notify, or block for the rest of the day), the five-minute wait before social, video and messaging apps, and keeping apps outside your focus list shut during a focus session |
-| Display over other apps (special) | The floating Pomodoro timer bubble, the block, wait and focus-session screens shown over other apps, and opening the alarm screen while you use other apps |
-| Notification access (special) | Removing notifications from apps kept shut outside your open hours, while they are closed; only the posting app is looked at, never the content |
-| Calendar (read) | Showing your agenda so you can tick events off |
+| Display over other apps (special) | The floating Pomodoro timer bubble, the block, wait and focus-session screens shown over other apps, opening the alarm screen while you use other apps, and covering an app left open in a pop-up window while it is walled |
+| Do Not Disturb access (special) | Turning on Do Not Disturb (priority mode) for a focus session, on every device the session walls, and restoring it afterwards |
+| Notification access (special) | Removing notifications from apps while a wall keeps them shut; only the posting app is looked at, never the content |
+| Calendar (read) | Showing your agenda so you can tick events off, event reminders, focus sessions timed to an event |
 | Home app (role, optional) | Only if you choose WakeProof as your home screen in Settings; switch back any time in Android's default-apps settings |
 | Internet | Only for the optional cloud sync and AI features above |
 

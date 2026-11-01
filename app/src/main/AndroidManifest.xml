@@ -22,6 +22,9 @@
          PACKAGE_USAGE_STATS and SYSTEM_ALERT_WINDOW are special-access grants
          the user enables via Settings deep links (no runtime dialog exists). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Stops a walled app's background process so a Recents tap cold-starts
+         it into the wall (AppBlockService.followWalledApp). Normal permission. -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
@@ -171,6 +174,23 @@
 
         <!-- Wake-up check prompt + "I'm up". Direct-boot aware for the same
              reason as AlarmReceiver: a verification can precede the first unlock. -->
+        <!-- Calendar-event reminders and the end-of-event check-in (agenda/). -->
+        <receiver
+            android:name=".agenda.EventReminderReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".agenda.EventDoneReceiver"
+            android:exported="false" />
+
+        <!-- "Focus for this event": the confirm alone, from a reminder. -->
+        <activity
+            android:name=".agenda.EventFocusActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WakeProof.Translucent" />
+
         <receiver
             android:name=".alarm.WakeCheckReceiver"
             android:directBootAware="true"

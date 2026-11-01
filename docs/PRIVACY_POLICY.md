@@ -35,6 +35,11 @@ app:
   focus list shut and, with "Grow a tree" on, to tell whether you left for a
   distracting app. None of this is stored beyond
   your own settings or sent anywhere.
+- **Notifications from apps you have walled.** With your permission
+  (Notification access), WakeProof removes notifications posted by the apps
+  kept shut outside your open hours, while those hours are closed. It looks
+  only at which app posted a notification, never at its content, and stores
+  and sends nothing.
 - **Calendar events.** With your permission, WakeProof reads event titles and
   times from your device calendar to show your agenda — in the app, and on the
   WakeProof home screen if you use it. It never modifies your
@@ -126,6 +131,7 @@ network requests at all** — and water verification still works, on the device.
 | Notifications, exact alarms, full-screen alarms | Making the alarm ring reliably, including on the lock screen |
 | Usage access (special) | Showing you your own screen-time stats, applying the daily app limits you set (notify, or block for the rest of the day), the five-minute wait before social, video and messaging apps, and keeping apps outside your focus list shut during a focus session |
 | Display over other apps (special) | The floating Pomodoro timer bubble, the block, wait and focus-session screens shown over other apps, and opening the alarm screen while you use other apps |
+| Notification access (special) | Removing notifications from apps kept shut outside your open hours, while they are closed; only the posting app is looked at, never the content |
 | Calendar (read) | Showing your agenda so you can tick events off |
 | Home app (role, optional) | Only if you choose WakeProof as your home screen in Settings; switch back any time in Android's default-apps settings |
 | Internet | Only for the optional cloud sync and AI features above |

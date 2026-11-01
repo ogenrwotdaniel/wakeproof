@@ -357,7 +357,7 @@ class AppBlockService : Service() {
             capSpent = capSpent,
             gated = gated,
             hasPass = hasPass,
-            outsideWindow = gated && outsideOpenWindow(
+            outsideWindow = AppGate.keepsOpenWindow(current, gated) && outsideOpenWindow(
                 minuteOfDay = minuteOfDay,
                 startMinutes = rules.openWindowStartMinutes,
                 endMinutes = rules.openWindowEndMinutes
@@ -382,15 +382,15 @@ class AppBlockService : Service() {
                 context = this,
                 label = label,
                 usedMinutes = limit?.minutes ?: 0,
-                capMinutes = limit?.minutes ?: 0
+                capMinutes = limit?.minutes ?: 0,
+                reopensAt = reopensTomorrowAt(current)
             )
             GateVerdict.WINDOW_WALL -> BlockedActivity.ruleIntent(
                 this,
                 "Not open now",
                 "$label and every other waiting app open only between " +
                     "${clock(rules.openWindowStartMinutes)} and " +
-                    "${clock(rules.openWindowEndMinutes)}. WhatsApp Business and the phone " +
-                    "always work."
+                    "${clock(rules.openWindowEndMinutes)}. The phone and SMS always work."
             )
             GateVerdict.BEDTIME_WALL -> BlockedActivity.ruleIntent(
                 this,
@@ -407,7 +407,8 @@ class AppBlockService : Service() {
                 this,
                 "Today's budget is spent",
                 "${rules.dailyBudgetMinutes} minutes across every waiting app are used up. " +
-                    "$label opens again at midnight."
+                    "$label opens again " +
+                    (reopensTomorrowAt(current)?.let { "tomorrow at $it." } ?: "at midnight.")
             )
         }
     }
@@ -482,6 +483,16 @@ class AppBlockService : Service() {
         if (used < budget * 60_000L) return false
         budgetSpentAgainst = budget
         return true
+    }
+
+    /** Tomorrow's opening time for [current] if the open window outlasts midnight. */
+    private fun reopensTomorrowAt(current: String): String? {
+        val gated = gatedCache[current] ?: false
+        return reopensTomorrowAtMinutes(
+            windowed = AppGate.keepsOpenWindow(current, gated),
+            startMinutes = rules.openWindowStartMinutes,
+            endMinutes = rules.openWindowEndMinutes
+        )?.let(::clock)
     }
 
     /** "14:00" or "2:00 PM", as the phone tells time. */

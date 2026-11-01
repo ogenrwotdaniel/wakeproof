@@ -233,3 +233,12 @@ fun gateWaitSeconds(opensToday: Int, escalating: Boolean): Int =
  */
 fun outsideOpenWindow(minuteOfDay: Int, startMinutes: Int, endMinutes: Int): Boolean =
     startMinutes >= 0 && minuteOfDay !in startMinutes until endMinutes
+
+/**
+ * When an app shut until midnight (cap or budget spent) can actually be used
+ * again: at midnight, unless the open window keeps it shut until the window's
+ * start tomorrow. Minute of day, or null for midnight. An empty window (end ≤
+ * start) also answers null — there is no honest time to promise.
+ */
+fun reopensTomorrowAtMinutes(windowed: Boolean, startMinutes: Int, endMinutes: Int): Int? =
+    if (windowed && startMinutes != RULE_OFF_MINUTES && endMinutes > startMinutes) startMinutes else null

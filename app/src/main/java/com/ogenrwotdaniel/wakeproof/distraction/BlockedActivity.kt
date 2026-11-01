@@ -49,6 +49,7 @@ class BlockedActivity : ComponentActivity() {
         val label = intent.getStringExtra(EXTRA_LABEL) ?: "That app"
         val used = intent.getIntExtra(EXTRA_USED, 0)
         val cap = intent.getIntExtra(EXTRA_CAP, 0)
+        val reopensAt = intent.getStringExtra(EXTRA_REOPENS_AT)
         val focus = intent.getBooleanExtra(EXTRA_FOCUS, false)
         val ruleTitle = intent.getStringExtra(EXTRA_TITLE)
         val ruleBody = intent.getStringExtra(EXTRA_BODY).orEmpty()
@@ -62,7 +63,13 @@ class BlockedActivity : ComponentActivity() {
             WakeProofTheme {
                 if (ruleTitle != null) RuleWall(title = ruleTitle, body = ruleBody, onLeave = ::goHome)
                 else if (focus) FocusWall(label = label, onLeave = ::goHome)
-                else BlockedWall(label = label, usedMinutes = used, capMinutes = cap, onLeave = ::goHome)
+                else BlockedWall(
+                    label = label,
+                    usedMinutes = used,
+                    capMinutes = cap,
+                    reopensAt = reopensAt,
+                    onLeave = ::goHome
+                )
             }
         }
     }
@@ -83,12 +90,24 @@ class BlockedActivity : ComponentActivity() {
         private const val EXTRA_FOCUS = "focus"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_BODY = "body"
+        private const val EXTRA_REOPENS_AT = "reopens_at"
 
-        fun intent(context: Context, label: String, usedMinutes: Int, capMinutes: Int): Intent =
+        /**
+         * [reopensAt] is tomorrow's time ("14:00") when the open window keeps
+         * the app shut past midnight; null counts down to midnight.
+         */
+        fun intent(
+            context: Context,
+            label: String,
+            usedMinutes: Int,
+            capMinutes: Int,
+            reopensAt: String? = null
+        ): Intent =
             Intent(context, BlockedActivity::class.java)
                 .putExtra(EXTRA_LABEL, label)
                 .putExtra(EXTRA_USED, usedMinutes)
                 .putExtra(EXTRA_CAP, capMinutes)
+                .putExtra(EXTRA_REOPENS_AT, reopensAt)
 
         /** The wall for an app off the focus list while a session runs. */
         fun focusIntent(context: Context, label: String): Intent =
@@ -143,6 +162,7 @@ private fun BlockedWall(
     label: String,
     usedMinutes: Int,
     capMinutes: Int,
+    reopensAt: String?,
     onLeave: () -> Unit
 ) {
     Surface(
@@ -170,8 +190,9 @@ private fun BlockedWall(
                 modifier = Modifier.padding(top = 12.dp)
             )
             Text(
-                text = "Unlocks in ${timeUntilMidnight()}. You set this limit — there is no " +
-                    "way around it, which is exactly why it works.",
+                text = (reopensAt?.let { "Opens again tomorrow at $it." }
+                    ?: "Unlocks in ${timeUntilMidnight()}.") +
+                    " You set this limit — there is no way around it, which is exactly why it works.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onErrorContainer,

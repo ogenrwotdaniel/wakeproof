@@ -31,6 +31,7 @@ import com.ogenrwotdaniel.wakeproof.distraction.PendingRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
+import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
 import com.ogenrwotdaniel.wakeproof.distraction.gatedAppsInOtherProfiles
 import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
@@ -127,6 +128,11 @@ class UsageViewModel @Inject constructor(
 
     private val _dndAccess = MutableStateFlow(SessionDnd.hasAccess(context))
     val dndAccess: StateFlow<Boolean> = _dndAccess.asStateFlow()
+
+    private val _notificationAccess = MutableStateFlow(WindowNotificationGuard.hasAccess(context))
+
+    /** Whether windowed apps' notifications can be removed outside the open window. */
+    val notificationAccess: StateFlow<Boolean> = _notificationAccess.asStateFlow()
 
     /** Package → daily distraction cap. */
     val limits: StateFlow<Map<String, AppLimit>> = limitRepository.limits
@@ -261,6 +267,7 @@ class UsageViewModel @Inject constructor(
             wallRulesRepository.promoteDue()
         }
         _dndAccess.value = SessionDnd.hasAccess(context)
+        _notificationAccess.value = WindowNotificationGuard.hasAccess(context)
         viewModelScope.launch {
             val gateBrowsers = wallRulesRepository.current().gateBrowsers
             _otherProfileApps.value = withContext(Dispatchers.IO) {

@@ -40,11 +40,23 @@ object AppGate {
      * waits (2026-10-28) even though it would otherwise match as messaging or
      * by a social category. Still behind the focus wall during a session unless
      * it is put on the focus list. Plain WhatsApp still waits.
+     *
+     * Since 2026-10-29 (the user's change of mind) it keeps the open window
+     * like every waiting app, and carries a one-hour BLOCK cap — see
+     * [WINDOWED_PACKAGES] and `DistractionLimitRepository.seedWhatsAppBusinessCap`.
+     * Still no wait, bedtime, earn-the-feed or shared budget.
      */
     const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
 
     /** Never wait, whatever their category says. See [WHATSAPP_BUSINESS]. */
     val EXEMPT_PACKAGES = setOf(WHATSAPP_BUSINESS)
+
+    /** Not waiting apps, yet shut outside the open window all the same. */
+    val WINDOWED_PACKAGES = setOf(WHATSAPP_BUSINESS)
+
+    /** Whether the open window applies to [packageName]: every waiting app, plus [WINDOWED_PACKAGES]. */
+    fun keepsOpenWindow(packageName: String, gated: Boolean): Boolean =
+        gated || packageName in WINDOWED_PACKAGES
 
     /**
      * Screens that sit over an app for a moment without the user having left
@@ -230,10 +242,13 @@ enum class GateVerdict {
  *    whole session, breaks included, by the user's choice. A session running
  *    on another of the user's devices counts too.
  * 3. An app whose daily cap is spent is walled until midnight.
- * 4. Everything else here is about the waiting apps only: shut outside the
- *    open window (14:00–17:00 by default), then the bedtime wall, then the feed not yet earned by a focus block, then the
- *    shared daily budget spent, and finally the wait itself. A pass earned at
- *    the wait does not get past any of the walls before it.
+ * 4. Shut outside the open window (14:00–17:00 by default). The caller
+ *    decides who [outsideWindow] applies to: the waiting apps plus
+ *    [AppGate.WINDOWED_PACKAGES] (see [AppGate.keepsOpenWindow]).
+ * 5. Everything else here is about the waiting apps only: the bedtime wall,
+ *    then the feed not yet earned by a focus block, then the shared daily
+ *    budget spent, and finally the wait itself. A pass earned at the wait does
+ *    not get past any of the walls before it.
  */
 fun gateVerdict(
     essential: Boolean,
@@ -250,8 +265,8 @@ fun gateVerdict(
     essential -> GateVerdict.ALLOW
     focusSessionActive && !onFocusList -> GateVerdict.FOCUS_WALL
     capSpent -> GateVerdict.CAP_WALL
-    !gated -> GateVerdict.ALLOW
     outsideWindow -> GateVerdict.WINDOW_WALL
+    !gated -> GateVerdict.ALLOW
     bedtime -> GateVerdict.BEDTIME_WALL
     !feedEarned -> GateVerdict.EARN_WALL
     budgetSpent -> GateVerdict.BUDGET_WALL

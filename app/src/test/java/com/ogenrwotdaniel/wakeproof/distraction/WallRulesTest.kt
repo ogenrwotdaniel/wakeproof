@@ -149,13 +149,31 @@ class OpenWindowTest {
     }
 
     @Test
-    fun `outside the window comes before every other wall, and only for waiting apps`() {
-        fun verdict(gated: Boolean) = gateVerdict(
+    fun `outside the window comes before every other waiting-app wall`() {
+        fun verdict(gated: Boolean, outsideWindow: Boolean = true) = gateVerdict(
             essential = false, focusSessionActive = false, onFocusList = false,
             capSpent = false, gated = gated, hasPass = true,
-            outsideWindow = true, bedtime = true, feedEarned = false, budgetSpent = true
+            outsideWindow = outsideWindow, bedtime = true, feedEarned = false, budgetSpent = true
         )
         assertEquals(GateVerdict.WINDOW_WALL, verdict(gated = true))
-        assertEquals(GateVerdict.ALLOW, verdict(gated = false))
+        // A windowed app that does not wait (WhatsApp Business) is shut too...
+        assertEquals(GateVerdict.WINDOW_WALL, verdict(gated = false))
+        // ...but inside the window none of the waiting-app walls touch it.
+        assertEquals(GateVerdict.ALLOW, verdict(gated = false, outsideWindow = false))
+    }
+
+    @Test
+    fun `the window covers waiting apps and whatsapp business, nothing else`() {
+        assertTrue(AppGate.keepsOpenWindow("com.instagram.android", gated = true))
+        assertTrue(AppGate.keepsOpenWindow(AppGate.WHATSAPP_BUSINESS, gated = false))
+        assertFalse(AppGate.keepsOpenWindow("com.samsung.android.app.notes", gated = false))
+    }
+
+    @Test
+    fun `a capped windowed app reopens at tomorrow's window, others at midnight`() {
+        assertEquals(14 * 60, reopensTomorrowAtMinutes(true, 14 * 60, 17 * 60))
+        assertEquals(null, reopensTomorrowAtMinutes(false, 14 * 60, 17 * 60))
+        assertEquals(null, reopensTomorrowAtMinutes(true, RULE_OFF_MINUTES, 17 * 60))
+        assertEquals(null, reopensTomorrowAtMinutes(true, 16 * 60, 15 * 60))
     }
 }

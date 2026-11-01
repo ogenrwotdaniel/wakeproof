@@ -56,6 +56,7 @@ import com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.RULE_ON
 import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
+import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
 import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
@@ -93,6 +94,7 @@ fun UsageScreen(
     val wallWeek by viewModel.wallWeek.collectAsStateWithLifecycle()
     val otherProfileApps by viewModel.otherProfileApps.collectAsStateWithLifecycle()
     val dndAccess by viewModel.dndAccess.collectAsStateWithLifecycle()
+    val notificationAccess by viewModel.notificationAccess.collectAsStateWithLifecycle()
     var editingRule by remember { mutableStateOf<WallRule?>(null) }
     val context = LocalContext.current
 
@@ -325,12 +327,22 @@ fun UsageScreen(
                         rules = wallRules,
                         pending = wallPending,
                         dndAccess = dndAccess,
+                        notificationAccess = notificationAccess,
                         onToggle = { rule, on -> viewModel.requestRule(rule, if (on) RULE_ON else RULE_OFF) },
                         onEdit = { editingRule = it },
                         onKeep = viewModel::cancelRulePending,
                         onGrantDnd = {
                             context.startActivity(
                                 Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                            )
+                        },
+                        onGrantNotifications = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                                    .putExtra(
+                                        Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                                        WindowNotificationGuard.component(context).flattenToString()
+                                    )
                             )
                         }
                     )
@@ -661,10 +673,12 @@ private fun WallRulesSection(
     rules: WallRules,
     pending: Map<WallRule, PendingRule>,
     dndAccess: Boolean,
+    notificationAccess: Boolean,
     onToggle: (WallRule, Boolean) -> Unit,
     onEdit: (WallRule) -> Unit,
     onKeep: (WallRule) -> Unit,
-    onGrantDnd: () -> Unit
+    onGrantDnd: () -> Unit,
+    onGrantNotifications: () -> Unit
 ) {
     val context = LocalContext.current
     Text(
@@ -689,6 +703,13 @@ private fun WallRulesSection(
                 )
                 if (rule == WallRule.SESSION_DND && value != RULE_OFF && !dndAccess) {
                     TextButton(onClick = onGrantDnd) { Text("Allow Do Not Disturb access") }
+                }
+                if (rule == WallRule.OPEN_WINDOW_START_MINUTES && value != RULE_OFF_MINUTES &&
+                    !notificationAccess
+                ) {
+                    TextButton(onClick = onGrantNotifications) {
+                        Text("Allow notification access to hide their notifications too")
+                    }
                 }
                 pending[rule]?.let { change ->
                     Text(
@@ -747,7 +768,8 @@ private fun ruleSubtitle(rule: WallRule): String = when (rule) {
     WallRule.BEDTIME_START_MINUTES -> "Waiting apps shut until your morning alarm is verified."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
     WallRule.OPEN_WINDOW_START_MINUTES ->
-        "Outside the window every waiting app is shut, browsers and messaging included."
+        "Outside the window every waiting app and WhatsApp Business is shut, and their " +
+            "notifications are removed."
     WallRule.OPEN_WINDOW_END_MINUTES -> "Inside it the wait, the budget and the rest still apply."
 }
 

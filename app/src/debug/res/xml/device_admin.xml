@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DeviceLock asks for no classic admin policies: blocking its own uninstall
+     is a device-owner API, not a <uses-policies> entry. -->
+<device-admin>
+    <uses-policies />
+</device-admin>

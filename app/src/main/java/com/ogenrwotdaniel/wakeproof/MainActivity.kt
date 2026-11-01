@@ -53,6 +53,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { runCatching { AppBlockService.sync(applicationContext) } }
         // A session lost to a force-stop comes back the moment the app opens.
         com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService.restore(applicationContext)
+        // Re-asserts the uninstall block while WakeProof is device owner.
+        com.ogenrwotdaniel.wakeproof.admin.DeviceLock.enforce(applicationContext)
         // The next calendar-event reminder, from a calendar that may have changed.
         lifecycleScope.launch {
             runCatching { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(applicationContext) }

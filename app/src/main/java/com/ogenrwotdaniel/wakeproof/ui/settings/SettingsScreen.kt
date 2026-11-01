@@ -395,6 +395,8 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            UninstallLockSection()
+
             Text(text = "Data", style = MaterialTheme.typography.titleMedium)
             val csvLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument("text/csv")

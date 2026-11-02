@@ -272,7 +272,6 @@ class AppBlockService : Service() {
             }
         }
         scope.launch {
-            runCatching { limitRepository.seedWhatsAppBusinessCap() }
             runCatching { wallRulesRepository.seedMorningWindow() }
             refreshAllGated()
         }
@@ -424,7 +423,7 @@ class AppBlockService : Service() {
             capSpent = capSpent,
             gated = gated,
             hasPass = hasPass,
-            outsideWindow = AppGate.keepsOpenWindow(current, gated) && outsideOpenWindow(
+            outsideWindow = gated && outsideOpenWindow(
                 minuteOfDay = minuteOfDay,
                 startMinutes = rules.openWindowStartMinutes,
                 endMinutes = rules.openWindowEndMinutes
@@ -585,7 +584,7 @@ class AppBlockService : Service() {
     private fun reopensTomorrowAt(current: String): String? {
         val gated = gatedCache[current] ?: false
         return reopensTomorrowAtMinutes(
-            windowed = AppGate.keepsOpenWindow(current, gated),
+            windowed = gated,
             startMinutes = rules.openWindowStartMinutes,
             endMinutes = rules.openWindowEndMinutes
         )?.let(::clock)

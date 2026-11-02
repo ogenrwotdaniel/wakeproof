@@ -57,8 +57,10 @@ class AppGateTest {
     }
 
     @Test
-    fun `whatsapp business never waits, plain whatsapp still does`() {
-        assertFalse(AppGate.isGated("com.whatsapp.w4b", ApplicationInfo.CATEGORY_SOCIAL, null))
+    fun `every messenger waits, whatsapp business telegram and kakaotalk included`() {
+        assertTrue(AppGate.isGated("com.whatsapp.w4b", ApplicationInfo.CATEGORY_UNDEFINED, null))
+        assertTrue(AppGate.isGated("org.telegram.messenger", ApplicationInfo.CATEGORY_UNDEFINED, null))
+        assertTrue(AppGate.isGated("com.kakao.talk", ApplicationInfo.CATEGORY_UNDEFINED, null))
         assertTrue(AppGate.isGated("com.whatsapp", ApplicationInfo.CATEGORY_UNDEFINED, null))
     }
 

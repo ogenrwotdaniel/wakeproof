@@ -33,7 +33,8 @@ private const val EXPERT_RAW_LABEL = "Expert RAW"
 /**
  * The tools that are always on the home screen and cannot be unpinned, in
  * order: the phone, WhatsApp Business (the user's main line of communication,
- * 2026-10-28 — exempt from the wait too, see [AppGate.WHATSAPP_BUSINESS]), the cameras, notes, Claude, the bank, the clock and the
+ * 2026-10-28; it still opens through the wait like every messenger, see
+ * [AppGate.WHATSAPP_BUSINESS]), the cameras, notes, Claude, the bank, the clock and the
  * calendar.
  * Chosen by the user as things a phone is FOR rather than things it is used
  * to fill time with. Roles (phone, camera, clock, calendar) are resolved from

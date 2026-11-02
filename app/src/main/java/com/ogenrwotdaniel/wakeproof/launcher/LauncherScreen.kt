@@ -141,14 +141,10 @@ fun LauncherScreen(
     // Social, video and messaging apps sit out the five-minute wait — the same
     // one AppBlockService throws up however else they are opened. Other capped
     // apps get the shorter mindful pause; everything else opens at once.
-    // Exempt apps (WhatsApp Business) skip the pause too: the user's main line
-    // of communication. Its hour cap and the open window are walls the blocker
-    // throws up once it opens, not a reason to stand in front of it.
     val open: (InstalledApp) -> Unit = { app ->
         when {
             app.packageName in gated -> onWait(app)
-            app.packageName in limits && app.packageName !in AppGate.EXEMPT_PACKAGES ->
-                pausing = app
+            app.packageName in limits -> pausing = app
             else -> onLaunch(app.packageName)
         }
     }

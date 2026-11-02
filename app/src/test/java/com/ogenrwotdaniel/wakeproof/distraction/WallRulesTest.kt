@@ -163,13 +163,6 @@ class OpenWindowTest {
     }
 
     @Test
-    fun `the window covers waiting apps and whatsapp business, nothing else`() {
-        assertTrue(AppGate.keepsOpenWindow("com.instagram.android", gated = true))
-        assertTrue(AppGate.keepsOpenWindow(AppGate.WHATSAPP_BUSINESS, gated = false))
-        assertFalse(AppGate.keepsOpenWindow("com.samsung.android.app.notes", gated = false))
-    }
-
-    @Test
     fun `a capped windowed app reopens at tomorrow's window, others at midnight`() {
         assertEquals(14 * 60, reopensTomorrowAtMinutes(true, 14 * 60, 17 * 60))
         assertEquals(null, reopensTomorrowAtMinutes(false, 14 * 60, 17 * 60))

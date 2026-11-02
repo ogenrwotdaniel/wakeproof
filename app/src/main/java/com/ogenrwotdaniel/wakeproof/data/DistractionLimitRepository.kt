@@ -161,33 +161,6 @@ class DistractionLimitRepository @Inject constructor(
         prefs[MOVED_ONTO_WEEK] = true
     }
 
-    /**
-     * One-off: WhatsApp Business is exempt from the wait, which makes it the
-     * one messaging app with no friction at all — exactly where a habit moves
-     * to. On 2026-10-28 it got a 45-minute NUDGE cap; on 2026-10-29 the user
-     * asked for an hour MAXIMUM, so it is now a 60-minute BLOCK cap.
-     *
-     * Applied straight away rather than through [requestLimit]: 45 NUDGE → 60
-     * BLOCK reads as a loosening there (more minutes) and would wait a week,
-     * and this is the user's own explicit choice. Any loosening already queued
-     * for the app is dropped with it. Runs once per device under its own flag,
-     * so later edits from the Usage screen are never overwritten.
-     */
-    suspend fun seedWhatsAppBusinessCap() {
-        dataStore.edit { prefs ->
-            if (prefs[WHATSAPP_BUSINESS_HOUR_CAP] == true) return@edit
-            prefs[LIMITS] = withLimit(
-                prefs[LIMITS] ?: emptySet(),
-                WHATSAPP_BUSINESS,
-                AppLimit(WHATSAPP_BUSINESS_CAP_MINUTES, LimitMode.BLOCK)
-            )
-            prefs[PENDING] = encodePending(
-                parsePending(prefs[PENDING] ?: emptySet()) - WHATSAPP_BUSINESS
-            )
-            prefs[WHATSAPP_BUSINESS_HOUR_CAP] = true
-        }
-    }
-
     /** True once per package per [epochDay]; marks as notified as a side effect. */
     suspend fun tryMarkNotified(packageName: String, epochDay: Long): Boolean {
         var first = false
@@ -211,10 +184,6 @@ class DistractionLimitRepository @Inject constructor(
         private val LEGACY_COOLING_PENDING_HOURS = intPreferencesKey("cooling_off_pending_hours")
         private val LEGACY_COOLING_PENDING_AT = longPreferencesKey("cooling_off_pending_at")
         private val MOVED_ONTO_WEEK = booleanPreferencesKey("cooling_off_moved_onto_week")
-        private val WHATSAPP_BUSINESS_HOUR_CAP =
-            booleanPreferencesKey("whatsapp_business_cap_hour_block")
-        private const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
-        private const val WHATSAPP_BUSINESS_CAP_MINUTES = 60
 
         private const val HOUR_MILLIS = 60L * 60 * 1000
 

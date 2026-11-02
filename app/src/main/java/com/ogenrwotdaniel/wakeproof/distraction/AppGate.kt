@@ -36,27 +36,13 @@ object AppGate {
     const val PASS_LAUNCH_MILLIS = 10_000L
 
     /**
-     * WhatsApp Business: the user's main line of communication, so it never
-     * waits (2026-10-28) even though it would otherwise match as messaging or
-     * by a social category. Still behind the focus wall during a session unless
-     * it is put on the focus list. Plain WhatsApp still waits.
-     *
-     * Since 2026-10-29 (the user's change of mind) it keeps the open window
-     * like every waiting app, and carries a one-hour BLOCK cap — see
-     * [WINDOWED_PACKAGES] and `DistractionLimitRepository.seedWhatsAppBusinessCap`.
-     * Still no wait, bedtime, earn-the-feed or shared budget.
+     * WhatsApp Business, named for the home screen's permanent pin. Since
+     * 2026-11-02 it is a waiting app like every other messenger (user's choice:
+     * the same restrictions everywhere) — no exemption from the wait, no
+     * one-hour cap of its own. It was exempt from the wait 2026-10-28, then
+     * windowed with a one-hour BLOCK cap 2026-10-29.
      */
     const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
-
-    /** Never wait, whatever their category says. See [WHATSAPP_BUSINESS]. */
-    val EXEMPT_PACKAGES = setOf(WHATSAPP_BUSINESS)
-
-    /** Not waiting apps, yet shut outside the open window all the same. */
-    val WINDOWED_PACKAGES = setOf(WHATSAPP_BUSINESS)
-
-    /** Whether the open window applies to [packageName]: every waiting app, plus [WINDOWED_PACKAGES]. */
-    fun keepsOpenWindow(packageName: String, gated: Boolean): Boolean =
-        gated || packageName in WINDOWED_PACKAGES
 
     /**
      * Screens that sit over an app for a moment without the user having left
@@ -91,9 +77,9 @@ object AppGate {
         // Video
         "com.google.android.youtube", "com.netflix.mediaclient", "tv.twitch.android.app",
         // Messaging
-        "com.whatsapp", "com.facebook.orca", "org.telegram.messenger",
-        "org.thoughtcrime.securesms", "com.discord", "com.kakao.talk",
-        "jp.naver.line.android", "com.tencent.mm", "com.viber.voip"
+        "com.whatsapp", WHATSAPP_BUSINESS, "com.facebook.orca", "org.telegram.messenger",
+        "org.telegram.messenger.web", "org.thoughtcrime.securesms", "com.discord",
+        "com.kakao.talk", "jp.naver.line.android", "com.tencent.mm", "com.viber.voip"
     )
 
     /**
@@ -142,7 +128,7 @@ object AppGate {
         isBrowser: Boolean = false,
         gateBrowsers: Boolean = false
     ): Boolean =
-        packageName != defaultSmsPackage && packageName !in EXEMPT_PACKAGES && (
+        packageName != defaultSmsPackage && (
             packageName in KNOWN_GATED_PACKAGES ||
                 category == ApplicationInfo.CATEGORY_SOCIAL ||
                 category == ApplicationInfo.CATEGORY_VIDEO ||
@@ -243,8 +229,7 @@ enum class GateVerdict {
  *    on another of the user's devices counts too.
  * 3. An app whose daily cap is spent is walled until midnight.
  * 4. Shut outside the open window (08:10–08:50 by default). The caller
- *    decides who [outsideWindow] applies to: the waiting apps plus
- *    [AppGate.WINDOWED_PACKAGES] (see [AppGate.keepsOpenWindow]).
+ *    decides who [outsideWindow] applies to: the waiting apps.
  * 5. Everything else here is about the waiting apps only: the bedtime wall,
  *    then the feed not yet earned by a focus block, then the shared daily
  *    budget spent, and finally the wait itself. A pass earned at the wait does

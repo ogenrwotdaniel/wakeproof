@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
  * shade, the Edge panel, Edge lighting and an icon's long-press preview all
  * show it. The wait is not a wall and leaves notifications alone. With the
  * blocker not running it falls back to the open window alone, for the
- * windowed apps (the waiting apps plus [AppGate.WINDOWED_PACKAGES]).
+ * waiting apps.
  *
  * LIMIT, accepted: the system plays a notification's sound and vibration before
  * any listener hears of it, so a single buzz can still get through. What this
@@ -113,7 +113,7 @@ class WindowNotificationGuard : NotificationListenerService() {
         val pkg = sbn.packageName
         return windowedCache.getOrPut(pkg) {
             val gated = AppGate.isGated(this, pkg, essentials, browsers, rules.gateBrowsers)
-            pkg !in essentials && AppGate.keepsOpenWindow(pkg, gated)
+            pkg !in essentials && gated
         }
     }
 

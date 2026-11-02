@@ -769,8 +769,7 @@ private fun ruleSubtitle(rule: WallRule): String = when (rule) {
     WallRule.BEDTIME_START_MINUTES -> "Waiting apps shut until your morning alarm is verified."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
     WallRule.OPEN_WINDOW_START_MINUTES ->
-        "Outside the window every waiting app and WhatsApp Business is shut, and their " +
-            "notifications are removed."
+        "Outside the window every waiting app is shut, and its notifications are removed."
     WallRule.OPEN_WINDOW_END_MINUTES -> "Inside it the wait, the budget and the rest still apply."
 }
 

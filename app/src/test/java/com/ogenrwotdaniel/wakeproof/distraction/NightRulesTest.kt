@@ -10,9 +10,10 @@ class NightRulesTest {
     private fun hm(h: Int, m: Int) = h * 60 + m
 
     @Test
-    fun `the sleep wall runs 21 00 to 03 00 across midnight`() {
-        assertFalse(sleepWallActive(hm(20, 59)))
-        assertTrue(sleepWallActive(hm(21, 0)))
+    fun `the sleep wall runs 19 45 to 03 00 across midnight`() {
+        assertFalse(sleepWallActive(hm(19, 44)))
+        assertTrue(sleepWallActive(hm(19, 45)))
+        assertTrue(sleepWallActive(hm(20, 0)))
         assertTrue(sleepWallActive(hm(0, 30)))
         assertTrue(sleepWallActive(hm(2, 59)))
         assertFalse(sleepWallActive(hm(3, 0)))
@@ -37,17 +38,27 @@ class NightRulesTest {
     }
 
     @Test
-    fun `wind-down once, in its half hour`() {
-        assertTrue(windDownDue(hm(20, 30), sentOnDay = 9, today = 10))
-        assertFalse(windDownDue(hm(20, 45), sentOnDay = 10, today = 10))
-        assertFalse(windDownDue(hm(20, 29), sentOnDay = 9, today = 10))
-        assertFalse(windDownDue(hm(21, 0), sentOnDay = 9, today = 10))
+    fun `wind-down once, in its half hour before the wall`() {
+        assertTrue(windDownDue(hm(19, 15), sentOnDay = 9, today = 10))
+        assertFalse(windDownDue(hm(19, 30), sentOnDay = 10, today = 10))
+        assertFalse(windDownDue(hm(19, 14), sentOnDay = 9, today = 10))
+        assertFalse(windDownDue(hm(19, 45), sentOnDay = 9, today = 10))
+    }
+
+    @Test
+    fun `lights out once, from 20 00`() {
+        assertTrue(lightsOutDue(hm(20, 0), sentOnDay = 9, today = 10))
+        assertTrue(lightsOutDue(hm(20, 29), sentOnDay = 9, today = 10))
+        assertFalse(lightsOutDue(hm(20, 30), sentOnDay = 9, today = 10))
+        assertFalse(lightsOutDue(hm(19, 59), sentOnDay = 9, today = 10))
+        assertFalse(lightsOutDue(hm(20, 5), sentOnDay = 10, today = 10))
     }
 
     @Test
     fun `charging nag at night, low, unplugged, at most every half hour`() {
         val now = 10_000_000L
         assertTrue(chargeNagDue(hm(22, 0), 30, charging = false, lastNagAt = 0L, now = now))
+        assertTrue(chargeNagDue(hm(19, 45), 30, charging = false, lastNagAt = 0L, now = now))
         assertTrue(chargeNagDue(hm(1, 0), 30, charging = false, lastNagAt = 0L, now = now))
         assertFalse(chargeNagDue(hm(22, 0), 30, charging = true, lastNagAt = 0L, now = now))
         assertFalse(chargeNagDue(hm(22, 0), 40, charging = false, lastNagAt = 0L, now = now))

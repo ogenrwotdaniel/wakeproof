@@ -831,8 +831,17 @@ class AppBlockService : Service() {
             nightNotice(
                 WIND_DOWN_NOTIFICATION_ID,
                 "Wind down",
-                "Everything but calls and your alarms shuts at ${clock(SLEEP_START_MINUTES)}. " +
-                    "Finish up, put the phone on charge, get ready for bed."
+                "Everything but calls and your alarms shuts at ${clock(SLEEP_START_MINUTES)}, " +
+                    "bed at ${clock(BEDTIME_MINUTES)}. Finish up and get ready."
+            )
+        }
+        if (lightsOutDue(minuteOfDay, prefs.getLong(KEY_LIGHTS_OUT_DAY, -1L), today)) {
+            prefs.edit().putLong(KEY_LIGHTS_OUT_DAY, today).apply()
+            nightNotice(
+                WIND_DOWN_NOTIFICATION_ID,
+                "Lights out",
+                "It's ${clock(BEDTIME_MINUTES)}. Phone on charge, into bed. " +
+                    "Your alarm is at ${clock(SLEEP_END_MINUTES)}."
             )
         }
         if (!alarmDevicePolicy.ringsAlarms) return
@@ -1097,6 +1106,7 @@ class AppBlockService : Service() {
         private const val MEDIA_CHECK_MILLIS = 2_000L
         private const val NIGHT_PREFS = "night_reminders"
         private const val KEY_WIND_DOWN_DAY = "wind_down_day"
+        private const val KEY_LIGHTS_OUT_DAY = "lights_out_day"
         private const val KEY_CHARGE_NAG_AT = "charge_nag_at"
         private const val NIGHT_CHANNEL_ID = "wakeproof_night"
         private const val WIND_DOWN_NOTIFICATION_ID = 71

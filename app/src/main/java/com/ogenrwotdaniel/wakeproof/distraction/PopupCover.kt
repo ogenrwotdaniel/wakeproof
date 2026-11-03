@@ -50,6 +50,25 @@ const val COVER_MAX_MILLIS = 2 * 60_000L
 const val COVER_GRACE_MILLIS = 8_000L
 
 /**
+ * Pure: whether the PIN cover should be up (2026-11-04, user report: "you can
+ * bypass all restrictions by pinning the app on the screen").
+ *
+ * While the user has a task pinned (Android's screen pinning,
+ * `LOCK_TASK_MODE_PINNED`), the system refuses to start any activity outside
+ * that task — so every wall, which is an activity in its own task, silently
+ * failed to appear and a pinned SNS app ran free. An overlay window still
+ * draws over a pinned task, so the cover goes there instead, for as long as
+ * the pin lasts and the app in front would be walled.
+ *
+ * No time limit, unlike [popupCoverWanted]: this reads the system's live pin
+ * state every tick rather than a fold of events, so there is no lost event
+ * that could hold it up. And it never stops the way out — the cover is not
+ * focusable, so the system's unpin gesture still works, and unpinning drops it.
+ */
+fun pinCoverWanted(userPinned: Boolean, verdict: GateVerdict): Boolean =
+    userPinned && verdict != GateVerdict.ALLOW
+
+/**
  * The full-screen overlay itself. Programmatic views, like
  * [com.ogenrwotdaniel.wakeproof.pomodoro.FloatingTimerOverlay]: an overlay
  * window has no lifecycle owner for Compose. Touch-eating, so the pop-up
@@ -64,10 +83,12 @@ class PopupCover(private val context: Context) {
 
     val isShowing: Boolean get() = view != null
 
-    /** Shows (or relabels) the cover for [appLabel]; [onGrace] runs on the button. */
-    fun show(appLabel: String, onGrace: () -> Unit) {
+    /**
+     * Shows (or relabels) the cover with [text]; a button labelled [buttonLabel]
+     * runs [onButton], and there is no button when either is null.
+     */
+    fun show(text: String, buttonLabel: String? = null, onButton: (() -> Unit)? = null) {
         if (!Settings.canDrawOverlays(context)) return
-        val text = "$appLabel is walled.\n\nClose its pop-up window to carry on."
         view?.let {
             label?.text = text
             return
@@ -80,9 +101,13 @@ class PopupCover(private val context: Context) {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             gravity = Gravity.CENTER
         }
-        val button = Button(context).apply {
-            this.text = "Let me close it"
-            setOnClickListener { onGrace() }
+        val button = if (buttonLabel != null && onButton != null) {
+            Button(context).apply {
+                this.text = buttonLabel
+                setOnClickListener { onButton() }
+            }
+        } else {
+            null
         }
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -90,13 +115,15 @@ class PopupCover(private val context: Context) {
             setBackgroundColor(COVER_COLOR)
             setPadding(dp(32), dp(32), dp(32), dp(32))
             addView(message)
-            addView(
-                button,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(24) }
-            )
+            if (button != null) {
+                addView(
+                    button,
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = dp(24) }
+                )
+            }
         }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,

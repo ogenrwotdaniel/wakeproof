@@ -51,9 +51,16 @@ class AlarmDevicePolicy @Inject constructor(
      */
     val ringsAlarms: Boolean get() = _ringsAlarms.value
 
-    fun setRingsAlarms(value: Boolean) {
+    /**
+     * Returns false, changing nothing, when switching the role off is refused:
+     * a device holding the [StrictAlarm] keeps ringing — otherwise the switch
+     * would be the "turn it off" the locked alarm exists to rule out.
+     */
+    fun setRingsAlarms(value: Boolean): Boolean {
+        if (!value && StrictAlarm.syncIds(context).isNotEmpty()) return false
         prefs.edit().putBoolean(KEY_RINGS, value).apply()
         _ringsAlarms.value = value
+        return true
     }
 
     /**

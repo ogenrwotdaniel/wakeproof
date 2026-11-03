@@ -2,6 +2,7 @@ package com.ogenrwotdaniel.wakeproof.distraction
 
 import android.content.Context
 import android.content.Intent
+import com.ogenrwotdaniel.wakeproof.admin.AppCloser
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
@@ -140,6 +141,9 @@ class GateActivity : ComponentActivity() {
         opened = true
         GateLog.recordOpened(this)
         GatePasses.grant(packageName, System.currentTimeMillis())
+        // Waiting apps are held suspended (AppBlockService.syncSuspensions);
+        // the pass is the one way in, so it lifts the hold before launching.
+        AppCloser.release(this, packageName)
         packageManager.getLaunchIntentForPackage(packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?.let { runCatching { startActivity(it) } }

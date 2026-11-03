@@ -35,12 +35,16 @@ class BootReceiver : BroadcastReceiver() {
         }
         if (!context.getSystemService(UserManager::class.java).isUserUnlocked) {
             directBootStore.all().forEach(scheduler::schedule)
+            // A locked-alarm ring cut off by the restart picks up again here,
+            // still at the lock screen.
+            runCatching { StrictAlarm.resumeIfPending(context) }
             return
         }
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 alarmInitializer.initialize()
+                runCatching { StrictAlarm.resumeIfPending(context) }
                 // App blocking used to wait for the next 15-minute worker run
                 // after a reboot, leaving capped apps open in the meantime.
                 runCatching { AppBlockService.sync(context.applicationContext) }

@@ -12,6 +12,8 @@ import com.google.android.gms.wearable.WearableListenerService
  * - `/wakeproof/timer` → post/update/cancel the timer Ongoing Activity via
  *   [TimerNotifier] (deleted item or active=false clears it) — unless the
  *   watch's own timer is running, which keeps the chip.
+ * - `/wakeproof/alarm` → buzz the wrist while the phone's alarm rings
+ *   ([PhoneAlarmMirror]); it cannot be dismissed here.
  * - `/wakeproof/session/…` deleted → the phone imported a block finished here;
  *   the tile's "waiting to sync" count and focus total change with it.
  */
@@ -28,6 +30,15 @@ class StatsDataListenerService : WearableListenerService() {
             }
             when (path) {
                 WearStatsPath.STATS -> refreshTile = true
+                // The phone's alarm rings here too, as a buzz; see PhoneAlarmMirror.
+                PhoneAlarmContract.PATH -> PhoneAlarmMirror.onChanged(
+                    this,
+                    if (event.type == DataEvent.TYPE_CHANGED) {
+                        DataMapItem.fromDataItem(event.dataItem).dataMap
+                    } else {
+                        null
+                    }
+                )
                 TimerContract.PATH -> {
                     timerChanged = true
                     timer = if (event.type == DataEvent.TYPE_CHANGED) {

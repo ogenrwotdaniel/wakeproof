@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -170,9 +171,15 @@ class SettingsViewModel @Inject constructor(
      * would leave whatever AlarmManager already holds exactly where it was.
      */
     fun setRingsAlarms(value: Boolean) {
-        alarmDevicePolicy.setRingsAlarms(value)
+        // Refused while this device holds the locked alarm.
+        if (!alarmDevicePolicy.setRingsAlarms(value)) return
         viewModelScope.launch { alarmInitializer.initialize() }
     }
+
+    /** The [StrictAlarm]s' sync ids on this device, which the screen shows locked. */
+    val strictAlarmSyncIds: Set<String> get() = StrictAlarm.syncIds(context)
+
+    private fun locked(alarm: Alarm) = StrictAlarm.isStrict(context, alarm)
 
     val settings: StateFlow<WakeProofSettings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WakeProofSettings())
@@ -191,6 +198,7 @@ class SettingsViewModel @Inject constructor(
 
     /** Changing a time reschedules the alarm immediately. */
     fun setAlarmTime(alarm: Alarm, hour: Int, minute: Int) {
+        if (locked(alarm)) return
         viewModelScope.launch {
             val updated = alarm.copy(hour = hour, minute = minute)
             alarmRepository.updateAlarm(updated)
@@ -199,6 +207,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setAlarmEnabled(alarm: Alarm, enabled: Boolean) {
+        if (locked(alarm)) return
         viewModelScope.launch {
             val updated = alarm.copy(enabled = enabled)
             alarmRepository.updateAlarm(updated)
@@ -208,6 +217,7 @@ class SettingsViewModel @Inject constructor(
 
     /** Changing which days an alarm repeats on reschedules it for the next one. */
     fun setAlarmDays(alarm: Alarm, daysMask: Int) {
+        if (locked(alarm)) return
         viewModelScope.launch {
             val updated = alarm.copy(daysMask = AlarmDays.normalise(daysMask))
             alarmRepository.updateAlarm(updated)
@@ -225,6 +235,7 @@ class SettingsViewModel @Inject constructor(
      * it never created, and before this there was no way to get rid of one.
      */
     fun deleteAlarm(alarm: Alarm) {
+        if (locked(alarm)) return
         viewModelScope.launch { alarmRepository.deleteAlarm(alarm) }
     }
 

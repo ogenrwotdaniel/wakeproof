@@ -1,5 +1,10 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.data.sync.SyncLeave
+import com.ogenrwotdaniel.wakeproof.data.sync.syncLeaveReady
+import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+
 import android.app.Activity
 import android.content.Context
 import androidx.lifecycle.ViewModel
@@ -95,7 +100,28 @@ class SyncViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Whether leaving sync may go through now; says why not otherwise.
+     * See [SyncLeave].
+     */
+    private fun mayLeave(what: String): Boolean {
+        if (PomodoroTimerService.state.value.active || AppBlockService.otherSessionActive()) {
+            message.value = "Not during a focus session. $what keeps this device walled by your other devices' sessions."
+            return false
+        }
+        val now = System.currentTimeMillis()
+        val requestedAt = SyncLeave.requestedAt(context)
+        if (syncLeaveReady(requestedAt, now)) return true
+        SyncLeave.request(context, now)
+        val readyAt = (SyncLeave.requestedAt(context) ?: now) + SyncLeave.MILLIS
+        val date = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(readyAt))
+        message.value = "Leaving sync waits a week. Ask again after $date."
+        return false
+    }
+
     fun signOut() {
+        if (!mayLeave("Sync")) return
+        SyncLeave.clear(context)
         viewModelScope.launch {
             busy.value = true
             accounts.signOut()
@@ -106,6 +132,10 @@ class SyncViewModel @Inject constructor(
     }
 
     fun setEnabled(value: Boolean) {
+        if (!value) {
+            if (!mayLeave("Sync")) return
+            SyncLeave.clear(context)
+        }
         viewModelScope.launch {
             preferences.setEnabled(value)
             if (value) {

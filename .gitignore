@@ -30,3 +30,8 @@ tools/water/.pytest_cache/
 # Play Console working notes (release checklist, store texts) — kept locally
 docs/PLAY_PUBLISHING.md
 docs/STORE_LISTING.md
+
+# The locked alarms' tone is the user's own copy of a commercial song: personal
+# use only, never published. The app falls back to the phone's alarm sound without it.
+app/src/main/res/raw/locked_alarm.*
+wear/src/main/res/raw/locked_alarm.*

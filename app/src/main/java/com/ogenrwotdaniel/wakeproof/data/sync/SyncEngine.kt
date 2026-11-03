@@ -58,6 +58,7 @@ class SyncEngine @Inject constructor(
     private val tables: List<@JvmSuppressWildcards SyncTable<out SyncableEntity>>,
     private val alarms: AlarmDao,
     private val scheduler: AlarmScheduler,
+    private val alarmInitializer: com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer,
     private val settings: SettingsRepository,
     private val studyUsage: StudyUsageSync
 ) {
@@ -133,6 +134,9 @@ class SyncEngine @Inject constructor(
      * intent registered here.
      */
     private suspend fun reconcileAlarmSchedule() {
+        // A pull can carry an edit or delete of the locked alarm from the
+        // other device; it is written back before anything is armed.
+        runCatching { alarmInitializer.enforceStrict() }
         alarms.getAllIncludingDeleted().forEach { alarm ->
             if (alarm.enabled && !alarm.deleted) scheduler.schedule(alarm)
             else scheduler.cancel(alarm)

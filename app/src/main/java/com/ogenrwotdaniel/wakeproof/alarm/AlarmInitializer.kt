@@ -3,6 +3,8 @@ package com.ogenrwotdaniel.wakeproof.alarm
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import javax.inject.Inject
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Singleton
 
 /**
@@ -14,6 +16,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class AlarmInitializer @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
     private val directBootStore: DirectBootAlarmStore,
@@ -21,6 +24,7 @@ class AlarmInitializer @Inject constructor(
 ) {
     suspend fun initialize() {
         repository.seedDefaultAlarmsIfEmpty()
+        enforceStrict()
         val plan = reconcilePlan(
             alarms = repository.getAllAlarmsIncludingDeleted(),
             mirroredIds = directBootStore.ids(),
@@ -32,6 +36,33 @@ class AlarmInitializer @Inject constructor(
         plan.toSchedule.forEach(scheduler::schedule)
         plan.toCancel.forEach(scheduler::cancel)
         plan.orphanIds.forEach(scheduler::cancelById)
+    }
+
+    /**
+     * Pins every [StrictAlarm] slot on the ringing device: adopts an alarm the
+     * first time (the earliest unlocked pushup alarm, or a new one), brings it
+     * back if it was deleted, and rewrites any change to it.
+     */
+    suspend fun enforceStrict() {
+        if (!devicePolicy.ringsAlarms) return
+        StrictAlarm.SLOTS.forEachIndexed { index, slot ->
+            val all = repository.getAllAlarmsIncludingDeleted()
+            val syncId = StrictAlarm.syncId(context, index)
+            var row = all.firstOrNull { it.syncId == syncId }
+            if (row == null) {
+                row = strictAlarmCandidate(all, taken = StrictAlarm.syncIds(context)) ?: run {
+                    repository.addAlarm(
+                        StrictAlarm.TYPE, slot.hour, slot.minute,
+                        "Locked %d:%02d".format(slot.hour, slot.minute)
+                    )
+                    repository.getAllAlarmsIncludingDeleted().maxByOrNull { it.id }
+                } ?: return@forEachIndexed
+            }
+            StrictAlarm.adopt(context, index, row)
+            val fixed = strictAlarmFixed(row, slot, System.currentTimeMillis()) ?: return@forEachIndexed
+            repository.updateAlarm(fixed)
+            scheduler.schedule(fixed)
+        }
     }
 }
 

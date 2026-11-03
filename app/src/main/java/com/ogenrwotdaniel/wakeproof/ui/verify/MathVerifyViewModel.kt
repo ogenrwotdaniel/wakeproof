@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.verify
 
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -66,7 +67,13 @@ class MathVerifyViewModel @Inject constructor(
                 ?: return@launch
             _uiState.update {
                 it.copy(
-                    progress = it.progress.copy(required = settings.mathProblems),
+                    progress = it.progress.copy(
+                        required = if (strict) {
+                            maxOf(settings.mathProblems, StrictAlarm.MATH_FALLBACK_PROBLEMS)
+                        } else {
+                            settings.mathProblems
+                        }
+                    ),
                     emergencyHoldSeconds = settings.emergencyHoldSeconds
                 )
             }
@@ -76,6 +83,22 @@ class MathVerifyViewModel @Inject constructor(
                 delay(1_000)
                 refreshEmergency()
             }
+        }
+    }
+
+    /** Ringing the [StrictAlarm] (its camera fallback): more sums, no emergency dismiss. */
+    @Volatile private var strict = false
+
+    fun setStrict(value: Boolean) {
+        if (!value || strict) return
+        strict = true
+        _uiState.update {
+            it.copy(
+                progress = it.progress.copy(
+                    required = maxOf(it.progress.required, StrictAlarm.MATH_FALLBACK_PROBLEMS)
+                ),
+                emergencyAvailable = false
+            )
         }
     }
 
@@ -115,8 +138,10 @@ class MathVerifyViewModel @Inject constructor(
 
     private fun refreshEmergency() {
         val state = _uiState.value
-        val open = state.progress.mistakes >= MAX_MISTAKES ||
-            SystemClock.elapsedRealtime() - startedAt > EMERGENCY_AFTER_MS
+        val open = !strict && (
+            state.progress.mistakes >= MAX_MISTAKES ||
+                SystemClock.elapsedRealtime() - startedAt > EMERGENCY_AFTER_MS
+            )
         if (open != state.emergencyAvailable) _uiState.update { it.copy(emergencyAvailable = open) }
     }
 

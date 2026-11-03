@@ -7,7 +7,10 @@ import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.app.PendingIntent
 import android.app.usage.UsageStatsManager
+import android.content.ComponentName
 import android.content.Context
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.app.Service
@@ -20,6 +23,9 @@ import android.provider.Settings
 import android.util.Log
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.R
+import com.ogenrwotdaniel.wakeproof.admin.AppCloser
+import com.ogenrwotdaniel.wakeproof.admin.DeviceLock
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
@@ -136,8 +142,49 @@ class AppBlockService : Service() {
 
     private var ticks = 0L
 
-    /** Web browsers on this phone, resolved once. */
-    private val browsers: Set<String> by lazy { AppGate.browserPackages(this) }
+    /**
+     * The stored rules and limits have arrived. Until then the defaults stand
+     * in, and [syncSuspensions] must not release a held app on their say-so.
+     */
+    @Volatile private var rulesLoaded = false
+    @Volatile private var limitsLoaded = false
+
+    /** Never suspended, whatever their verdict: losing them costs more than any app is worth. */
+    private val neverSuspend: Set<String> by lazy {
+        untouchable + AppGate.NEVER_SUSPEND + listOfNotNull(
+            // OTP codes.
+            runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(this) }.getOrNull(),
+            // The keyboard: every text field on the phone.
+            runCatching {
+                Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                    ?.substringBefore('/')
+            }.getOrNull(),
+            // Web content inside every other app, should a browser provide it.
+            runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.packageName }.getOrNull()
+        )
+    }
+
+    /** Web browsers on this phone; re-resolved when an app is installed. */
+    @Volatile private var browsers: Set<String> = emptySet()
+
+    /** Apps in their first week on the phone; see [NewAppQuarantine]. */
+    @Volatile private var quarantined: Set<String> = emptySet()
+
+    /**
+     * Notification history is on: it keeps the text of notifications the
+     * walls strip, so while it is on every waiting app stays shut.
+     */
+    @Volatile private var historyOn = false
+
+    /** An app was installed: it may be a browser or a new feed, so look again. */
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+            browsers = AppGate.browserPackages(this@AppBlockService)
+            gatedCache.clear()
+            refreshAllGated()
+        }
+    }
 
     /** PackageManager lookups, resolved once — they cannot change under us. */
     private val untouchable: Set<String> by lazy { undismissablePackages() }
@@ -184,6 +231,11 @@ class AppBlockService : Service() {
 
     /** The cover over a walled app left running in a pop-up; see [popupCoverWanted]. */
     private val popupCover by lazy { PopupCover(this) }
+    /** The cover over a walled app the user has screen-pinned; see [pinCoverWanted]. */
+    private val pinCover by lazy { PopupCover(this) }
+    private val activityManager by lazy { getSystemService(ActivityManager::class.java) }
+    /** Apps [AppCloser] is suspending right now, so a tick does not start a second close. */
+    private val closing = mutableSetOf<String>()
     /** The app last walled, for the cover and the Recents kill; null = none pending. */
     private var coverFor: String? = null
     private var coverWallAt = 0L
@@ -194,6 +246,17 @@ class AppBlockService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        browsers = AppGate.browserPackages(this)
+        AppCloser.releaseStale(this)
+        // Not only from MainActivity: the restrictions must stand on a phone
+        // where WakeProof itself is never opened.
+        DeviceLock.enforce(this)
+        StrictAlarm.resumeIfPending(this)
+        registerReceiver(
+            packageReceiver,
+            IntentFilter(Intent.ACTION_PACKAGE_ADDED).apply { addDataScheme("package") },
+            RECEIVER_NOT_EXPORTED
+        )
         createChannel()
         startForeground(
             NOTIFICATION_ID,
@@ -216,6 +279,7 @@ class AppBlockService : Service() {
             wallRulesRepository.rules.collect { next ->
                 val browsersChanged = next.gateBrowsers != rules.gateBrowsers
                 rules = next
+                rulesLoaded = true
                 if (browsersChanged) {
                     gatedCache.clear()
                     refreshAllGated()
@@ -264,10 +328,24 @@ class AppBlockService : Service() {
             }
         }
         scope.launch {
+            while (true) {
+                historyOn = runCatching {
+                    Settings.Secure.getInt(contentResolver, NOTIFICATION_HISTORY_SETTING, 0) == 1
+                }.getOrDefault(false)
+                // Screen off too: audio is exactly what plays with the screen off.
+                pauseWalledMedia()
+                delay(MEDIA_CHECK_MILLIS)
+            }
+        }
+        scope.launch {
             // Queued loosenings land here too, not only when a screen opens.
             while (true) {
                 runCatching { wallRulesRepository.promoteDue() }
                 runCatching { limitRepository.promoteDuePending() }
+                // Also ends a new app's quarantine week on time.
+                refreshAllGated()
+                // A locked-alarm ring whose service died is started again.
+                runCatching { StrictAlarm.resumeIfPending(this@AppBlockService) }
                 delay(PROMOTE_EVERY_MILLIS)
             }
         }
@@ -280,6 +358,7 @@ class AppBlockService : Service() {
         PomodoroTimerService.restore(applicationContext)
         scope.launch {
             limitRepository.limits.collect { all ->
+                limitsLoaded = true
                 blockedLimits = all
                     .filterValues { it.mode == LimitMode.BLOCK }
                     .filterKeys { it !in untouchable }
@@ -306,7 +385,9 @@ class AppBlockService : Service() {
     override fun onDestroy() {
         if (instance === this) instance = null
         popupCover.hide()
+        pinCover.hide()
         runCatching { unregisterReceiver(screenReceiver) }
+        runCatching { unregisterReceiver(packageReceiver) }
         scope.cancel()
         super.onDestroy()
     }
@@ -320,6 +401,11 @@ class AppBlockService : Service() {
             if (!usageRepository.hasAccess() ||
                 (ticks++ % OVERLAY_CHECK_EVERY == 0L && !Settings.canDrawOverlays(this))
             ) {
+                // Nothing can be seen any more, so nothing can be judged: shut
+                // every waiting and capped app instead of opening them all.
+                // The holds outlive this service and are re-decided when the
+                // grant comes back and it starts again.
+                holdEverything()
                 announceWallDown()
                 stopSelf()
                 return
@@ -330,7 +416,9 @@ class AppBlockService : Service() {
             // sleep was ~19,000 foreground queries that could only ever answer
             // "no one is using anything".
             if (!powerManager.isInteractive) {
+                syncSuspensions()
                 popupCover.hide()
+                pinCover.hide()
                 // Screen off ends a visit through the wait, like leaving the app.
                 GatePasses.revokeAll()
                 // Force a fresh measurement on wake rather than extrapolating
@@ -347,6 +435,7 @@ class AppBlockService : Service() {
                 budgetSpentAgainst = null
                 budgetBaselineValid = false
             }
+            syncSuspensions()
 
             // Still reading events while the lock screen is up keeps the fold
             // current, but nothing behind the lock screen can be used.
@@ -359,12 +448,14 @@ class AppBlockService : Service() {
             if (keyguardManager.isKeyguardLocked) GatePasses.revokeAll()
             if (current == null || keyguardManager.isKeyguardLocked) {
                 popupCover.hide()
+                pinCover.hide()
                 delay(POLL_MILLIS)
                 continue
             }
             followWalledApp(current)
             if (current == packageName) {
                 // Looking at our own wall (or WakeProof itself). Not a re-entry.
+                pinCover.hide()
                 delay(POLL_MILLIS)
                 continue
             }
@@ -385,8 +476,24 @@ class AppBlockService : Service() {
                 budgetSpent = gated && budgetSpent(current)
             )
             logVerdict(current, verdict)
-            if (verdict != GateVerdict.ALLOW) {
-                wall(current, killAfter = verdict != GateVerdict.WAIT) { wallIntent(current, verdict, limit) }
+            // A pinned task refuses every activity from outside it, wall
+            // included, so a pinned app is covered by an overlay instead.
+            val pinned = userPinned()
+            if (pinCoverWanted(pinned, verdict)) {
+                if (!pinCover.isShowing) Log.i(TAG, "pin cover UP for $current ($verdict)")
+                // Closing the app ends the pin with it; the cover holds the
+                // screen meanwhile, and alone where closing is not possible.
+                closeBesideWall(current)
+                pinCover.show(
+                    "${usageRepository.appLabel(current)} is walled.\n\n" +
+                        "Screen pinning does not get past it. Unpin the app to carry on."
+                )
+            } else {
+                if (pinCover.isShowing) Log.i(TAG, "pin cover down ($current, pinned=$pinned)")
+                pinCover.hide()
+                if (verdict != GateVerdict.ALLOW) {
+                    wall(current, killAfter = verdict != GateVerdict.WAIT) { wallIntent(current, verdict, limit) }
+                }
             }
             delay(POLL_MILLIS)
         }
@@ -417,7 +524,12 @@ class AppBlockService : Service() {
     ): GateVerdict {
         val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
         return gateVerdict(
-            essential = current in untouchable,
+            // Settings is the one essential app a focus session walls
+            // (2026-11-04, "once focus starts you can't run away"): it is where
+            // grants, defaults and the date live. Calls, the home screen and
+            // the quick-settings shade stay usable.
+            essential = current in untouchable &&
+                !(current in FOCUS_WALLED_ESSENTIALS && anySessionActive()),
             focusSessionActive = anySessionActive(),
             onFocusList = current in focusList,
             capSpent = capSpent,
@@ -522,20 +634,56 @@ class AppBlockService : Service() {
      */
     private fun walledNow(pkg: String): Boolean {
         if (pkg == packageName) return false
+        val verdict = standingVerdict(pkg, hasPass = false)
+        return verdict != GateVerdict.ALLOW && verdict != GateVerdict.WAIT
+    }
+
+    /**
+     * [pkg]'s verdict were it opened now, without measuring: a cap or budget
+     * counts only once [watch] has found it spent today.
+     */
+    private fun standingVerdict(pkg: String, hasPass: Boolean): GateVerdict {
         val gated = gatedCache.getOrPut(pkg) {
             AppGate.isGated(this, pkg, untouchable, browsers, rules.gateBrowsers)
         }
         val capMinutes = blockedLimits[pkg]?.minutes
         val spentAt = spentToday[pkg]
         val budget = rules.dailyBudgetMinutes
-        val verdict = verdictFor(
+        return verdictFor(
             current = pkg,
             gated = gated,
-            hasPass = false,
+            hasPass = hasPass,
             capSpent = capMinutes != null && spentAt != null && capMinutes <= spentAt,
             budgetSpent = gated && budget > 0 && budgetSpentAgainst?.let { budget <= it } == true
         )
-        return verdict != GateVerdict.ALLOW && verdict != GateVerdict.WAIT
+    }
+
+    /**
+     * Holds every waiting or capped app SUSPENDED while it stands behind any
+     * wall or the wait (2026-11-04), so it cannot be opened at all — not from
+     * its icon, Recents, a pop-up window or a link. The wait's way in is the
+     * WakeProof home screen's [GateActivity], which lifts the hold as it grants
+     * the pass; when the visit ends, the pass goes and the hold comes back.
+     * See [com.ogenrwotdaniel.wakeproof.admin.AppCloser]. Changes only, so a
+     * steady state costs no system calls.
+     */
+    private fun syncSuspensions() {
+        if (!rulesLoaded || !limitsLoaded) return
+        if (!AppCloser.available(this)) return
+        val held = AppCloser.held(this)
+        val shutAll = historyOn
+        for (pkg in allGated + blockedLimits.keys + quarantined + held) {
+            val want = holdSuspended(
+                neverSuspend = pkg == packageName || pkg in neverSuspend,
+                verdict = standingVerdict(pkg, hasPass = GatePasses.isValid(pkg)),
+                forced = pkg in quarantined || (shutAll && (pkg in allGated || pkg in blockedLimits))
+            )
+            if (want && pkg !in held) {
+                AppCloser.hold(this, pkg)
+            } else if (!want && pkg in held) {
+                AppCloser.release(this, pkg)
+            }
+        }
     }
 
     /**
@@ -598,11 +746,15 @@ class AppBlockService : Service() {
     private fun refreshAllGated() {
         scope.launch {
             val gateBrowsers = rules.gateBrowsers
-            allGated = runCatching {
-                usageRepository.installedApps().map { it.packageName }.filter {
-                    AppGate.isGated(this@AppBlockService, it, untouchable, browsers, gateBrowsers)
-                }.toSet()
-            }.getOrDefault(emptySet())
+            val installed = runCatching {
+                usageRepository.installedApps().map { it.packageName }.toSet()
+            }.getOrNull() ?: return@launch
+            allGated = installed.filter {
+                AppGate.isGated(this@AppBlockService, it, untouchable, browsers, gateBrowsers)
+            }.toSet()
+            NewAppQuarantine.observe(this@AppBlockService, installed)
+            quarantined = NewAppQuarantine.quarantined(this@AppBlockService)
+                .filter { it in installed }.toSet()
         }
     }
 
@@ -641,6 +793,83 @@ class AppBlockService : Service() {
     }
 
     /**
+     * Holds every waiting, capped and new app; for when nothing can be judged
+     * any more. During a focus session, EVERY app off the focus list too — the
+     * focus wall covers them all, and losing the grant must not be the way
+     * out of a session. The home screen's permanent tools (dialer, camera,
+     * clock, calendar…) are spared. Released by [syncSuspensions] once the
+     * grant is back and this service runs again.
+     */
+    private fun holdEverything() {
+        if (!AppCloser.available(this)) return
+        val inSession = anySessionActive()
+        val everyApp = if (inSession) {
+            runCatching {
+                packageManager.queryIntentActivities(
+                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+                ).map { it.activityInfo.packageName }.toSet()
+            }.getOrDefault(emptySet()) - focusList -
+                com.ogenrwotdaniel.wakeproof.launcher.permanentPackages(this).toSet()
+        } else {
+            emptySet()
+        }
+        (allGated + blockedLimits.keys + quarantined + everyApp)
+            .filter { it != packageName && it !in neverSuspend }
+            .forEach { AppCloser.hold(this, it) }
+    }
+
+    /**
+     * Pauses media a walled or held app is still playing (2026-11-04): a
+     * video dropped into picture-in-picture or playing in the background
+     * outlived the visit it was opened on. Needs notification access, which
+     * the notification guard already holds; without it this does nothing.
+     */
+    private fun pauseWalledMedia() {
+        val sessions = runCatching {
+            getSystemService(MediaSessionManager::class.java)
+                .getActiveSessions(ComponentName(this, WindowNotificationGuard::class.java))
+        }.getOrNull() ?: return
+        val held = AppCloser.held(this)
+        sessions.forEach { controller ->
+            val pkg = controller.packageName
+            val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+            if (playing && pkg != packageName && (pkg in held || walledNow(pkg))) {
+                Log.i(TAG, "pausing $pkg's media")
+                runCatching { controller.transportControls.pause() }
+            }
+        }
+    }
+
+    /**
+     * Closes [pkg] where it is still on screen beside its wall (pop-up, split
+     * screen, pin) — see [AppCloser]. Returns whether that is possible here;
+     * false means the overlay cover is the only defence left.
+     */
+    private fun closeBesideWall(pkg: String): Boolean {
+        if (!AppCloser.available(this)) return false
+        // Never suspend Settings or the like, even for 1.5 s; the cover will do.
+        if (pkg in neverSuspend) return false
+        if (closing.add(pkg)) {
+            scope.launch {
+                try {
+                    AppCloser.close(this@AppBlockService, pkg)
+                } finally {
+                    closing.remove(pkg)
+                }
+            }
+        }
+        return true
+    }
+
+    /**
+     * The user has a task screen-pinned. System-wide, not just WakeProof's own
+     * focus pin — that one has WakeProof in front and never reaches the check.
+     */
+    private fun userPinned(): Boolean = runCatching {
+        activityManager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_PINNED
+    }.getOrDefault(false)
+
+    /**
      * Throws [intent] in front of [packageName], once: the wall pauses the app,
      * so the next tick sees WakeProof in front and leaves it alone. The debounce
      * only covers the tick or two before the wall's own resume lands.
@@ -656,6 +885,9 @@ class AppBlockService : Service() {
                 coverWallAt = now
                 coverGraceUntil = 0L
                 killPending = killAfter
+                // A hard wall closes the app outright, so nothing of it is left
+                // to reach in a pop-up, split screen or Recents.
+                if (killAfter) closeBesideWall(packageName)
             }
             .onFailure { Log.w(TAG, "could not raise the wall over $packageName", it) }
     }
@@ -684,8 +916,13 @@ class AppBlockService : Service() {
         if (want != popupCover.isShowing) {
             Log.i(TAG, "popup cover ${if (want) "UP" else "down"} for $pkg (resumed=$resumed, age=${age}ms)")
         }
-        if (want) {
-            popupCover.show(usageRepository.appLabel(pkg)) {
+        if (want && closeBesideWall(pkg)) {
+            popupCover.hide()
+        } else if (want) {
+            popupCover.show(
+                "${usageRepository.appLabel(pkg)} is walled.\n\nClose its pop-up window to carry on.",
+                "Let me close it"
+            ) {
                 coverGraceUntil = SystemClock.elapsedRealtime() + COVER_GRACE_MILLIS
                 popupCover.hide()
             }
@@ -766,6 +1003,9 @@ class AppBlockService : Service() {
          * thread only, like the service's own loop.
          */
         fun walledNow(packageName: String): Boolean? = instance?.walledNow(packageName)
+
+        /** A session on another of the user's devices walls this one; false if not running. */
+        fun otherSessionActive(): Boolean = instance?.otherDeviceSessionActive() ?: false
         private const val CHANNEL_ID = "wakeproof_app_block_quiet"
         private const val LEGACY_CHANNEL_ID = "wakeproof_app_block"
         private const val NOTIFICATION_ID = 43
@@ -777,6 +1017,12 @@ class AppBlockService : Service() {
 
         /** How often queued loosenings are checked for landing. */
         private const val PROMOTE_EVERY_MILLIS = 5 * 60_000L
+        private const val MEDIA_CHECK_MILLIS = 2_000L
+
+        /** Essential apps that are nonetheless walled during a focus session. */
+        private val FOCUS_WALLED_ESSENTIALS = setOf("com.android.settings")
+        /** Not a public constant; read like any other secure setting. */
+        private const val NOTIFICATION_HISTORY_SETTING = "notification_history_enabled"
 
         /**
          * Foreground checks per tick. Halved from 1 s once the wait had to beat

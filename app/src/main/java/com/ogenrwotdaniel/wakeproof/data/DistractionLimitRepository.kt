@@ -127,6 +127,8 @@ class DistractionLimitRepository @Inject constructor(
      * the safe one. Returns true when anything changed.
      */
     suspend fun promoteDuePending(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        // A clock set by hand could be set forward a week (2026-11-04).
+        if (!com.ogenrwotdaniel.wakeproof.admin.DeviceLock.networkTime(context)) return false
         var changed = false
         dataStore.edit { prefs ->
             moveOntoWeek(prefs)

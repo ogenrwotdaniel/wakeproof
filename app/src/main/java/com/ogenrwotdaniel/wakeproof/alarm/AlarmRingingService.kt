@@ -10,8 +10,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.UserManager
@@ -49,6 +51,39 @@ class AlarmRingingService : Service() {
     private var player: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private var rampJob: Job? = null
+    private var volumeJob: Job? = null
+
+    /** Ringing a locked alarm: its own fade, and a volume that cannot be turned down. */
+    private var strictRing = false
+
+    /**
+     * The locked alarm cannot be turned down: the alarm stream is set to
+     * [STRICT_STREAM_FRACTION] of the maximum when it starts and put back
+     * every couple of seconds if lowered, and the device-wide mute is lifted
+     * where WakeProof is device owner. Not the maximum — the user lives in a
+     * shared flat (2026-11-04), and the full speaker would wake the others.
+     */
+    private suspend fun holdAlarmVolume() {
+        val audio = getSystemService(AudioManager::class.java)
+        val floor = runCatching {
+            strictStreamIndex(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM))
+        }.getOrDefault(0)
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, floor, 0) }
+        while (true) {
+            runCatching {
+                if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < floor) {
+                    audio.setStreamVolume(AudioManager.STREAM_ALARM, floor, 0)
+                }
+            }
+            runCatching {
+                if (com.ogenrwotdaniel.wakeproof.admin.DeviceLock.isDeviceOwner(this)) {
+                    getSystemService(android.app.admin.DevicePolicyManager::class.java)
+                        .setMasterVolumeMuted(com.ogenrwotdaniel.wakeproof.admin.DeviceLock.admin(this), false)
+                }
+            }
+            delay(VOLUME_HOLD_MILLIS)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -81,8 +116,20 @@ class AlarmRingingService : Service() {
         // previous playback down first or its looping MediaPlayer leaks and
         // keeps ringing forever after the service stops.
         stopRinging()
-        startRingtone()
+        ringing = true
+        strictRing = StrictAlarm.isStrictId(this, alarmId)
+        // Every alarm rings the bundled song (user's choice, 2026-11-04), not
+        // only the locked ones; the phone's alarm sound if none is bundled.
+        startRingtone(StrictAlarm.toneUri(this))
+        // The watch buzzes too; it cannot dismiss, only the phone can.
+        WearAlarmSync.push(this, ringing = true, strict = strictRing)
         startVibration()
+        if (StrictAlarm.isStrictId(this, alarmId)) {
+            // Resumed after a restart until verified, and never quiet.
+            if (StrictAlarm.pendingRing(this) != alarmId) StrictAlarm.markRinging(this, alarmId)
+            volumeJob?.cancel()
+            volumeJob = scope.launch { holdAlarmVolume() }
+        }
         launchRingingScreenIfDeviceInUse(alarmId)
         scope.launch {
             // Room is unreadable before the first unlock; keep the generic text then.
@@ -97,6 +144,8 @@ class AlarmRingingService : Service() {
     }
 
     override fun onDestroy() {
+        if (ringing) WearAlarmSync.push(this, ringing = false, strict = strictRing)
+        ringing = false
         scope.cancel()
         stopRinging()
         super.onDestroy()
@@ -134,8 +183,10 @@ class AlarmRingingService : Service() {
         vibrator = null
     }
 
-    private fun startRingtone() {
-        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+    /** [tone] overrides the phone's alarm sound; a locked alarm's own tone. */
+    private fun startRingtone(tone: Uri? = null) {
+        val uri = tone
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             ?: return
         val mediaPlayer = MediaPlayer()
@@ -146,10 +197,18 @@ class AlarmRingingService : Service() {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         )
-        mediaPlayer.setDataSource(this, uri)
+        val loaded = runCatching { mediaPlayer.setDataSource(this, uri) }.isSuccess
+        if (!loaded) {
+            // A bundled tone that cannot be read must not leave a silent alarm.
+            mediaPlayer.release()
+            player = null
+            if (tone != null) startRingtone(null)
+            return
+        }
         mediaPlayer.isLooping = true
         mediaPlayer.setOnPreparedListener { prepared ->
-            prepared.setVolume(RAMP_START_VOLUME, RAMP_START_VOLUME)
+            val start = if (strictRing) STRICT_RAMP_START_VOLUME else RAMP_START_VOLUME
+            prepared.setVolume(start, start)
             prepared.start()
             rampJob = scope.launch { rampVolume(prepared) }
         }
@@ -157,9 +216,11 @@ class AlarmRingingService : Service() {
     }
 
     private suspend fun rampVolume(mediaPlayer: MediaPlayer) {
+        val start = if (strictRing) STRICT_RAMP_START_VOLUME else RAMP_START_VOLUME
+        val duration = if (strictRing) STRICT_RAMP_DURATION_MS else RAMP_DURATION_MS
         for (step in 1..RAMP_STEPS) {
-            delay(RAMP_DURATION_MS / RAMP_STEPS)
-            val volume = RAMP_START_VOLUME + (1f - RAMP_START_VOLUME) * step / RAMP_STEPS
+            delay(duration / RAMP_STEPS)
+            val volume = start + (1f - start) * step / RAMP_STEPS
             // The player may be released while we sleep; ignore late failures.
             runCatching { mediaPlayer.setVolume(volume, volume) }
         }
@@ -225,6 +286,14 @@ class AlarmRingingService : Service() {
         private const val RAMP_START_VOLUME = 0.3f
         private const val RAMP_DURATION_MS = 60_000L
         private const val RAMP_STEPS = 30
+        private const val VOLUME_HOLD_MILLIS = 2_000L
+        /** A locked alarm's fade: louder sooner, since it cannot be snoozed anyway. */
+        private const val STRICT_RAMP_START_VOLUME = 0.6f
+        private const val STRICT_RAMP_DURATION_MS = 20_000L
+
+        /** A ring is playing in this process; see [StrictAlarm.resumeIfPending]. */
+        @Volatile var ringing = false
+            private set
 
         fun start(context: Context, alarmId: Long, mission: String? = null) {
             context.startForegroundService(

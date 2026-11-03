@@ -38,7 +38,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.data.DayOutcome
 import com.ogenrwotdaniel.wakeproof.data.DayStat
 import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
@@ -66,7 +65,6 @@ fun HomeScreen(
     onOpenAgenda: () -> Unit,
     onOpenFlashcards: () -> Unit,
     onOpenForest: () -> Unit,
-    onOpenCorpusCapture: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -85,7 +83,6 @@ fun HomeScreen(
         viewModel.refreshGrants()
         onPauseOrDispose { }
     }
-    var testArmed by remember { mutableStateOf(false) }
     var addingExam by remember { mutableStateOf(false) }
 
     val activity = LocalActivity.current
@@ -220,48 +217,6 @@ fun HomeScreen(
             NavigationRow("Screen time", "Usage and daily app limits", onOpenUsage)
             NavigationRow("Settings", "Alarms, focus, sync, data", onOpenSettings)
             NavigationRow("Setup check", "Permissions and reliability", onOpenOnboarding)
-
-            if (BuildConfig.DEBUG) {
-                Text(
-                    text = "Developer testing",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedButton(
-                    onClick = onOpenCorpusCapture,
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Water corpus capture") }
-                OutlinedButton(
-                    onClick = {
-                        viewModel.testFire(AlarmType.PUSHUP)
-                        testArmed = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Test-fire pushup alarm (10 s)") }
-                OutlinedButton(
-                    onClick = {
-                        viewModel.testFire(AlarmType.WATER)
-                        testArmed = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Test-fire water alarm (10 s)") }
-                // Borrows the pushup alarm and swaps its mission, so trying the
-                // math flow creates no MATH row for older builds to choke on.
-                OutlinedButton(
-                    onClick = {
-                        viewModel.testFire(AlarmType.PUSHUP, mission = AlarmType.MATH)
-                        testArmed = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Test-fire math alarm (10 s)") }
-                if (testArmed) {
-                    Text(
-                        text = "Armed — lock your phone now to test the lock-screen wake.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
-                }
-            }
         }
     }
 

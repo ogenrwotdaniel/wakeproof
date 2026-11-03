@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -115,6 +116,10 @@ fun SettingsScreen(
                 )
             }
             alarms.forEach { alarm ->
+                if (alarm.syncId in viewModel.strictAlarmSyncIds) {
+                    LockedAlarmRow(alarm)
+                    return@forEach
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -919,4 +924,30 @@ private fun TimePickerDialog(
         },
         text = { TimePicker(state = state) }
     )
+}
+
+/**
+ * The [StrictAlarm]: shown, never editable — no time picker, switch, delete or
+ * day chips. The view model refuses the same changes, and a change reaching the
+ * row any other way is written back.
+ */
+@Composable
+private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp)) {
+        Text(
+            text = formatAlarmTime(LocalContext.current, alarm.hour, alarm.minute),
+            style = MaterialTheme.typography.headlineSmall
+        )
+        Text(
+            text = alarm.label.ifBlank { "Locked" } + " · ${StrictAlarm.REPS} pushups · every day",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
+                "no emergency dismiss, and keeps ringing after a restart until it is done.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }

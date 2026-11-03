@@ -1,5 +1,8 @@
 package com.ogenrwotdaniel.wakeproof.ui.alarm
 
+import android.content.Context
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
+import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
@@ -28,6 +31,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AlarmRingingViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
     private val snoozeStore: SnoozeStore,
@@ -36,6 +40,11 @@ class AlarmRingingViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val alarmId = MutableStateFlow(-1L)
+
+    private val _strict = MutableStateFlow(false)
+
+    /** The ringing alarm is the [StrictAlarm]: no snooze, no emergency dismiss. */
+    val strict: StateFlow<Boolean> = _strict
 
     private val _snoozesLeft = MutableStateFlow(SnoozeStore.MAX_PER_DAY)
 
@@ -57,7 +66,8 @@ class AlarmRingingViewModel @Inject constructor(
     fun setAlarmId(id: Long, mission: String? = null) {
         missionOverride.value = mission?.let { name -> AlarmType.entries.firstOrNull { it.name == name } }
         alarmId.value = id
-        _snoozesLeft.value = if (id == -1L) 0 else snoozeStore.remaining(id)
+        _strict.value = StrictAlarm.isStrictId(context, id)
+        _snoozesLeft.value = if (id == -1L || _strict.value) 0 else snoozeStore.remaining(id)
     }
 
     /**
@@ -72,7 +82,7 @@ class AlarmRingingViewModel @Inject constructor(
      */
     fun snooze(onSnoozed: () -> Unit) {
         val id = alarmId.value
-        if (id == -1L || _snoozesLeft.value <= 0) return
+        if (id == -1L || _snoozesLeft.value <= 0 || _strict.value) return
         _snoozesLeft.value = snoozeStore.record(id)
         scheduler.scheduleSnooze(id, SnoozeStore.SNOOZE_MINUTES)
         onSnoozed()
@@ -91,8 +101,13 @@ class AlarmRingingViewModel @Inject constructor(
             alarmId.value.takeIf { it != -1L }?.let { id ->
                 // Never let a storage failure (e.g. pre-unlock) keep the alarm ringing.
                 runCatching { repository.markCompletedToday(id) }
-                val wantsCheck = runCatching { settingsRepository.settings.first().wakeUpCheck }
-                    .getOrDefault(false)
+                // Done: a restart no longer brings it back.
+                if (StrictAlarm.isStrictId(context, id)) StrictAlarm.clearRinging(context)
+                // The locked alarm always gets the "Still up?" check: twenty
+                // pushups and straight back to bed would be a way around it.
+                val wantsCheck = _strict.value ||
+                    runCatching { settingsRepository.settings.first().wakeUpCheck }
+                        .getOrDefault(false)
                 if (wantsCheck && wakeCheckStore.claimToday(id)) scheduler.scheduleWakeCheck(id)
             }
             onDone()

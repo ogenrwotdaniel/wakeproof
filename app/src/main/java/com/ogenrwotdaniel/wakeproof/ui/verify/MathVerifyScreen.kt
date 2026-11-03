@@ -70,9 +70,11 @@ fun MathVerifyScreen(
     snoozesLeft: Int,
     onSnooze: () -> Unit,
     modifier: Modifier = Modifier,
+    strict: Boolean = false,
     viewModel: MathVerifyViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(strict) { viewModel.setStrict(strict) }
     val haptics = LocalHapticFeedback.current
     val shake = remember { Animatable(0f) }
 

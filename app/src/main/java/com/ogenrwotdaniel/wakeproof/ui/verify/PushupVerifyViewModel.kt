@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.verify
 
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -44,7 +45,9 @@ class PushupVerifyViewModel @Inject constructor(
         val motivation: String? = null,
         val emergencyAvailable: Boolean = false,
         val emergencyHoldSeconds: Int = 60,
-        val resets: Int = 0
+        val resets: Int = 0,
+        /** The camera cannot be used; a locked alarm offers sums instead. */
+        val cameraUnavailable: Boolean = false
     )
 
     private val counter = PushupCounter()
@@ -55,12 +58,24 @@ class PushupVerifyViewModel @Inject constructor(
     private var lastPoseAt = startedAt
     private var resetAppliedForThisGap = false
 
+    /** Ringing the [StrictAlarm]: at least its reps, and no emergency dismiss. */
+    @Volatile private var strict = false
+
+    fun setStrict(value: Boolean) {
+        if (!value || strict) return
+        strict = true
+        _uiState.update {
+            it.copy(target = maxOf(it.target, StrictAlarm.REPS), emergencyAvailable = false)
+        }
+    }
+
     init {
         viewModelScope.launch {
             val settings = settingsRepository.settings.first()
             _uiState.update {
                 it.copy(
-                    target = settings.pushupTarget,
+                    target = if (strict) maxOf(settings.pushupTarget, StrictAlarm.REPS)
+                    else settings.pushupTarget,
                     emergencyHoldSeconds = settings.emergencyHoldSeconds
                 )
             }
@@ -74,8 +89,10 @@ class PushupVerifyViewModel @Inject constructor(
                     counter.reset()
                     _uiState.update { it.copy(reps = 0, resets = it.resets + 1) }
                 }
-                val emergency = _uiState.value.resets >= MAX_RESETS ||
-                    now - startedAt > EMERGENCY_AFTER_MS
+                val emergency = !strict && (
+                    _uiState.value.resets >= MAX_RESETS ||
+                        now - startedAt > EMERGENCY_AFTER_MS
+                    )
                 if (emergency != _uiState.value.emergencyAvailable) {
                     _uiState.update { it.copy(emergencyAvailable = emergency) }
                 }
@@ -106,7 +123,7 @@ class PushupVerifyViewModel @Inject constructor(
 
     /** Camera permission denied ⇒ verification is impossible; open the escape hatch. */
     fun onCameraUnavailable() {
-        _uiState.update { it.copy(emergencyAvailable = true) }
+        _uiState.update { it.copy(emergencyAvailable = !strict, cameraUnavailable = true) }
     }
 
     fun logSkipped(onDone: () -> Unit) {

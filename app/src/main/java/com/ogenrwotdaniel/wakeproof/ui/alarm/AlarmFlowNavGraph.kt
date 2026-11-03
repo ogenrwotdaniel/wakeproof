@@ -33,6 +33,7 @@ fun AlarmFlowNavGraph(
     val navController = rememberNavController()
     val alarm by viewModel.alarm.collectAsStateWithLifecycle()
     val snoozesLeft by viewModel.snoozesLeft.collectAsStateWithLifecycle()
+    val strict by viewModel.strict.collectAsStateWithLifecycle()
 
     NavHost(navController = navController, startDestination = AlarmRingingRoute()) {
         composable<AlarmRingingRoute> {
@@ -53,7 +54,9 @@ fun AlarmFlowNavGraph(
                 onFinish = onFinish,
                 onEmergencyDismiss = onEmergencyDismiss,
                 snoozesLeft = snoozesLeft,
-                onSnooze = { viewModel.snooze(onSnooze) }
+                onSnooze = { viewModel.snooze(onSnooze) },
+                strict = strict,
+                onCameraFallback = { navController.navigate(MathVerifyRoute) }
             )
         }
         composable<MathVerifyRoute> {
@@ -62,7 +65,8 @@ fun AlarmFlowNavGraph(
                 onFinish = onFinish,
                 onEmergencyDismiss = onEmergencyDismiss,
                 snoozesLeft = snoozesLeft,
-                onSnooze = { viewModel.snooze(onSnooze) }
+                onSnooze = { viewModel.snooze(onSnooze) },
+                strict = strict
             )
         }
         composable<WaterVerifyRoute> {

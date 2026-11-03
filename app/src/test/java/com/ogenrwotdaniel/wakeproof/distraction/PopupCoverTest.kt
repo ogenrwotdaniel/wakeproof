@@ -36,4 +36,34 @@ class PopupCoverTest {
         assertFalse(wanted(grace = true))
         assertFalse(wanted(inFront = false))
     }
+
+    @Test
+    fun `a pinned app that would be walled is covered, whatever the wall`() {
+        GateVerdict.entries.filter { it != GateVerdict.ALLOW }.forEach {
+            assertTrue(it.name, pinCoverWanted(userPinned = true, verdict = it))
+        }
+    }
+
+    @Test
+    fun `the pin cover never covers an allowed app or an unpinned one`() {
+        assertFalse(pinCoverWanted(userPinned = true, verdict = GateVerdict.ALLOW))
+        GateVerdict.entries.forEach {
+            assertFalse(it.name, pinCoverWanted(userPinned = false, verdict = it))
+        }
+    }
+
+    @Test
+    fun `a waiting or walled app is held suspended, an allowed one is not`() {
+        GateVerdict.entries.filter { it != GateVerdict.ALLOW }.forEach {
+            assertTrue(it.name, holdSuspended(neverSuspend = false, verdict = it))
+        }
+        assertFalse(holdSuspended(neverSuspend = false, verdict = GateVerdict.ALLOW))
+    }
+
+    @Test
+    fun `the keyboard, SMS and essentials are never suspended`() {
+        GateVerdict.entries.forEach {
+            assertFalse(it.name, holdSuspended(neverSuspend = true, verdict = it))
+        }
+    }
 }

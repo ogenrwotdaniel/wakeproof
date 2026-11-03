@@ -5,6 +5,9 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.UserManager
+import com.ogenrwotdaniel.wakeproof.launcher.LauncherActivity
 import android.util.Log
 
 /**
@@ -40,11 +43,67 @@ object DeviceLock {
     fun isDeviceOwner(context: Context): Boolean =
         runCatching { dpm(context).isDeviceOwnerApp(context.packageName) }.getOrDefault(false)
 
-    /** Makes sure uninstalling is blocked. Idempotent; called on enable and every app start. */
+    /**
+     * The phone-wide restrictions, by the user's choice (2026-11-04, after an
+     * audit of the routes around the walls; they green-lit everything but
+     * blocking USB debugging, which is how updates are installed):
+     *  - safe mode, where WakeProof does not run but the browsers do;
+     *  - the clock: automatic time and time zone are forced on and the user
+     *    cannot change them, or setting it forward a week would land every
+     *    queued loosening and shift every time window;
+     *  - new users, guest, work and clone profiles, where none of this applies;
+     *  - default apps, so the home screen stays WakeProof's and no chat app
+     *    becomes the never-walled SMS app;
+     *  - factory reset from Settings (recovery mode cannot be blocked).
+     * All of it goes with device owner when [release] gives that up.
+     */
+    private val RESTRICTIONS = listOf(
+        UserManager.DISALLOW_SAFE_BOOT,
+        UserManager.DISALLOW_CONFIG_DATE_TIME,
+        UserManager.DISALLOW_ADD_USER,
+        UserManager.DISALLOW_USER_SWITCH,
+        UserManager.DISALLOW_ADD_MANAGED_PROFILE,
+        // UserManager.DISALLOW_ADD_CLONE_PROFILE is @hide; Dual Messenger-style clones.
+        "no_add_clone_profile",
+        UserManager.DISALLOW_CONFIG_DEFAULT_APPS,
+        UserManager.DISALLOW_FACTORY_RESET
+    )
+
+    /**
+     * Makes sure uninstalling is blocked and the [RESTRICTIONS] stand.
+     * Idempotent; called on enable and every app start. Each step on its own,
+     * so one refused does not leave the rest unapplied.
+     */
     fun enforce(context: Context) {
         if (!isDeviceOwner(context)) return
-        runCatching { dpm(context).setUninstallBlocked(admin(context), context.packageName, true) }
-            .onFailure { Log.w(TAG, "could not block uninstall", it) }
+        val dpm = dpm(context)
+        val admin = admin(context)
+        step("block uninstall") { dpm.setUninstallBlocked(admin, context.packageName, true) }
+        RESTRICTIONS.forEach { step(it) { dpm.addUserRestriction(admin, it) } }
+        // Revoking the camera was a way to open the emergency dismiss on a
+        // pushup alarm; the locked alarm has none, so it is held granted.
+        step("camera") {
+            dpm.setPermissionGrantState(
+                admin, context.packageName, android.Manifest.permission.CAMERA,
+                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+            )
+        }
+        step("auto time") { dpm.setAutoTimeEnabled(admin, true) }
+        step("auto time zone") { dpm.setAutoTimeZoneEnabled(admin, true) }
+        step("home") {
+            dpm.addPersistentPreferredActivity(
+                admin,
+                IntentFilter(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    addCategory(Intent.CATEGORY_DEFAULT)
+                },
+                ComponentName(context, LauncherActivity::class.java)
+            )
+        }
+    }
+
+    private inline fun step(what: String, block: () -> Unit) {
+        runCatching(block).onFailure { Log.w(TAG, "could not enforce $what", it) }
     }
 
     private fun prefs(context: Context) = context.createDeviceProtectedStorageContext()

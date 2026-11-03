@@ -80,8 +80,27 @@ object AppGate {
         // Messaging
         "com.whatsapp", WHATSAPP_BUSINESS, "com.facebook.orca", "org.telegram.messenger",
         "org.telegram.messenger.web", "org.thoughtcrime.securesms", "com.discord",
-        "com.kakao.talk", "jp.naver.line.android", "com.tencent.mm", "com.viber.voip"
+        "com.kakao.talk", "jp.naver.line.android", "com.tencent.mm", "com.viber.voip",
+        // Feeds the audit found ungated (2026-11-04). The Google app (Discover)
+        // is left alone on purpose: Gemini runs through it and the user relies
+        // on Gemini for questions.
+        "com.google.android.apps.youtube.music", "com.google.android.apps.youtube.kids",
+        "com.samsung.android.app.spage", "com.samsung.android.tvplus",
+        "net.daum.android.daum", "com.nhn.android.search",
+        // The store itself: a new feed is one install away.
+        PLAY_STORE,
+        // Alternative clients for the apps above.
+        "org.schabi.newpipe", "app.revanced.android.youtube", "app.rvx.android.youtube",
+        "xyz.blueskyweb.app", "org.joinmastodon.android", "ml.docilealligator.infinityforreddit"
     )
+
+    const val PLAY_STORE = "com.android.vending"
+
+    /**
+     * Gated but never SUSPENDED: suspending the Play Store would stall every
+     * app's updates and licence checks. It is walled the ordinary way.
+     */
+    val NEVER_SUSPEND = setOf(PLAY_STORE)
 
     /**
      * Browsers, named outright for the same reason as [KNOWN_GATED_PACKAGES];
@@ -92,7 +111,7 @@ object AppGate {
         "org.mozilla.firefox", "com.brave.browser", "com.opera.browser",
         "com.opera.mini.native", "com.microsoft.emmx", "com.duckduckgo.mobile.android",
         "com.vivaldi.browser", "com.kiwibrowser.browser", "com.naver.whale",
-        "com.UCMobile.intl"
+        "com.UCMobile.intl", "org.mozilla.focus", "org.mozilla.fenix"
     )
 
     /**
@@ -259,3 +278,13 @@ fun gateVerdict(
     !hasPass -> GateVerdict.WAIT
     else -> GateVerdict.ALLOW
 }
+
+/**
+ * Pure: whether a waiting or capped app is held suspended
+ * (`AppBlockService.syncSuspensions`). The wait counts — a suspended app is
+ * reached only through the wait screen, which lifts the hold with the pass.
+ * [forced] holds whatever the verdict: an app in its first week
+ * ([NewAppQuarantine]), or every waiting app while notification history is on.
+ */
+fun holdSuspended(neverSuspend: Boolean, verdict: GateVerdict, forced: Boolean = false): Boolean =
+    !neverSuspend && (forced || verdict != GateVerdict.ALLOW)

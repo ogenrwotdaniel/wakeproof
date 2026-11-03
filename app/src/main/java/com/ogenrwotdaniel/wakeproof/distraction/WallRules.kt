@@ -108,7 +108,7 @@ data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
  * every way of loosening the phone, so none is the easy one.
  */
 @Singleton
-class WallRulesRepository @Inject constructor(@ApplicationContext context: Context) {
+class WallRulesRepository @Inject constructor(@ApplicationContext private val context: Context) {
 
     private val dataStore = context.wallRulesDataStore
 
@@ -157,6 +157,8 @@ class WallRulesRepository @Inject constructor(@ApplicationContext context: Conte
 
     /** Lands every queued loosening whose week is over. True when anything changed. */
     suspend fun promoteDue(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        // A clock set by hand could be set forward a week (2026-11-04).
+        if (!com.ogenrwotdaniel.wakeproof.admin.DeviceLock.networkTime(context)) return false
         var changed = false
         dataStore.edit { prefs ->
             val pending = parsePendingRules(prefs[PENDING] ?: emptySet())

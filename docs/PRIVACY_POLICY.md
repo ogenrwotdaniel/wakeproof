@@ -40,7 +40,9 @@ app:
   while one of your walls keeps it shut — outside your open hours, during a
   focus session, at bedtime, or once its daily limit is spent. It looks
   only at which app posted a notification, never at its content, and stores
-  and sends nothing.
+  and sends nothing. The same access lets it pause media that a walled app is
+  still playing (for example a video left in picture-in-picture); for that it
+  reads only which app is playing and whether it is playing.
 - **Calendar events.** With your permission, WakeProof reads event titles and
   times from your device calendar to show your agenda — in the app, and on the
   WakeProof home screen if you use it — to remind you five minutes before an
@@ -134,7 +136,7 @@ network requests at all** — and water verification still works, on the device.
 | Usage access (special) | Showing you your own screen-time stats, applying the daily app limits you set (notify, or block for the rest of the day), the five-minute wait before social, video and messaging apps, and keeping apps outside your focus list shut during a focus session |
 | Display over other apps (special) | The floating Pomodoro timer bubble, the block, wait and focus-session screens shown over other apps, opening the alarm screen while you use other apps, and covering an app left open in a pop-up window while it is walled |
 | Do Not Disturb access (special) | Turning on Do Not Disturb (priority mode) for a focus session, on every device the session walls, and restoring it afterwards |
-| Notification access (special) | Removing notifications from apps while a wall keeps them shut; only the posting app is looked at, never the content |
+| Notification access (special) | Removing notifications from apps while a wall keeps them shut, and pausing media a walled app is still playing; only the app and whether it is playing are looked at, never the content |
 | Calendar (read) | Showing your agenda so you can tick events off, event reminders, focus sessions timed to an event |
 | Home app (role, optional) | Only if you choose WakeProof as your home screen in Settings; switch back any time in Android's default-apps settings |
 | Internet | Only for the optional cloud sync and AI features above |

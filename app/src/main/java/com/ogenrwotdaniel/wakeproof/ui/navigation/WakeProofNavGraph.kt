@@ -36,7 +36,6 @@ fun WakeProofNavGraph(
                     onOpenAgenda = { navController.navigate(AgendaRoute) },
                     onOpenFlashcards = { navController.navigate(FlashcardsRoute) },
                     onOpenForest = { navController.navigate(ForestRoute) },
-                    onOpenCorpusCapture = { navController.navigate(CorpusCaptureRoute) }
                 )
             }
             composable<OnboardingRoute> {

@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.verify
 
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -69,9 +70,26 @@ fun PushupVerifyScreen(
     snoozesLeft: Int,
     onSnooze: () -> Unit,
     modifier: Modifier = Modifier,
+    strict: Boolean = false,
+    onCameraFallback: () -> Unit = {},
     viewModel: PushupVerifyViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(strict) { viewModel.setStrict(strict) }
+    // The ringtone quietens as the reps come in, and is full again if the
+    // counter resets. Nothing is touched before the first rep, so the
+    // alarm's own fade-in is left alone until then.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var repsStarted by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.reps, state.target, state.verified) {
+        if (state.verified) return@LaunchedEffect
+        if (state.reps > 0) repsStarted = true
+        if (repsStarted) {
+            com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService.setVolume(
+                context, com.ogenrwotdaniel.wakeproof.alarm.pushupRingVolume(state.reps, state.target)
+            )
+        }
+    }
     val cameraPermission = rememberPermissionState(android.Manifest.permission.CAMERA)
 
     LaunchedEffect(Unit) {
@@ -99,11 +117,22 @@ fun PushupVerifyScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Camera permission is required to count pushups. " +
-                            "Grant it, or use the emergency dismiss below.",
+                        text = if (strict) {
+                            "The camera can't be used, so this alarm wants " +
+                                "${StrictAlarm.MATH_FALLBACK_PROBLEMS} sums in a row instead."
+                        } else {
+                            "Camera permission is required to count pushups. " +
+                                "Grant it, or use the emergency dismiss below."
+                        },
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyLarge
                     )
+                    if (strict) {
+                        androidx.compose.material3.Button(
+                            onClick = onCameraFallback,
+                            modifier = Modifier.padding(top = 16.dp)
+                        ) { Text("Solve the sums") }
+                    }
                 }
             }
 

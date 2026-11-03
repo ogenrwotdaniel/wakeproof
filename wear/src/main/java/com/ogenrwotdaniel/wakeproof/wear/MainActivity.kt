@@ -125,6 +125,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // The backup for the phone's locked alarms, in case boot never re-armed it.
         BackupAlarm.arm(this)
+        scope.launch { BackupAlarm.pull(applicationContext) }
 
         textView = TextView(this).apply {
             gravity = Gravity.CENTER

@@ -9,7 +9,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
+import android.net.Uri
 import com.google.android.gms.wearable.DataMap
+import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -57,6 +61,23 @@ object BackupAlarm {
         val minutes = map?.getIntegerArrayList(AlarmScheduleContract.KEY_MINUTES).orEmpty()
         prefs(context).edit().putString(KEY_MINUTES, minutes.joinToString(",")).commit()
         arm(context)
+    }
+
+    /**
+     * Reads the schedule the phone last put, instead of waiting for a change.
+     * A DataItem raises its event once: one that arrived while an older watch
+     * build (which ignored it) was installed would otherwise never be seen.
+     */
+    suspend fun pull(context: Context) {
+        runCatching {
+            val items = Wearable.getDataClient(context)
+                .getDataItems(Uri.parse("wear://*" + AlarmScheduleContract.PATH)).await()
+            try {
+                items.firstOrNull()?.let { onSchedule(context, DataMapItem.fromDataItem(it).dataMap) }
+            } finally {
+                items.release()
+            }
+        }.onFailure { Log.w(TAG, "could not read the alarm schedule", it) }
     }
 
     /** The phone said it is ringing: the backup for this slot stands down. */

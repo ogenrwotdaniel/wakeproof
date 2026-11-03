@@ -18,10 +18,10 @@ import android.util.Log
  * that use device-admin powers to block their own removal, and the sideloaded
  * build is the one this is for.
  *
- * The one way out short of a reset is a release that waits 24 hours
- * ([RELEASE_DELAY_MILLIS]) after it is asked for — long enough that it is
- * never the answer to an impulse, the same idea as the week a looser limit
- * waits. Asking again restarts nothing; cancelling and asking again does.
+ * The one way out short of a reset is a release that waits 90 days
+ * ([RELEASE_DELAY_MILLIS]) after it is asked for (24 hours until 2026-11-03,
+ * when the user asked for three months: "I want just to recover my time") —
+ * long enough that it is never the answer to an impulse. Asking again restarts nothing; cancelling and asking again does.
  * The request lives in device-protected storage so a reboot neither loses
  * nor resets it.
  */
@@ -30,7 +30,8 @@ object DeviceLock {
     private const val PREFS = "device_lock"
     private const val KEY_REQUESTED_AT = "release_requested_at"
 
-    const val RELEASE_DELAY_MILLIS = 24 * 60 * 60 * 1000L
+    const val RELEASE_DELAY_DAYS = 90
+    const val RELEASE_DELAY_MILLIS = RELEASE_DELAY_DAYS * 24 * 60 * 60 * 1000L
 
     fun admin(context: Context) = ComponentName(context, WakeProofAdmin::class.java)
 
@@ -53,7 +54,7 @@ object DeviceLock {
     fun requestedAt(context: Context): Long? =
         prefs(context).getLong(KEY_REQUESTED_AT, 0L).takeIf { it > 0L }
 
-    /** Starts the 24-hour wait, unless one is already running. */
+    /** Starts the [RELEASE_DELAY_DAYS]-day wait, unless one is already running. */
     fun requestRelease(context: Context, now: Long = System.currentTimeMillis()) {
         if (requestedAt(context) != null) return
         prefs(context).edit().putLong(KEY_REQUESTED_AT, now).commit()
@@ -61,7 +62,7 @@ object DeviceLock {
 
     /**
      * Automatic (network) time is on. The release requires it: otherwise
-     * setting the clock a day forward would be a 24-hour wait taking seconds.
+     * setting the clock forward would turn the wait into seconds.
      */
     fun networkTime(context: Context): Boolean = runCatching {
         android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.AUTO_TIME) == 1

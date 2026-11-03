@@ -36,7 +36,8 @@ object AppGate {
     const val PASS_LAUNCH_MILLIS = 10_000L
 
     /**
-     * WhatsApp Business, named for the home screen's permanent pin. Since
+     * WhatsApp Business. Off the home screen's permanent pins since 2026-11-03
+     * (user: "forget about being there for others"). Since
      * 2026-11-02 it is a waiting app like every other messenger (user's choice:
      * the same restrictions everywhere) — no exemption from the wait, no
      * one-hour cap of its own. It was exempt from the wait 2026-10-28, then

@@ -30,7 +30,7 @@ import kotlinx.coroutines.delay
 /**
  * "Uninstall lock": shown only while WakeProof is device owner
  * ([DeviceLock]). Says the app cannot be removed, and offers the one way out
- * that is not a factory reset — a release that waits 24 hours.
+ * that is not a factory reset — a release that waits [DeviceLock.RELEASE_DELAY_DAYS] days.
  */
 @Composable
 fun UninstallLockSection(modifier: Modifier = Modifier) {
@@ -49,7 +49,7 @@ fun UninstallLockSection(modifier: Modifier = Modifier) {
         Text("Uninstall lock", style = MaterialTheme.typography.titleMedium)
         Text(
             text = "WakeProof can't be uninstalled, force-stopped or cleared — only a " +
-                "factory reset removes it. Releasing the lock waits 24 hours after you ask.",
+                "factory reset removes it. Releasing the lock waits ${DeviceLock.RELEASE_DELAY_DAYS} days after you ask.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -58,13 +58,13 @@ fun UninstallLockSection(modifier: Modifier = Modifier) {
                 DeviceLock.requestRelease(context)
                 requestedAt = DeviceLock.requestedAt(context)
                 now = System.currentTimeMillis()
-            }) { Text("Ask to release (24 h)") }
+            }) { Text("Ask to release (${DeviceLock.RELEASE_DELAY_DAYS} days)") }
 
             ReleaseState.WAITING -> {
                 val at = Instant.ofEpochMilli((requestedAt ?: now) + DeviceLock.RELEASE_DELAY_MILLIS)
                     .atZone(ZoneId.systemDefault())
                 Text(
-                    text = "Release possible from ${at.format(DateTimeFormatter.ofPattern("EEE d MMM"))} " +
+                    text = "Release possible from ${at.format(DateTimeFormatter.ofPattern("EEE d MMM yyyy"))} " +
                         formatAlarmTime(context, at.hour, at.minute) + ".",
                     style = MaterialTheme.typography.bodyMedium
                 )

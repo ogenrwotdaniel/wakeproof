@@ -12,7 +12,8 @@ class ReleaseStateTest {
     }
 
     @Test
-    fun `the release waits a full day`() {
+    fun `the release waits the full ninety days`() {
+        assertEquals(90L * 24 * 60 * 60 * 1000, DeviceLock.RELEASE_DELAY_MILLIS)
         assertEquals(ReleaseState.WAITING, releaseState(1_000L, 1_000L + day - 1))
         assertEquals(ReleaseState.READY, releaseState(1_000L, 1_000L + day))
     }

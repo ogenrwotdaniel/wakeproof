@@ -203,6 +203,7 @@ fun HomeScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             WeekChart(week = week, goalMinutes = focusGoal)
+            MorningAlarmsWeek(week = week)
 
             // Six identical filled buttons stacked full-width gave every
             // destination the same weight, so the screen ended in a wall with
@@ -599,6 +600,59 @@ private fun FocusGoalCard(focusMinutes: Int, goalMinutes: Int, modifier: Modifie
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/**
+ * The locked morning alarms over the last 7 days (2026-11-04): pushup
+ * verifications against pushup alarms due, one cell per day. A schedule that
+ * has quietly stopped ringing shows up here as a row of misses, rather than as
+ * the one morning nobody woke. Past days are scored against today's schedule,
+ * like the rest of the stats.
+ */
+@Composable
+private fun MorningAlarmsWeek(week: List<DayStat>, modifier: Modifier = Modifier) {
+    if (week.none { it.pushupTarget > 0 }) return
+    val today = LocalDate.now().toEpochDay()
+    val locale = androidx.compose.ui.platform.LocalLocale.current.platformLocale
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val kept = week.count { it.pushupDone }
+            val due = week.count { it.pushupTarget > 0 && it.epochDay < today }
+            Text(text = "Morning alarms", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Done on $kept of the last ${week.size} days" +
+                    if (due > 0 && kept < due) " — check the misses below." else ".",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                week.forEach { day ->
+                    val date = LocalDate.ofEpochDay(day.epochDay)
+                    val label = if (day.epochDay == today) "Today" else
+                        date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, locale)
+                    val mark = when {
+                        day.pushupTarget == 0 -> "–"
+                        day.pushupDone -> "✓"
+                        day.epochDay == today -> "${day.pushupCount}/${day.pushupTarget}"
+                        else -> "✗ ${day.pushupCount}/${day.pushupTarget}"
+                    }
+                    val color = when {
+                        day.pushupDone -> MaterialTheme.colorScheme.primary
+                        day.pushupTarget > 0 && day.epochDay < today -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = mark, style = MaterialTheme.typography.bodyMedium, color = color)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }

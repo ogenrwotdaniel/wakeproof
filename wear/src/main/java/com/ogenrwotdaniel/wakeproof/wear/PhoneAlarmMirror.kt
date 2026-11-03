@@ -42,6 +42,8 @@ object PhoneAlarmMirror {
             stop(context)
             return
         }
+        // The phone is ringing, so the backup alarm stands down for this slot.
+        BackupAlarm.onPhoneRang(context, startedAt)
         val strict = map?.getBoolean(PhoneAlarmContract.KEY_STRICT) == true
         val reps = map?.getInt(PhoneAlarmContract.KEY_REPS) ?: 0
         val text = if (strict && reps > 0) "$reps pushups on your phone silence it." else "Verify on your phone to silence it."

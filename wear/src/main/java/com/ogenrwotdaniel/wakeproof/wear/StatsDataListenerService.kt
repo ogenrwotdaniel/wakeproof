@@ -30,6 +30,15 @@ class StatsDataListenerService : WearableListenerService() {
             }
             when (path) {
                 WearStatsPath.STATS -> refreshTile = true
+                // The locked times, for the watch's backup alarm.
+                AlarmScheduleContract.PATH -> BackupAlarm.onSchedule(
+                    this,
+                    if (event.type == DataEvent.TYPE_CHANGED) {
+                        DataMapItem.fromDataItem(event.dataItem).dataMap
+                    } else {
+                        null
+                    }
+                )
                 // The phone's alarm rings here too, as a buzz; see PhoneAlarmMirror.
                 PhoneAlarmContract.PATH -> PhoneAlarmMirror.onChanged(
                     this,

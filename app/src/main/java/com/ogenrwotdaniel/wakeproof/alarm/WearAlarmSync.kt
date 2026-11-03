@@ -29,6 +29,23 @@ object WearAlarmSync {
     const val KEY_REPS = "a_reps"
     const val KEY_STARTED_AT = "a_started_at"
 
+    const val SCHEDULE_PATH = "/wakeproof/alarm_schedule"
+    const val KEY_SCHEDULE_MINUTES = "s_minutes"
+
+    /**
+     * The locked alarms' times, for the watch's backup alarm: it rings by
+     * itself when the phone has not rung a couple of minutes after one. Put on
+     * every reconcile; an unchanged DataItem raises nothing on the watch.
+     */
+    fun pushSchedule(context: Context, minutes: List<Int>) {
+        runCatching {
+            val request = PutDataMapRequest.create(SCHEDULE_PATH).apply {
+                dataMap.putIntegerArrayList(KEY_SCHEDULE_MINUTES, ArrayList(minutes.sorted()))
+            }.asPutDataRequest()
+            Wearable.getDataClient(context.applicationContext).putDataItem(request)
+        }
+    }
+
     fun push(context: Context, ringing: Boolean, strict: Boolean) {
         runCatching {
             val request = PutDataMapRequest.create(PATH).apply {

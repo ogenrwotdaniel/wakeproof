@@ -237,7 +237,9 @@ data class GatePass(val grantedAt: Long, val used: Boolean)
 
 /** What [AppBlockService] does about the app on screen. */
 enum class GateVerdict {
-    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL, EARN_WALL, BUDGET_WALL, WAIT
+    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL, EARN_WALL, BUDGET_WALL, WAIT,
+    /** The night's sleep wall over every non-essential app; see [sleepWallActive]. */
+    SLEEP_WALL
 }
 
 /**
@@ -265,9 +267,12 @@ fun gateVerdict(
     outsideWindow: Boolean = false,
     bedtime: Boolean = false,
     feedEarned: Boolean = true,
-    budgetSpent: Boolean = false
+    budgetSpent: Boolean = false,
+    sleeping: Boolean = false
 ): GateVerdict = when {
     essential -> GateVerdict.ALLOW
+    // Every app, gated or not; a focus session into the night keeps its list.
+    sleeping && !(focusSessionActive && onFocusList) -> GateVerdict.SLEEP_WALL
     focusSessionActive && !onFocusList -> GateVerdict.FOCUS_WALL
     capSpent -> GateVerdict.CAP_WALL
     outsideWindow -> GateVerdict.WINDOW_WALL

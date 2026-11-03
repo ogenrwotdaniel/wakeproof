@@ -101,6 +101,7 @@ class AppBlockService : Service() {
     @Inject lateinit var statsRepository: StatsRepository
     @Inject lateinit var liveFocusSession: LiveFocusSession
     @Inject lateinit var liveCloudFeed: LiveCloudFeed
+    @Inject lateinit var alarmDevicePolicy: com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -148,6 +149,21 @@ class AppBlockService : Service() {
      */
     @Volatile private var rulesLoaded = false
     @Volatile private var limitsLoaded = false
+
+    /** Open through the sleep wall: the clock (to check the alarm) and the calendar. */
+    private val sleepExempt: Set<String> by lazy {
+        listOfNotNull(
+            runCatching {
+                packageManager.resolveActivity(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS), 0)
+                    ?.activityInfo?.packageName
+            }.getOrNull(),
+            runCatching {
+                packageManager.resolveActivity(
+                    Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR), 0
+                )?.activityInfo?.packageName
+            }.getOrNull()
+        ).filter { it != "android" }.toSet()
+    }
 
     /** Never suspended, whatever their verdict: losing them costs more than any app is worth. */
     private val neverSuspend: Set<String> by lazy {
@@ -346,6 +362,7 @@ class AppBlockService : Service() {
                 refreshAllGated()
                 // A locked-alarm ring whose service died is started again.
                 runCatching { StrictAlarm.resumeIfPending(this@AppBlockService) }
+                runCatching { nightReminders() }
                 delay(PROMOTE_EVERY_MILLIS)
             }
         }
@@ -546,7 +563,8 @@ class AppBlockService : Service() {
                 alarmVerifiedToday = alarmVerifiedToday
             ),
             feedEarned = feedEarned(rules.earnTheFeed, focusDoneToday, rules.openWindowStartMinutes),
-            budgetSpent = budgetSpent
+            budgetSpent = budgetSpent,
+            sleeping = sleepWallActive(minuteOfDay) && current !in sleepExempt
         )
     }
 
@@ -575,6 +593,12 @@ class AppBlockService : Service() {
                 "Bedtime",
                 "$label and every other waiting app are shut for the night. They open once " +
                     "your morning alarm is verified, or at 07:00 on a day without one."
+            )
+            GateVerdict.SLEEP_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Time to sleep",
+                "Everything but calls, the clock and your alarms is shut until " +
+                    "${clock(SLEEP_END_MINUTES)}. Put the phone on charge and go to bed."
             )
             GateVerdict.EARN_WALL -> BlockedActivity.ruleIntent(
                 this,
@@ -787,6 +811,59 @@ class AppBlockService : Service() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                     )
                 )
+                .setAutoCancel(true)
+                .build()
+        )
+    }
+
+    /**
+     * The wind-down reminder and the charging nag ([NightRules]). The nag only
+     * where alarms ring: the tablet going flat costs nothing at 03:00.
+     */
+    private fun nightReminders() {
+        val now = System.currentTimeMillis()
+        val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
+        val today = LocalDate.now().toEpochDay()
+        val prefs = createDeviceProtectedStorageContext()
+            .getSharedPreferences(NIGHT_PREFS, Context.MODE_PRIVATE)
+        if (windDownDue(minuteOfDay, prefs.getLong(KEY_WIND_DOWN_DAY, -1L), today)) {
+            prefs.edit().putLong(KEY_WIND_DOWN_DAY, today).apply()
+            nightNotice(
+                WIND_DOWN_NOTIFICATION_ID,
+                "Wind down",
+                "Everything but calls and your alarms shuts at ${clock(SLEEP_START_MINUTES)}. " +
+                    "Finish up, put the phone on charge, get ready for bed."
+            )
+        }
+        if (!alarmDevicePolicy.ringsAlarms) return
+        val battery = getSystemService(android.os.BatteryManager::class.java)
+        val level = runCatching {
+            battery.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        }.getOrDefault(-1)
+        val charging = runCatching { battery.isCharging }.getOrDefault(true)
+        if (chargeNagDue(minuteOfDay, level, charging, prefs.getLong(KEY_CHARGE_NAG_AT, 0L), now)) {
+            prefs.edit().putLong(KEY_CHARGE_NAG_AT, now).apply()
+            nightNotice(
+                CHARGE_NOTIFICATION_ID,
+                "Charge your phone — $level %",
+                "Your ${clock(SLEEP_END_MINUTES)} alarm needs a phone that is still on. Plug it in now."
+            )
+        }
+    }
+
+    private fun nightNotice(id: Int, title: String, text: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(NIGHT_CHANNEL_ID, "Bedtime", NotificationManager.IMPORTANCE_HIGH)
+                .apply { description = "Wind-down and charging reminders before the morning alarm" }
+        )
+        manager.notify(
+            id,
+            Notification.Builder(this, NIGHT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
                 .setAutoCancel(true)
                 .build()
         )
@@ -1018,6 +1095,12 @@ class AppBlockService : Service() {
         /** How often queued loosenings are checked for landing. */
         private const val PROMOTE_EVERY_MILLIS = 5 * 60_000L
         private const val MEDIA_CHECK_MILLIS = 2_000L
+        private const val NIGHT_PREFS = "night_reminders"
+        private const val KEY_WIND_DOWN_DAY = "wind_down_day"
+        private const val KEY_CHARGE_NAG_AT = "charge_nag_at"
+        private const val NIGHT_CHANNEL_ID = "wakeproof_night"
+        private const val WIND_DOWN_NOTIFICATION_ID = 71
+        private const val CHARGE_NOTIFICATION_ID = 72
 
         /** Essential apps that are nonetheless walled during a focus session. */
         private val FOCUS_WALLED_ESSENTIALS = setOf("com.android.settings")

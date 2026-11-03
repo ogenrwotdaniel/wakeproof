@@ -123,6 +123,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The backup for the phone's locked alarms, in case boot never re-armed it.
+        BackupAlarm.arm(this)
 
         textView = TextView(this).apply {
             gravity = Gravity.CENTER

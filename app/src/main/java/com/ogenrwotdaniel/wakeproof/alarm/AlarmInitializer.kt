@@ -45,6 +45,7 @@ class AlarmInitializer @Inject constructor(
      */
     suspend fun enforceStrict() {
         if (!devicePolicy.ringsAlarms) return
+        WearAlarmSync.pushSchedule(context, StrictAlarm.SLOTS.map { it.hour * 60 + it.minute })
         StrictAlarm.SLOTS.forEachIndexed { index, slot ->
             val all = repository.getAllAlarmsIncludingDeleted()
             val syncId = StrictAlarm.syncId(context, index)

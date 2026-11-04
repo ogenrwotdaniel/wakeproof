@@ -15,12 +15,26 @@ import com.google.android.gms.wearable.Wearable
  * (watch wall clock), 0 once it is over. A DataItem rather than a message
  * because this is state: the phone reads the latest whenever it next connects,
  * and over Bluetooth, so it needs no internet. The phone passes it on to the
- * tablet through the cloud. MUST match app `WearContract.WATCH_SESSION_*` —
+ * tablet through the cloud. Since 2026-11-05 it also carries the live timer,
+ * so the phone shows "Focus on your watch" with no internet. MUST match app `WearContract.WATCH_SESSION_*` —
  * kept in step by hand, like the other paths.
  */
 internal object WatchSessionContract {
     const val PATH = "/wakeproof/watch_session"
     const val KEY_ENDS_AT = "ws_ends_at"
+
+    // The live timer itself (2026-11-05), so the phone can SHOW the session,
+    // not only wall itself — over Bluetooth, with the phone offline. Same
+    // meaning as the cloud's `live/watchTimer` fields.
+    const val KEY_ACTIVE = "ws_active"
+    const val KEY_RUNNING = "ws_running"
+    const val KEY_PHASE = "ws_phase"
+    const val KEY_PHASE_ENDS_AT = "ws_phase_ends_at"
+    const val KEY_REMAINING = "ws_remaining"
+    const val KEY_COMPLETED = "ws_completed"
+    const val KEY_TARGET = "ws_target"
+    const val KEY_SUBJECT = "ws_subject"
+    const val KEY_UPDATED_AT = "ws_updated_at"
 }
 
 object WatchSessionBeacon {
@@ -31,6 +45,15 @@ object WatchSessionBeacon {
     fun publish(context: Context, state: WatchTimerState, now: Long = System.currentTimeMillis()) {
         val request = PutDataMapRequest.create(WatchSessionContract.PATH).apply {
             dataMap.putLong(WatchSessionContract.KEY_ENDS_AT, sessionEndsAt(state, now))
+            dataMap.putBoolean(WatchSessionContract.KEY_ACTIVE, state.active)
+            dataMap.putBoolean(WatchSessionContract.KEY_RUNNING, state.running)
+            dataMap.putString(WatchSessionContract.KEY_PHASE, state.phase.name)
+            dataMap.putLong(WatchSessionContract.KEY_PHASE_ENDS_AT, state.phaseEndsAt)
+            dataMap.putLong(WatchSessionContract.KEY_REMAINING, state.remainingMillisAt(now))
+            dataMap.putInt(WatchSessionContract.KEY_COMPLETED, state.completedFocus)
+            dataMap.putInt(WatchSessionContract.KEY_TARGET, state.targetFocusBlocks)
+            dataMap.putString(WatchSessionContract.KEY_SUBJECT, state.subject.orEmpty())
+            dataMap.putLong(WatchSessionContract.KEY_UPDATED_AT, now)
         }.asPutDataRequest().setUrgent()
         runCatching { Wearable.getDataClient(context).putDataItem(request) }
             .onFailure { Log.w(TAG, "watch session publish failed", it) }

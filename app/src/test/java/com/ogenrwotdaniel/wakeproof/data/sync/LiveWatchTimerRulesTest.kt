@@ -98,4 +98,22 @@ class LiveWatchTimerRulesTest {
         assertFalse(LiveWatchTimerRules.walls(timer(active = false, phaseEndsAt = now + 60_000L), now))
         assertFalse(LiveWatchTimerRules.walls(null, now))
     }
+
+    @Test
+    fun `the newer copy of the watch timer wins, whichever path brought it`() {
+        val bluetooth = timer(completedFocus = 2, serverUpdatedAt = now)
+        val cloud = timer(completedFocus = 1, serverUpdatedAt = now - 60_000L)
+        // Phone offline: the cloud copy is a block behind.
+        assertEquals(bluetooth, LiveWatchTimerRules.newest(bluetooth, cloud))
+        // Watch out of Bluetooth range but on Wi-Fi: the Bluetooth copy is.
+        val freshCloud = timer(completedFocus = 3, serverUpdatedAt = now + 60_000L)
+        assertEquals(freshCloud, LiveWatchTimerRules.newest(bluetooth, freshCloud))
+        // Either alone is used as is; an undated copy loses; a tie goes to Bluetooth.
+        assertEquals(cloud, LiveWatchTimerRules.newest(null, cloud))
+        assertEquals(bluetooth, LiveWatchTimerRules.newest(bluetooth, null))
+        assertNull(LiveWatchTimerRules.newest(null, null))
+        assertEquals(cloud, LiveWatchTimerRules.newest(timer(serverUpdatedAt = null), cloud))
+        val tie = timer(completedFocus = 9, serverUpdatedAt = now)
+        assertEquals(tie, LiveWatchTimerRules.newest(tie, timer(serverUpdatedAt = now)))
+    }
 }

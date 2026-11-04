@@ -103,6 +103,17 @@ object WearContract {
      */
     const val WATCH_SESSION_PATH = "/wakeproof/watch_session"
     const val KEY_WATCH_SESSION_ENDS_AT = "ws_ends_at"
+
+    /** The watch's live timer on the same item (2026-11-05), read into a `LiveWatchTimer`. */
+    const val KEY_WS_ACTIVE = "ws_active"
+    const val KEY_WS_RUNNING = "ws_running"
+    const val KEY_WS_PHASE = "ws_phase"
+    const val KEY_WS_PHASE_ENDS_AT = "ws_phase_ends_at"
+    const val KEY_WS_REMAINING = "ws_remaining"
+    const val KEY_WS_COMPLETED = "ws_completed"
+    const val KEY_WS_TARGET = "ws_target"
+    const val KEY_WS_SUBJECT = "ws_subject"
+    const val KEY_WS_UPDATED_AT = "ws_updated_at"
     const val KEY_SESSION_ID = "s_id"
     const val KEY_SESSION_STARTED = "s_started"
     const val KEY_SESSION_ENDED = "s_ended"

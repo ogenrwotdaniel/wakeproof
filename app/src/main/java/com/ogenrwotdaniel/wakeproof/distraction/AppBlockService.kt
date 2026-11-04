@@ -36,6 +36,7 @@ import com.ogenrwotdaniel.wakeproof.data.sync.LiveFocusSession
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimerRules
 import com.ogenrwotdaniel.wakeproof.wear.WatchSessionFeed
+import com.ogenrwotdaniel.wakeproof.wear.WatchSessionNotifier
 import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
@@ -129,7 +130,14 @@ class AppBlockService : Service() {
     @Volatile private var watchSessionEndsAt = 0L
 
     /** The watch's own cloud timer: the tablet's way to hear of a watch session. */
-    @Volatile private var watchTimer: LiveWatchTimer? = null
+    @Volatile private var cloudWatchTimer: LiveWatchTimer? = null
+
+    /** The watch's live timer heard over Bluetooth (2026-11-05): the offline phone's way. */
+    @Volatile private var bluetoothWatchTimer: LiveWatchTimer? = null
+
+    /** Whichever copy of the watch timer is newer. */
+    private val watchTimer: LiveWatchTimer?
+        get() = LiveWatchTimerRules.newest(bluetoothWatchTimer, cloudWatchTimer)
 
     /** Every installed app that waits — the pool the daily budget is spent from. */
     @Volatile private var allGated: Set<String> = emptySet()
@@ -331,7 +339,26 @@ class AppBlockService : Service() {
                 runCatching { liveFocusSession.relayWatch(endsAt) }
             }
         }
-        scope.launch { liveCloudFeed.watchTimer().collect { watchTimer = it } }
+        scope.launch {
+            liveCloudFeed.watchTimer().collect {
+                cloudWatchTimer = it
+                WatchSessionNotifier.update(applicationContext, watchTimer)
+            }
+        }
+        scope.launch {
+            WatchSessionFeed.timer(applicationContext).collect {
+                bluetoothWatchTimer = it
+                WatchSessionNotifier.update(applicationContext, watchTimer)
+            }
+        }
+        // "Focus on your watch" also has to go when the watch falls silent past
+        // its phase end (no push will say so), so it is re-judged on a clock too.
+        scope.launch {
+            while (true) {
+                delay(WATCH_NOTIFICATION_RECHECK_MILLIS)
+                WatchSessionNotifier.update(applicationContext, watchTimer)
+            }
+        }
         // Do Not Disturb follows a session on ANY device (2026-11-01). The
         // session's own device sets it in PomodoroTimerService; this covers the
         // others. Level-triggered: SessionDnd only undoes what it did.
@@ -409,6 +436,8 @@ class AppBlockService : Service() {
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { unregisterReceiver(packageReceiver) }
         com.ogenrwotdaniel.wakeproof.clip.ClipRuntime.stop()
+        // Nothing would update it once this service is gone.
+        WatchSessionNotifier.update(applicationContext, null)
         scope.cancel()
         super.onDestroy()
     }
@@ -1101,6 +1130,7 @@ class AppBlockService : Service() {
         private const val NOTIFICATION_ID = 43
         private const val ALERT_CHANNEL_ID = "wakeproof_walls_down"
         private const val ALERT_NOTIFICATION_ID = 44
+        private const val WATCH_NOTIFICATION_RECHECK_MILLIS = 15_000L
 
         /** canDrawOverlays is a binder call, so it is checked every 5 s, not every tick. */
         private const val OVERLAY_CHECK_EVERY = 10L

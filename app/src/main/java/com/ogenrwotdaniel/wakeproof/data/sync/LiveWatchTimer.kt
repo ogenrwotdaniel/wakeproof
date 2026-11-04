@@ -17,7 +17,10 @@ data class LiveWatchTimer(
     val completedFocus: Int,
     val targetFocusBlocks: Int,
     val subject: String?,
-    /** Server time of the last write, or null while that is unknown. */
+    /**
+     * When this copy was written, or null while that is unknown: the server's
+     * time for the cloud copy, the watch's own clock for the Bluetooth one.
+     */
     val serverUpdatedAtMillis: Long?
 ) {
     companion object {
@@ -106,6 +109,21 @@ object LiveWatchTimerRules {
     fun walls(timer: LiveWatchTimer?, now: Long): Boolean =
         timer != null && timer.active && timer.running &&
             timer.phaseEndsAt - now >= -RUNNING_STALE_MILLIS
+
+    /**
+     * Two copies of the same watch timer — over Bluetooth and from the cloud —
+     * reduced to the one to believe: the newer write. Either path can be the
+     * stale one (the phone offline, or the watch out of Bluetooth range but on
+     * Wi-Fi), and the newer write is the watch's latest word either way. An
+     * undated copy loses to a dated one; a tie goes to Bluetooth, which is local.
+     */
+    fun newest(bluetooth: LiveWatchTimer?, cloud: LiveWatchTimer?): LiveWatchTimer? {
+        if (bluetooth == null) return cloud
+        if (cloud == null) return bluetooth
+        val b = bluetooth.serverUpdatedAtMillis ?: Long.MIN_VALUE
+        val c = cloud.serverUpdatedAtMillis ?: Long.MIN_VALUE
+        return if (c > b) cloud else bluetooth
+    }
 
     private val BREAKS = setOf("SHORT_BREAK", "LONG_BREAK")
 }

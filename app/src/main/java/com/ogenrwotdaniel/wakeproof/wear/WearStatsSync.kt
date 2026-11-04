@@ -67,6 +67,27 @@ object WearContract {
     const val CMD_TIMER_STOP = "timer_stop"
 
     /**
+     * `agenda_done:<event key>` — the watch's tick on a calendar event. The
+     * phone marks it done in `AgendaRepository` and re-pushes [AGENDA_PATH];
+     * the watch changes nothing until that push lands.
+     */
+    const val CMD_AGENDA_DONE_PREFIX = "agenda_done:"
+
+    /**
+     * Today's timed calendar events, for the watch's "Today" list
+     * ([WearAgendaSync]). Parallel arrays, one entry per event; [KEY_AGENDA_DONE]
+     * is the subset of keys ticked off. MUST match wear `AgendaContract`.
+     */
+    const val AGENDA_PATH = "/wakeproof/agenda"
+    const val KEY_AGENDA_DAY = "ag_day"
+    const val KEY_AGENDA_ALLOWED = "ag_allowed"
+    const val KEY_AGENDA_KEYS = "ag_keys"
+    const val KEY_AGENDA_TITLES = "ag_titles"
+    const val KEY_AGENDA_BEGINS = "ag_begins"
+    const val KEY_AGENDA_ENDS = "ag_ends"
+    const val KEY_AGENDA_DONE = "ag_done"
+
+    /**
      * Focus blocks finished on the watch's OWN timer, one DataItem each at
      * `SESSION_PATH_PREFIX + <block id>`. The watch writes them whether or not
      * the phone is reachable and the Data Layer delivers them when it is; the

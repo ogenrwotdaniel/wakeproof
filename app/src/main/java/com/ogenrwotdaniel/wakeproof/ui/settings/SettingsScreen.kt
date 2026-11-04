@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
+import com.ogenrwotdaniel.wakeproof.data.MIN_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,7 +56,6 @@ import android.app.role.RoleManager
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
-import com.ogenrwotdaniel.wakeproof.alarm.WakeCheck
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge
 import java.time.DayOfWeek
@@ -174,9 +175,10 @@ fun SettingsScreen(
             SliderSetting(
                 label = "Pushup target",
                 value = settings.pushupTarget,
-                range = 5f..50f,
+                range = MIN_PUSHUP_TARGET.toFloat()..MAX_PUSHUP_TARGET.toFloat(),
                 unit = "reps",
-                onCommit = viewModel::setPushupTarget
+                onCommit = viewModel::setPushupTarget,
+                steps = MAX_PUSHUP_TARGET - MIN_PUSHUP_TARGET - 1
             )
             SliderSetting(
                 label = "Math problems in a row",
@@ -185,14 +187,6 @@ fun SettingsScreen(
                 unit = "sums",
                 onCommit = viewModel::setMathProblems,
                 steps = MathChallenge.MAX_PROBLEMS - MathChallenge.MIN_PROBLEMS - 1
-            )
-            SwitchSetting(
-                label = "Wake-up check",
-                description = "${WakeCheck.DELAY_MINUTES} minutes after you dismiss an alarm, " +
-                    "a notification asks if you're still up. Ignore it for " +
-                    "${WakeCheck.ANSWER_MINUTES} minutes and the alarm rings again.",
-                checked = settings.wakeUpCheck,
-                onCheckedChange = viewModel::setWakeUpCheck
             )
             SliderSetting(
                 label = "Water per alarm",
@@ -397,6 +391,10 @@ fun SettingsScreen(
             HorizontalDivider()
 
             SyncSection()
+
+            HorizontalDivider()
+
+            ClipSection()
 
             HorizontalDivider()
 

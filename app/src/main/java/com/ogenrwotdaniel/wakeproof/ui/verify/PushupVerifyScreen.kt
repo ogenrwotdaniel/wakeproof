@@ -188,7 +188,10 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
-    val analyzer = remember { PoseAnalyzer(viewModel::onPoseFrame) }
+    val analyzer = remember {
+        com.ogenrwotdaniel.wakeproof.verify.MlKitInit.ensure(context)
+        PoseAnalyzer(viewModel::onPoseFrame)
+    }
     var useFrontCamera by remember { mutableStateOf(true) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 

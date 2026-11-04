@@ -9,9 +9,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.ogenrwotdaniel.wakeproof.MainActivity
+import com.ogenrwotdaniel.wakeproof.clip.ClipHub
+import com.ogenrwotdaniel.wakeproof.clip.ClipTriggers
 import com.ogenrwotdaniel.wakeproof.distraction.GateActivity
 import com.ogenrwotdaniel.wakeproof.ui.theme.WakeProofTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * WakeProof as the phone's home screen — opt-in, chosen in Settings → Home
@@ -27,6 +30,8 @@ import dagger.hilt.android.AndroidEntryPoint
 class LauncherActivity : ComponentActivity() {
 
     private val viewModel: LauncherViewModel by viewModels()
+
+    @Inject lateinit var clipHub: ClipHub
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,5 +74,15 @@ class LauncherActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refresh()
+    }
+
+    /**
+     * Every return home is a moment WakeProof may read the clipboard (Android
+     * allows it only with window focus): a clip copied since the last one handled
+     * goes to the other devices (WakeProof Clip).
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) runCatching { ClipTriggers.onHomeFocused(this, clipHub) }
     }
 }

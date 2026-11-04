@@ -134,14 +134,16 @@ class AccountRepository @Inject constructor(
 
     /**
      * A fresh Google ID token for the account this device already syncs as, to
-     * hand to the watch (Settings -> Sync -> "Sign in the watch").
+     * hand to a companion: the watch (Settings -> Sync -> "Sign in the watch") or a
+     * computer being paired for WakeProof Clip, which exchanges it for its own
+     * Firebase session.
      *
      * Asks only among accounts that have used this app and auto-selects when
      * there is one, so in practice it is a brief sheet rather than a picker.
-     * The chosen account must be the one signed in here: a watch on a different
+     * The chosen account must be the one signed in here: a companion on a different
      * account would upload into a tree no other device reads.
      */
-    suspend fun idTokenForWatch(activity: Activity): Result<String> {
+    suspend fun idTokenForCompanion(activity: Activity): Result<String> {
         val clientId = availability.webClientId
         val email = auth?.currentUser?.email
         if (clientId == null || auth?.currentUser == null) {

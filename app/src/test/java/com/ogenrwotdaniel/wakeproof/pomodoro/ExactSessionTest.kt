@@ -49,6 +49,25 @@ class ExactSessionTest {
         }
     }
 
+    /**
+     * total minutes -> (focus blocks, last block minutes). The SAME table is in
+     * the watch's `WatchTimerTest`, whose `exactSessionPlan` is a hand-kept copy
+     * of this one: change the rule and one side or the other fails.
+     */
+    private val sharedVectors = listOf(
+        3 to (1 to 10), 10 to (1 to 10), 15 to (1 to 15), 25 to (1 to 25), 34 to (1 to 34),
+        35 to (1 to 35), 40 to (2 to 10), 50 to (2 to 20), 55 to (2 to 25), 62 to (2 to 32),
+        85 to (3 to 25), 90 to (3 to 30), 120 to (4 to 30), 185 to (6 to 35)
+    )
+
+    @Test
+    fun `the vectors shared with the watch's copy hold`() {
+        for ((total, expected) in sharedVectors) {
+            val plan = exactSessionPlan(total)
+            assertEquals("total $total", expected, plan.focusBlocks to plan.lastFocusMinutes)
+        }
+    }
+
     @Test
     fun `only the last block takes the trimmed length`() {
         assertEquals(1_500, focusSecondsForBlock(1, 3, 1_500, 600))

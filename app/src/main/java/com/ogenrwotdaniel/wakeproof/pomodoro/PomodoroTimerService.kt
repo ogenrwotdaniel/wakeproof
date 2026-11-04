@@ -948,8 +948,32 @@ class PomodoroTimerService : Service() {
          * session is saved and none is running.
          */
         fun restore(context: Context) {
-            if (_state.value.active || SessionStore.load(context) == null) return
+            if (_state.value.active) return
+            if (SessionStore.load(context) == null) {
+                releaseStaleOnce(context)
+                return
+            }
             runCatching { context.startForegroundService(intent(context, ACTION_RESTORE)) }
+        }
+
+        private val staleReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        /**
+         * No session saved and none running (2026-11-04): if the process died
+         * mid-session, the watch still mirrors it and the tablet is still walled
+         * by it, since the end was never announced. Once per process, withdraw
+         * both — the watch's timer item and our own live/focusSession doc.
+         */
+        private fun releaseStaleOnce(context: Context) {
+            if (!staleReleased.compareAndSet(false, true)) return
+            val entry = dagger.hilt.android.EntryPointAccessors.fromApplication(
+                context.applicationContext, StaleSessionEntryPoint::class.java
+            )
+            CoroutineScope(Dispatchers.IO).launch {
+                if (_state.value.active) return@launch
+                runCatching { entry.wearTimerSync().clear() }
+                runCatching { entry.liveFocusSession().releaseIfOwnStale() }
+            }
         }
 
         /**
@@ -967,4 +991,12 @@ class PomodoroTimerService : Service() {
         private fun intent(context: Context, action: String) =
             Intent(context, PomodoroTimerService::class.java).setAction(action)
     }
+}
+
+/** What [PomodoroTimerService.restore] needs outside an injected service. */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface StaleSessionEntryPoint {
+    fun wearTimerSync(): WearTimerSync
+    fun liveFocusSession(): LiveFocusSession
 }

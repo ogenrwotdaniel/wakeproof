@@ -88,6 +88,14 @@ object DeviceLock {
                 DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
             )
         }
+        // WakeProof Clip's screenshot observer (READ_MEDIA_IMAGES is declared in
+        // the debug manifest only, like the admin receiver itself).
+        step("read images") {
+            dpm.setPermissionGrantState(
+                admin, context.packageName, android.Manifest.permission.READ_MEDIA_IMAGES,
+                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+            )
+        }
         step("auto time") { dpm.setAutoTimeEnabled(admin, true) }
         step("auto time zone") { dpm.setAutoTimeZoneEnabled(admin, true) }
         step("home") {

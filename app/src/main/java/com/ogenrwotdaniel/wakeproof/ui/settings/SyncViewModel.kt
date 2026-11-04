@@ -164,7 +164,7 @@ class SyncViewModel @Inject constructor(
         if (busy.value) return
         viewModelScope.launch {
             busy.value = true
-            message.value = accounts.idTokenForWatch(activity).fold(
+            message.value = accounts.idTokenForCompanion(activity).fold(
                 onSuccess = { token ->
                     if (watchSignIn.send(token) > 0) {
                         "Sent to the watch. Its home screen shows ☁ and your account once it's signed in."

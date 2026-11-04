@@ -123,14 +123,10 @@ class WakeCheckReceiver : BroadcastReceiver() {
         val alarmId = intent.getLongExtra(EXTRA_ALARM_ID, -1L)
         if (alarmId == -1L) return
         when (intent.action) {
-            WakeCheck.ACTION_PROMPT -> {
-                // Arm the re-ring BEFORE posting: if posting fails the user is
-                // still checked, just without the chance to answer.
-                if (scheduler.scheduleWakeCheckReRing(alarmId)) {
-                    WakeCheck.post(context, alarmId)
-                }
-            }
-            WakeCheck.ACTION_CONFIRM -> {
+            // REMOVED 2026-11-04 (user's request): the check re-rang five
+            // minutes after a full set of pushups. Nothing arms it any more; a
+            // prompt an older build left armed lands here and only disarms.
+            WakeCheck.ACTION_PROMPT, WakeCheck.ACTION_CONFIRM -> {
                 scheduler.cancelWakeCheck(alarmId)
                 WakeCheck.clear(context, alarmId)
             }

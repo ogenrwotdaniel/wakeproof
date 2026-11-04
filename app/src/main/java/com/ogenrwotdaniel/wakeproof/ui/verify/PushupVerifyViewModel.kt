@@ -58,14 +58,14 @@ class PushupVerifyViewModel @Inject constructor(
     private var lastPoseAt = startedAt
     private var resetAppliedForThisGap = false
 
-    /** Ringing the [StrictAlarm]: at least its reps, and no emergency dismiss. */
+    /** Ringing the [StrictAlarm]: exactly its reps, and no emergency dismiss. */
     @Volatile private var strict = false
 
     fun setStrict(value: Boolean) {
         if (!value || strict) return
         strict = true
         _uiState.update {
-            it.copy(target = maxOf(it.target, StrictAlarm.REPS), emergencyAvailable = false)
+            it.copy(target = StrictAlarm.REPS, emergencyAvailable = false)
         }
     }
 
@@ -74,7 +74,7 @@ class PushupVerifyViewModel @Inject constructor(
             val settings = settingsRepository.settings.first()
             _uiState.update {
                 it.copy(
-                    target = if (strict) maxOf(settings.pushupTarget, StrictAlarm.REPS)
+                    target = if (strict) StrictAlarm.REPS
                     else settings.pushupTarget,
                     emergencyHoldSeconds = settings.emergencyHoldSeconds
                 )

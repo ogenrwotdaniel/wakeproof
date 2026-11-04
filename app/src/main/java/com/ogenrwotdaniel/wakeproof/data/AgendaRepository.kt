@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,7 +41,8 @@ data class AgendaEvent(
  * syncs into it, so no network or Google API is involved — and stores which
  * ones the user has ticked off (a local-only concept; the calendar itself has
  * no completion state). Done-keys are pruned to the current window on each
- * write so the set can't grow forever.
+ * write so the set can't grow forever. Every done-key change is re-pushed to
+ * the watch ([WearAgendaSync]).
  */
 @Singleton
 class AgendaRepository @Inject constructor(
@@ -60,6 +62,7 @@ class AgendaRepository @Inject constructor(
             val current = (prefs[DONE_KEYS] ?: emptySet()).intersect(validKeys)
             prefs[DONE_KEYS] = if (done) current + event.key else current - event.key
         }
+        WearAgendaSync.pushSoon(context)
     }
 
     /**
@@ -68,6 +71,7 @@ class AgendaRepository @Inject constructor(
      */
     suspend fun markDone(key: String) {
         dataStore.edit { prefs -> prefs[DONE_KEYS] = (prefs[DONE_KEYS] ?: emptySet()) + key }
+        WearAgendaSync.pushSoon(context)
     }
 
     /** Event instances from the start of today through the next [WINDOW_DAYS] days. */

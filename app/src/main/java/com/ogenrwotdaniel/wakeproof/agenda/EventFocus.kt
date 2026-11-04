@@ -1,7 +1,12 @@
 package com.ogenrwotdaniel.wakeproof.agenda
 
+import android.content.Context
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
+import com.ogenrwotdaniel.wakeproof.launcher.eventDay
 import com.ogenrwotdaniel.wakeproof.pomodoro.MIN_EXACT_SESSION_MINUTES
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Pure: how many minutes a session for [event] runs if started at [nowMillis],
@@ -15,6 +20,40 @@ fun eventFocusMinutes(event: AgendaEvent, nowMillis: Long): Int? {
     val from = maxOf(event.beginMillis, nowMillis)
     val minutes = ((event.endMillis - from) / 60_000L).toInt()
     return minutes.takeIf { it >= MIN_EXACT_SESSION_MINUTES }
+}
+
+/**
+ * Pure: what tapping an agenda row's TITLE does — the minutes to offer in the
+ * [EventFocusDialog], or null when the tap should simply tick the event (as the
+ * whole row used to). Shared by the home-screen agenda and the in-app Calendar
+ * screen (2026-11-04) so the two can never disagree about which events can be
+ * focused for: not one already ticked, not while a session runs, not one on a
+ * later day (a session for tomorrow's lecture would start now and end at the
+ * wrong time), and not what [eventFocusMinutes] refuses — all-day, over, or
+ * under [MIN_EXACT_SESSION_MINUTES] left.
+ */
+fun eventFocusOffer(
+    event: AgendaEvent,
+    done: Boolean,
+    sessionRunning: Boolean,
+    nowMillis: Long,
+    zone: ZoneId = ZoneId.systemDefault()
+): Int? {
+    if (done || sessionRunning) return null
+    if (eventDay(event, zone) > Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()) return null
+    return eventFocusMinutes(event, nowMillis)
+}
+
+/**
+ * Starts a session lasting as long as what is left of [event], re-checking
+ * at the moment of the tap rather than trusting the dialog, which may have
+ * sat open past the point where too little was left. False when refused.
+ */
+fun startEventFocus(context: Context, event: AgendaEvent, nowMillis: Long = System.currentTimeMillis()): Boolean {
+    if (PomodoroTimerService.state.value.active) return false
+    val minutes = eventFocusMinutes(event, nowMillis) ?: return false
+    PomodoroTimerService.startForEvent(context, minutes, event.key, event.title)
+    return true
 }
 
 /** How long before a timed event its reminder comes. */

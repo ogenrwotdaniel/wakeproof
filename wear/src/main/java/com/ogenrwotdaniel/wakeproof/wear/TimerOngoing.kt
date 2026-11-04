@@ -26,6 +26,8 @@ internal object TimerContract {
     const val KEY_PHASE = "t_phase"
     const val KEY_REMAINING = "t_remaining"
     const val KEY_FINISH_AT = "t_finish_at"
+    /** The phone's wall clock at the push (app `WearContract.KEY_UPDATED`, shared with stats). */
+    const val KEY_UPDATED = "updated_at"
 }
 
 /** A single push of Pomodoro timer state from the phone. */
@@ -34,20 +36,48 @@ data class TimerSnapshot(
     val running: Boolean,
     val phase: String,
     val remainingSeconds: Int,
-    val finishAtMillis: Long
+    val finishAtMillis: Long,
+    /** When the phone pushed this, its clock; 0 = unknown (older phone build). */
+    val updatedAtMillis: Long = 0L
 ) {
+    /**
+     * Pure: whether this mirror still describes a live phone session at [now].
+     *
+     * The phone pushes on every transition, and `active = false` when a session
+     * ends — but a phone whose process is KILLED mid-session never sends that
+     * last push, and the watch mirrored the dead session forever: no buttons,
+     * no way in (seen on hardware 2026-11-04). So a mirror is treated as ended
+     * when it is running and its phase finished more than
+     * [RUNNING_STALE_MILLIS] ago (a live phone would have pushed the next
+     * phase by then), or paused and pushed more than [PAUSED_STALE_MILLIS] ago.
+     */
+    fun liveAt(now: Long): Boolean {
+        if (!active) return false
+        return if (running) {
+            finishAtMillis <= 0L || now - finishAtMillis <= RUNNING_STALE_MILLIS
+        } else {
+            updatedAtMillis <= 0L || now - updatedAtMillis <= PAUSED_STALE_MILLIS
+        }
+    }
+
     companion object {
         fun from(map: DataMap) = TimerSnapshot(
             active = map.getBoolean(TimerContract.KEY_ACTIVE, false),
             running = map.getBoolean(TimerContract.KEY_RUNNING, false),
             phase = map.getString(TimerContract.KEY_PHASE, ""),
             remainingSeconds = map.getInt(TimerContract.KEY_REMAINING, 0),
-            finishAtMillis = map.getLong(TimerContract.KEY_FINISH_AT, 0L)
+            finishAtMillis = map.getLong(TimerContract.KEY_FINISH_AT, 0L),
+            updatedAtMillis = map.getLong(TimerContract.KEY_UPDATED, 0L)
         )
+
+        /** See [liveAt]. */
+        const val RUNNING_STALE_MILLIS = 2 * 60_000L
+        const val PAUSED_STALE_MILLIS = 12 * 60 * 60_000L
 
         /**
          * Reads the latest timer snapshot the phone pushed onto the Data Layer,
-         * or null if none / not active. Mirrors [WearStatsReader]'s read path so
+         * or null if none / not active. NOT filtered for staleness — callers
+         * deciding what runs use [liveAt]. Mirrors [WearStatsReader]'s read path so
          * [MainActivity] can show the live countdown while a Pomodoro runs.
          */
         suspend fun read(context: Context): TimerSnapshot? = withContext(Dispatchers.IO) {
@@ -94,7 +124,7 @@ object TimerNotifier {
         if (local.active) {
             update(context, local.toSnapshot(System.currentTimeMillis()))
         } else {
-            update(context, TimerSnapshot.read(context))
+            update(context, TimerSnapshot.read(context)?.takeIf { it.liveAt(System.currentTimeMillis()) })
         }
     }
 

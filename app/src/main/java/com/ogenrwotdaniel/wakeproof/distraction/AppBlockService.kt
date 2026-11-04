@@ -268,6 +268,9 @@ class AppBlockService : Service() {
         // where WakeProof itself is never opened.
         DeviceLock.enforce(this)
         StrictAlarm.resumeIfPending(this)
+        // WakeProof Clip: LAN server, mDNS, cloud listener, screenshots — all
+        // self-contained, and idle unless the feature is on and paired.
+        com.ogenrwotdaniel.wakeproof.clip.ClipRuntime.start(this, scope)
         registerReceiver(
             packageReceiver,
             IntentFilter(Intent.ACTION_PACKAGE_ADDED).apply { addDataScheme("package") },
@@ -405,6 +408,7 @@ class AppBlockService : Service() {
         pinCover.hide()
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { unregisterReceiver(packageReceiver) }
+        com.ogenrwotdaniel.wakeproof.clip.ClipRuntime.stop()
         scope.cancel()
         super.onDestroy()
     }

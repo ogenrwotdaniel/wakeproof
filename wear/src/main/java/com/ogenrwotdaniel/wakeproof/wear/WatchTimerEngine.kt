@@ -45,8 +45,27 @@ object WatchTimerEngine {
     fun state(context: Context): WatchTimerState = WatchTimerStore.read(context)
 
     suspend fun start(context: Context, session: WatchSession) = mutate(context) {
+        // Never over a running session: starting again would reset it.
+        if (it.active) return@mutate it
         val stats = WearStatsReader.read(context)
         WatchTimer.start(stats.durations, stats.subject, System.currentTimeMillis(), session)
+    }
+
+    /**
+     * A session for a calendar event (2026-11-04): exactly what is left of it,
+     * re-measured here at the tap — the confirm may have sat open. False when
+     * refused: a session already running, or too little of the event left.
+     */
+    suspend fun startForEvent(context: Context, beginMillis: Long, endMillis: Long): Boolean {
+        var started = false
+        mutate(context) {
+            if (it.active) return@mutate it
+            val now = System.currentTimeMillis()
+            val minutes = WatchTimer.eventFocusMinutes(beginMillis, endMillis, now) ?: return@mutate it
+            started = true
+            WatchTimer.startExact(minutes, WearStatsReader.read(context).subject, now)
+        }
+        return started
     }
 
     // A user action is an acknowledgement: whatever is still buzzing stops.
@@ -114,7 +133,7 @@ object WatchTimerEngine {
                 app,
                 complete = true,
                 blocks = blocks,
-                minutes = blocks * before.durations.focusMinutes,
+                minutes = before.focusMinutesThrough(blocks),
                 day = day
             )
         } else {
@@ -165,6 +184,8 @@ object WatchTimerEngine {
         WatchSessionBeacon.publish(app, WatchTimerStore.read(app))
         TimerNotifier.refresh(app)
         TileService.getUpdater(app).requestUpdate(StatsTileService::class.java)
+        // "Focus running · ends …" on the agenda tile and complication.
+        AgendaSurfaces.refresh(app)
         // The tablet's "on your watch" card. Queued, not sent: a network call has
         // no place in an alarm receiver, and the worker reads the newest state.
         CloudOutbox.kick(app)

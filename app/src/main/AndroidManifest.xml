@@ -17,6 +17,8 @@
     <!-- Verification -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WakeProof Clip: presence is rewritten on network change. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Study tools: floating timer bubble, screen-time stats, calendar agenda.
          PACKAGE_USAGE_STATS and SYSTEM_ALERT_WINDOW are special-access grants
@@ -46,6 +48,8 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
         <package android:name="com.spotify.music" />
+        <!-- WakeProof Clip: "Open in Notes" on a received image. -->
+        <package android:name="com.samsung.android.app.notes" />
         <!-- Finding the browsers, which wait like social apps. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -178,6 +182,10 @@
         <receiver
             android:name=".agenda.EventReminderReceiver"
             android:exported="false" />
+        <!-- Just after midnight: today's calendar onto the watch's "Today" list. -->
+        <receiver
+            android:name=".wear.WearAgendaSync$DayReceiver"
+            android:exported="false" />
         <receiver
             android:name=".agenda.EventDoneReceiver"
             android:exported="false" />
@@ -246,6 +254,75 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/wakeproof/session/" />
+            </intent-filter>
+        </service>
+
+        <!-- ===== WakeProof Clip (clip/, docs/CLIPBOARD.md) ===== -->
+        <!-- Received images, handed to the clipboard and to Notes. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.clipfiles"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/clip_file_paths" />
+        </provider>
+
+        <!-- One frame: sets a received clip from the foreground (notification tap). -->
+        <activity
+            android:name=".clip.ClipApplyActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WakeProof.Translucent" />
+
+        <!-- One frame: reads the clipboard once focused and sends it (Quick Settings tile). -->
+        <activity
+            android:name=".clip.ClipSendActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WakeProof.Translucent" />
+
+        <activity
+            android:name=".clip.ClipShareActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="Send to my devices"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WakeProof.Translucent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".clip.ClipPairActivity"
+            android:exported="false"
+            android:label="Pair a computer"
+            android:theme="@style/Theme.WakeProof" />
+
+        <service
+            android:name=".clip.ClipTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_clip_tile"
+            android:label="Send clipboard"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
     </application>

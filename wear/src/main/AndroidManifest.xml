@@ -53,6 +53,16 @@
             </intent-filter>
         </activity>
 
+        <!-- "Today": the phone's calendar events, tap one to focus for it.
+             Exported because the tile host (another process) launches it from a
+             row on AgendaTileService. An outside start can only open a confirm;
+             a session still needs the Start tap. -->
+        <activity
+            android:name=".AgendaActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:screenOrientation="portrait" />
+
         <!-- The progress Tile. -->
         <service
             android:name=".StatsTileService"
@@ -65,6 +75,39 @@
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
                 android:resource="@drawable/ic_launcher_foreground" />
+        </service>
+
+        <!-- "WakeProof Today": the rest of today's calendar; a row opens its confirm. -->
+        <service
+            android:name=".AgendaTileService"
+            android:exported="true"
+            android:label="@string/agenda_tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/ic_launcher_foreground" />
+        </service>
+
+        <!-- "WakeProof Today" as a watch-face complication: the next events, or the
+             running session; a tap opens the next event's confirm. -->
+        <service
+            android:name=".AgendaComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_foreground"
+            android:label="@string/agenda_complication_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="LONG_TEXT,SHORT_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="900" />
         </service>
 
         <!-- Refreshes the tile whenever the phone pushes new stats. -->

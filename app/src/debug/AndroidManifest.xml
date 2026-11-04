@@ -2,6 +2,9 @@
 <!-- Debug (sideloaded) build only: WakeProof as device owner, so it cannot be
      uninstalled without a factory reset. See admin/DeviceLock.kt. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- WakeProof Clip's screenshot observer. Debug only: Play's photo-permission
+         policy would not accept it, and DeviceLock holds it granted here. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <application>
         <receiver
             android:name=".admin.WakeProofAdmin"

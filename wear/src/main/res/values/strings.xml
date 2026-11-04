@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">WakeProof</string>
     <string name="tile_label">WakeProof progress</string>
+    <string name="agenda_tile_label">WakeProof Today</string>
+    <string name="agenda_complication_label">WakeProof Today</string>
 </resources>

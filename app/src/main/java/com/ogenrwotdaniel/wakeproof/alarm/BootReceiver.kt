@@ -54,6 +54,8 @@ class BootReceiver : BroadcastReceiver() {
                 runCatching {
                     com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(context.applicationContext)
                 }
+                // Also re-arms the midnight push, which a reboot dropped.
+                com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync.push(context.applicationContext)
             } finally {
                 pendingResult.finish()
             }

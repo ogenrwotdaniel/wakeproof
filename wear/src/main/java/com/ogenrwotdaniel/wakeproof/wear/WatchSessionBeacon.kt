@@ -51,11 +51,10 @@ object WatchSessionBeacon {
         val every = state.longBreakEvery.coerceAtLeast(1)
         fun breakAfter(block: Int) =
             state.durations.millisOf(if (block % every == 0) WatchPhase.LONG_BREAK else WatchPhase.SHORT_BREAK)
-        val focus = state.durations.millisOf(WatchPhase.FOCUS)
         val current = if (state.phase == WatchPhase.FOCUS) state.completedFocus + 1 else state.completedFocus
         if (state.phase == WatchPhase.FOCUS && current < target) end += breakAfter(current)
         for (block in current + 1..target) {
-            end += focus
+            end += state.focusMillisOfBlock(block)
             if (block < target) end += breakAfter(block)
         }
         return end

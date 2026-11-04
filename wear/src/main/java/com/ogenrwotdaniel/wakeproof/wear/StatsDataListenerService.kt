@@ -14,12 +14,15 @@ import com.google.android.gms.wearable.WearableListenerService
  *   watch's own timer is running, which keeps the chip.
  * - `/wakeproof/alarm` → buzz the wrist while the phone's alarm rings
  *   ([PhoneAlarmMirror]); it cannot be dismissed here.
+ * - `/wakeproof/agenda` (and `/wakeproof/timer`) → re-render the agenda tile and
+ *   complication ([AgendaSurfaces]).
  * - `/wakeproof/session/…` deleted → the phone imported a block finished here;
  *   the tile's "waiting to sync" count and focus total change with it.
  */
 class StatsDataListenerService : WearableListenerService() {
     override fun onDataChanged(dataEvents: DataEventBuffer) {
         var refreshTile = false
+        var refreshAgendaTile = false
         var timerChanged = false
         var timer: TimerSnapshot? = null
         for (event in dataEvents) {
@@ -30,6 +33,8 @@ class StatsDataListenerService : WearableListenerService() {
             }
             when (path) {
                 WearStatsPath.STATS -> refreshTile = true
+                // Today's calendar: the "WakeProof Today" tile lists it.
+                AgendaContract.PATH -> refreshAgendaTile = true
                 // The locked times, for the watch's backup alarm.
                 AlarmScheduleContract.PATH -> BackupAlarm.onSchedule(
                     this,
@@ -50,6 +55,8 @@ class StatsDataListenerService : WearableListenerService() {
                 )
                 TimerContract.PATH -> {
                     timerChanged = true
+                    // The agenda tile says when a phone session runs.
+                    refreshAgendaTile = true
                     timer = if (event.type == DataEvent.TYPE_CHANGED) {
                         TimerSnapshot.from(DataMapItem.fromDataItem(event.dataItem).dataMap)
                     } else {
@@ -63,6 +70,7 @@ class StatsDataListenerService : WearableListenerService() {
         if (refreshTile) {
             TileService.getUpdater(this).requestUpdate(StatsTileService::class.java)
         }
+        if (refreshAgendaTile) AgendaSurfaces.refresh(this)
         if (timerChanged && !WatchTimerEngine.state(this).active) {
             TimerNotifier.update(this, timer)
         }

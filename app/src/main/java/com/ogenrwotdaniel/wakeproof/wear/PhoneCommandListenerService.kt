@@ -5,14 +5,15 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
+import com.ogenrwotdaniel.wakeproof.data.AgendaRepository
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.runBlocking
 
 /**
- * The phone's end of everything the watch sends: timer commands, and focus
- * blocks the watch timed on its own.
+ * The phone's end of everything the watch sends: timer commands, calendar
+ * ticks (`agenda_done:<key>`), and focus blocks the watch timed on its own.
  *
  * ### Commands
  *
@@ -46,10 +47,19 @@ import kotlinx.coroutines.runBlocking
 class PhoneCommandListenerService : WearableListenerService() {
 
     @Inject lateinit var importer: WatchBlockImporter
+    @Inject lateinit var agendaRepository: AgendaRepository
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
         if (messageEvent.path != WearContract.COMMAND_PATH) return
-        when (String(messageEvent.data, Charsets.UTF_8)) {
+        val command = String(messageEvent.data, Charsets.UTF_8)
+        if (command.startsWith(WearContract.CMD_AGENDA_DONE_PREFIX)) {
+            val key = command.removePrefix(WearContract.CMD_AGENDA_DONE_PREFIX)
+            // markDone re-pushes the agenda, which is what changes the watch.
+            // Blocking, like the block import: the service may go once this returns.
+            if (key.isNotEmpty()) runBlocking { runCatching { agendaRepository.markDone(key) } }
+            return
+        }
+        when (command) {
             WearContract.CMD_TIMER_START -> PomodoroTimerService.start(applicationContext)
             // Pause and stop are refused by the timer while a session runs
             // (nuclear focus); passed on anyway so the rule lives in one place.

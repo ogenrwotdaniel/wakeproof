@@ -121,6 +121,9 @@ dependencies {
     // Ongoing Activity (self-ticking timer chip on the watch face)
     implementation(libs.androidx.wear.ongoing)
 
+    // "WakeProof Today" watch-face complication (AgendaComplicationService).
+    implementation(libs.androidx.wear.watchface.complications.data.source.ktx)
+
     // Ambient mode: the timer stays on the watch screen, dimmed, when the wrist
     // drops, instead of the watch returning to its face. Needs a ComponentActivity.
     implementation(libs.androidx.wear)

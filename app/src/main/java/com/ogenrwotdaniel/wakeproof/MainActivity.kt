@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
         // The next calendar-event reminder, from a calendar that may have changed.
         lifecycleScope.launch {
             runCatching { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(applicationContext) }
+            // ...and the same calendar onto the watch's "Today" list.
+            com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync.push(applicationContext)
         }
         // Pull whatever the other device did before the user reads anything. This is
         // the case that matters: picking up the tablet after studying on the phone.

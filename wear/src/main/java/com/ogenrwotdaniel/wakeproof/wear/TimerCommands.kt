@@ -27,6 +27,15 @@ internal object TimerCommands {
     const val STOP = "timer_stop"
 
     /**
+     * `agenda_done:<event key>` — ticks a calendar event on the phone, which
+     * re-pushes `/wakeproof/agenda`. Mirrors the phone's
+     * `WearContract.CMD_AGENDA_DONE_PREFIX`.
+     */
+    const val AGENDA_DONE_PREFIX = "agenda_done:"
+
+    fun agendaDone(key: String) = AGENDA_DONE_PREFIX + key
+
+    /**
      * Fires [command] at every connected node.
      *
      * Broadcast rather than aimed at one node because a watch has exactly one

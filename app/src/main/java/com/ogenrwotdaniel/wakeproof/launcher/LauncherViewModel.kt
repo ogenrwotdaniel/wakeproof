@@ -19,9 +19,10 @@ import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
 import com.ogenrwotdaniel.wakeproof.agenda.EventReminders
-import com.ogenrwotdaniel.wakeproof.agenda.eventFocusMinutes
+import com.ogenrwotdaniel.wakeproof.agenda.startEventFocus
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -106,10 +107,10 @@ class LauncherViewModel @Inject constructor(
             }
             _pinned.value = pinnedApps(context, apps)
             _apps.value = apps
-            _agenda.value = withContext(Dispatchers.IO) {
-                val today = LocalDate.now()
-                agendaRepository.upcomingEvents().filter { onAgenda(it, today) }
-            }
+            val upcoming = withContext(Dispatchers.IO) { agendaRepository.upcomingEvents() }
+            val today = LocalDate.now()
+            _agenda.value = upcoming.filter { onAgenda(it, today) }
+            WearAgendaSync.push(context, upcoming)
         }
     }
 
@@ -152,17 +153,8 @@ class LauncherViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Starts a session lasting as long as what is left of [event]
-     * (2026-11-01). Re-checked here rather than trusted from the dialog: the
-     * dialog may have sat open past the point where too little was left.
-     */
-    fun focusForEvent(event: AgendaEvent): Boolean {
-        if (PomodoroTimerService.state.value.active) return false
-        val minutes = eventFocusMinutes(event, System.currentTimeMillis()) ?: return false
-        PomodoroTimerService.startForEvent(context, minutes, event.key, event.title)
-        return true
-    }
+    /** Starts a session for what is left of [event]; see [startEventFocus]. */
+    fun focusForEvent(event: AgendaEvent): Boolean = startEventFocus(context, event)
 
     companion object {
         /** A home screen of twenty favourites is an app drawer with extra steps. */

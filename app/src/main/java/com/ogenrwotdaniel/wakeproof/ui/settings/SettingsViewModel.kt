@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
+import com.ogenrwotdaniel.wakeproof.data.MIN_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import android.content.Context
 import android.net.Uri
@@ -244,7 +246,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setPushupTarget(value: Int) {
-        viewModelScope.launch { settingsRepository.setPushupTarget(value.coerceIn(5, 50)) }
+        viewModelScope.launch { settingsRepository.setPushupTarget(value.coerceIn(MIN_PUSHUP_TARGET, MAX_PUSHUP_TARGET)) }
     }
 
     fun setMathProblems(value: Int) {

@@ -19,9 +19,19 @@ import kotlinx.coroutines.flow.map
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore("settings")
 
+/** Fewest pushups an alarm can ask for (the slider's low end). */
+const val MIN_PUSHUP_TARGET = 5
+
+/**
+ * Most pushups ANY alarm asks for — the user's cap, 2026-11-04. A stored value
+ * above it (30 was saved before the cap) reads as this, so no screen, locked
+ * or not, can ask for more.
+ */
+const val MAX_PUSHUP_TARGET = 10
+
 /** User-tunable settings (DataStore-backed). */
 data class WakeProofSettings(
-    val pushupTarget: Int = 15,
+    val pushupTarget: Int = MAX_PUSHUP_TARGET,
     /** Problems in a row a math alarm demands; see [com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge]. */
     val mathProblems: Int = 3,
     /**
@@ -129,7 +139,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
 
     val settings: Flow<WakeProofSettings> = dataStore.data.map { prefs ->
         WakeProofSettings(
-            pushupTarget = prefs[PUSHUP_TARGET] ?: 15,
+            pushupTarget = (prefs[PUSHUP_TARGET] ?: MAX_PUSHUP_TARGET)
+                .coerceIn(MIN_PUSHUP_TARGET, MAX_PUSHUP_TARGET),
             mathProblems = prefs[MATH_PROBLEMS] ?: 3,
             wakeUpCheck = prefs[WAKE_UP_CHECK] ?: true,
             waterAmountMl = prefs[WATER_AMOUNT_ML] ?: 500,

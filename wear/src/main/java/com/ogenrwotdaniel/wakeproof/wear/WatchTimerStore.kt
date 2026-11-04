@@ -1,6 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.wear
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 
 /**
@@ -28,14 +29,24 @@ internal object WatchTimerStore {
     private const val SUBJECT = "subject"
     private const val TARGET = "target_blocks"
     private const val LONG_EVERY = "long_break_every"
+    private const val LAST_FOCUS_SEC = "last_focus_seconds"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    fun read(context: Context): WatchTimerState {
-        val p = prefs(context)
+    fun read(context: Context): WatchTimerState = read(prefs(context))
+
+    fun write(context: Context, state: WatchTimerState) = write(prefs(context), state)
+
+    /** [read] against any preferences — a fake in the unit tests. */
+    internal fun read(p: SharedPreferences): WatchTimerState {
         if (!p.getBoolean(ACTIVE, false)) return WatchTimerState()
         val defaults = WatchDurations()
+        val durations = WatchDurations(
+            focusMinutes = p.getInt(FOCUS_MIN, defaults.focusMinutes),
+            shortBreakMinutes = p.getInt(SHORT_MIN, defaults.shortBreakMinutes),
+            longBreakMinutes = p.getInt(LONG_MIN, defaults.longBreakMinutes)
+        )
         return WatchTimerState(
             active = true,
             running = p.getBoolean(RUNNING, false),
@@ -46,19 +57,18 @@ internal object WatchTimerStore {
             remainingMillis = p.getLong(REMAINING, 0L),
             completedFocus = p.getInt(COMPLETED, 0),
             focusStartedAt = p.getLong(FOCUS_STARTED, 0L),
-            durations = WatchDurations(
-                focusMinutes = p.getInt(FOCUS_MIN, defaults.focusMinutes),
-                shortBreakMinutes = p.getInt(SHORT_MIN, defaults.shortBreakMinutes),
-                longBreakMinutes = p.getInt(LONG_MIN, defaults.longBreakMinutes)
-            ),
+            durations = durations,
             subject = p.getString(SUBJECT, null),
             targetFocusBlocks = p.getInt(TARGET, 0),
-            longBreakEvery = p.getInt(LONG_EVERY, WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK)
+            longBreakEvery = p.getInt(LONG_EVERY, WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK),
+            // Absent in a state stored before event sessions: the last block
+            // is an ordinary one.
+            lastFocusSeconds = p.getInt(LAST_FOCUS_SEC, lastFocusDefault(durations))
         )
     }
 
-    fun write(context: Context, state: WatchTimerState) {
-        prefs(context).edit(commit = true) {
+    internal fun write(p: SharedPreferences, state: WatchTimerState) {
+        p.edit(commit = true) {
             clear()
             if (!state.active) return@edit
             putBoolean(ACTIVE, true)
@@ -74,6 +84,10 @@ internal object WatchTimerStore {
             putString(SUBJECT, state.subject)
             putInt(TARGET, state.targetFocusBlocks)
             putInt(LONG_EVERY, state.longBreakEvery)
+            putInt(LAST_FOCUS_SEC, state.lastFocusSeconds)
         }
     }
+
+    /** What a stored state with no last-block length means: a full block. Pure. */
+    fun lastFocusDefault(durations: WatchDurations): Int = WatchTimerState(durations = durations).lastFocusSeconds
 }

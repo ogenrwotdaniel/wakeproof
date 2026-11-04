@@ -13,7 +13,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
 import com.ogenrwotdaniel.wakeproof.agenda.EventFocusDialog
-import com.ogenrwotdaniel.wakeproof.agenda.eventFocusMinutes
+import com.ogenrwotdaniel.wakeproof.agenda.eventFocusOffer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -361,9 +361,8 @@ private fun Agenda(
                         .clickable {
                             // Only what can actually be focused for opens the
                             // confirm; the rest ticks, as the whole row used to.
-                            val minutes = eventFocusMinutes(event, System.currentTimeMillis())
-                            if (done || sessionRunning || minutes == null) onToggleDone(event, !done)
-                            else confirming = event to minutes
+                            val minutes = eventFocusOffer(event, done, sessionRunning, System.currentTimeMillis())
+                            if (minutes == null) onToggleDone(event, !done) else confirming = event to minutes
                         }
                         .padding(vertical = 3.dp)
                 )

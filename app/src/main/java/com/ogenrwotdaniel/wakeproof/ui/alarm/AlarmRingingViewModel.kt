@@ -89,12 +89,8 @@ class AlarmRingingViewModel @Inject constructor(
     }
 
     /**
-     * Marks today's goal done for this alarm and arms the [WakeCheck], then runs
-     * [onDone] on the main thread.
-     *
-     * The check is skipped when the setting cannot be read (before the first
-     * unlock DataStore is unreadable): adding a ring the user may have switched
-     * off is worse than missing one check.
+     * Marks today's goal done for this alarm, then runs [onDone] on the main
+     * thread. The old "Still up?" [WakeCheck] is never armed any more.
      */
     fun markCompletedToday(onDone: () -> Unit) {
         viewModelScope.launch {
@@ -103,12 +99,10 @@ class AlarmRingingViewModel @Inject constructor(
                 runCatching { repository.markCompletedToday(id) }
                 // Done: a restart no longer brings it back.
                 if (StrictAlarm.isStrictId(context, id)) StrictAlarm.clearRinging(context)
-                // The locked alarm always gets the "Still up?" check: twenty
-                // pushups and straight back to bed would be a way around it.
-                val wantsCheck = _strict.value ||
-                    runCatching { settingsRepository.settings.first().wakeUpCheck }
-                        .getOrDefault(false)
-                if (wantsCheck && wakeCheckStore.claimToday(id)) scheduler.scheduleWakeCheck(id)
+                // No wake-up check any more (removed 2026-11-04, user's request):
+                // a re-ring five minutes after a full set of pushups meant a
+                // second full set. Only cancel one an older build armed.
+                scheduler.cancelWakeCheck(id)
             }
             onDone()
         }

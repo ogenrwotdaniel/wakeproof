@@ -12,6 +12,32 @@ class EventFocusTest {
     private fun event(key: String = "e", begin: Long, end: Long, allDay: Boolean = false) =
         AgendaEvent(key, "Lecture", begin, end, allDay, "")
 
+    private val utc = java.time.ZoneOffset.UTC
+
+    @Test
+    fun `a title tap offers focus only for what can be focused for`() {
+        val lecture = event(begin = 100 * min, end = 185 * min)
+        assertEquals(85, eventFocusOffer(lecture, done = false, sessionRunning = false, nowMillis = 90 * min, zone = utc))
+        assertNull(eventFocusOffer(lecture, done = true, sessionRunning = false, nowMillis = 90 * min, zone = utc))
+        assertNull(eventFocusOffer(lecture, done = false, sessionRunning = true, nowMillis = 90 * min, zone = utc))
+        assertNull(eventFocusOffer(lecture, done = false, sessionRunning = false, nowMillis = 180 * min, zone = utc))
+    }
+
+    @Test
+    fun `tomorrow's event is ticked, not focused for, from the calendar screen`() {
+        val tomorrow = event(begin = 1_440 * min + 600 * min, end = 1_440 * min + 690 * min)
+        assertNull(eventFocusOffer(tomorrow, done = false, sessionRunning = false, nowMillis = 600 * min, zone = utc))
+    }
+
+    @Test
+    fun `an event that began yesterday and runs into today can still be focused for`() {
+        val overnight = event(begin = 1_400 * min, end = 1_440 * min + 60 * min)
+        assertEquals(
+            60,
+            eventFocusOffer(overnight, done = false, sessionRunning = false, nowMillis = 1_440 * min, zone = utc)
+        )
+    }
+
     @Test
     fun `a session for an event not yet started lasts the whole event`() {
         assertEquals(85, eventFocusMinutes(event(begin = 100 * min, end = 185 * min), nowMillis = 90 * min))

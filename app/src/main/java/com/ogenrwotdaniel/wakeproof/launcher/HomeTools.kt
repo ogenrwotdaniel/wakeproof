@@ -22,6 +22,9 @@ private const val CLAUDE = "com.anthropic.claude"
 /** KakaoBank — added by the user's request, 2026-10-27. */
 private const val KAKAOBANK = "com.kakaobank.channel"
 
+/** UNIST Smart-Check (attendance) — added by the user's request, 2026-11-04. */
+private const val UNIST_SMART_CHECK = "kr.ac.unist.atdc"
+
 /**
  * Samsung's Expert RAW camera. The package name is from memory, not read off
  * the device, so [pinnedApps] also finds it by its label.
@@ -31,8 +34,8 @@ private const val EXPERT_RAW_LABEL = "Expert RAW"
 
 /**
  * The tools that are always on the home screen and cannot be unpinned, in
- * order: the phone, the cameras, notes, Claude, the bank, the clock and the
- * calendar.
+ * order: the phone, the cameras, notes, Claude, the bank, UNIST attendance,
+ * the clock and the calendar.
  * Chosen by the user as things a phone is FOR rather than things it is used
  * to fill time with. Roles (phone, camera, clock, calendar) are resolved from
  * whatever app holds them, so a non-Samsung default still lands here; apps
@@ -53,7 +56,7 @@ fun permanentPackages(context: Context): List<String> {
         Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
     )
     return listOfNotNull(
-        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, KAKAOBANK,
+        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, KAKAOBANK, UNIST_SMART_CHECK,
         clock, calendar
     )
         .filter { it != context.packageName }

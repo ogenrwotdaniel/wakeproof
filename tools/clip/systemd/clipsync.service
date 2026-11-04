@@ -1,0 +1,18 @@
+[Unit]
+Description=WakeProof Clip daemon (clipboard across laptop, phone and tablet)
+Documentation=file://%h/AndroidStudioProjects/wakeproof/docs/CLIPBOARD.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=com.ogenrwotdaniel.WakeProofClip
+WorkingDirectory=%h/AndroidStudioProjects/wakeproof/tools/clip
+Environment=PYTHONPATH=%h/AndroidStudioProjects/wakeproof/tools/clip
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m clipsync daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

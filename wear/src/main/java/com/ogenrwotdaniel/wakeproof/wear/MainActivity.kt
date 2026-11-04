@@ -3,6 +3,7 @@ package com.ogenrwotdaniel.wakeproof.wear
 import android.Manifest
 import androidx.activity.ComponentActivity
 import androidx.wear.ambient.AmbientLifecycleObserver
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -49,6 +50,7 @@ import kotlinx.coroutines.launch
  * 2. the phone's timer, mirrored (no pause/stop: the phone refuses them);
  * 3. idle: today's progress, plus Start (on the watch) and Start on phone —
  *    and the cloud line: who the watch uploads as, or a way to sign it in.
+ * "Today" (the phone's calendar, [AgendaActivity]) is offered in all three.
  *
  * The alarm is deliberately not controllable from here. See the note on
  * `WearContract.COMMAND_PATH`: an alarm you can silence from your wrist is one
@@ -194,7 +196,9 @@ class MainActivity : ComponentActivity() {
                 renderLocal(local)
                 return@launch
             }
+            // A dead phone session (process killed, no final push) reads as idle.
             val phone = TimerSnapshot.read(applicationContext)
+                ?.takeIf { it.liveAt(System.currentTimeMillis()) }
             if (phone != null) {
                 showPhoneControls(phone)
                 renderPhoneTimer(phone)
@@ -221,6 +225,7 @@ class MainActivity : ComponentActivity() {
         if (state.phase != WatchPhase.FOCUS) {
             addButton("Skip break") { WatchTimerEngine.skipBreak(applicationContext) }
         }
+        addTodayButton()
     }
 
     private suspend fun renderLocal(state: WatchTimerState) {
@@ -286,6 +291,7 @@ class MainActivity : ComponentActivity() {
         // would be two buttons that do nothing. Resume only rescues a session
         // paused by an older phone build.
         if (!timer.running) addPhoneButton("Resume", TimerCommands.RESUME)
+        addTodayButton()
     }
 
     /** Shows the phone's countdown, ticking every second while running. */
@@ -304,7 +310,15 @@ class MainActivity : ComponentActivity() {
             val msLeft = (timer.finishAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
             val remaining = (msLeft + 999) / 1000L
             textView.text = "$phase · phone\n\n${clock(remaining)}"
-            if (remaining <= 0L) break
+            if (remaining <= 0L) {
+                // No push for the next phase within the grace = the phone died
+                // mid-session ([TimerSnapshot.liveAt]); fall back to idle then.
+                val untilStale = timer.finishAtMillis + TimerSnapshot.RUNNING_STALE_MILLIS -
+                    System.currentTimeMillis()
+                delay(untilStale.coerceAtLeast(0L) + 1_000L)
+                render()
+                return
+            }
             delay((msLeft - 1) % 1000L + 1)
         }
     }
@@ -322,6 +336,7 @@ class MainActivity : ComponentActivity() {
         for (session in WatchSession.entries) {
             addButton(session.label) { WatchTimerEngine.start(applicationContext, session) }
         }
+        addTodayButton()
         addPhoneButton("Start on phone", TimerCommands.START)
         if (WatchCloud.canSignInHere && !WatchCloud.signedIn(applicationContext)) {
             addButton("Sign in to cloud") { signInHere() }
@@ -388,6 +403,16 @@ class MainActivity : ComponentActivity() {
     }
 
     // --- Shared -------------------------------------------------------------------
+
+    /**
+     * Today's calendar from the phone, offered in EVERY state — with a session
+     * running (here or on the phone) it still ticks events off and says why a
+     * title cannot start another session. It was idle-only, so a phone session
+     * left no way in and no explanation. Hidden in ambient with the other buttons.
+     */
+    private fun addTodayButton() {
+        addButton("Today") { startActivity(Intent(this, AgendaActivity::class.java)) }
+    }
 
     private fun addButton(label: String, action: suspend () -> Unit): Button {
         val button = Button(this).apply {

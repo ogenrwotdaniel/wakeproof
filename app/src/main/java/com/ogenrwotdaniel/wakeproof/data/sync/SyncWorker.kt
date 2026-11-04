@@ -50,6 +50,8 @@ class SyncWorker(
         // Before the pass, so a watch block that missed its event goes up to the
         // cloud in this same pass rather than the next one.
         runCatching { entryPoint.watchBlockImporter().sweep() }
+        // Signed in or not: the watch's "Today" list comes from this phone's calendar.
+        com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync.push(applicationContext)
         return when (val result = entryPoint.syncEngine().sync()) {
             is SyncResult.Skipped -> Result.success()
             is SyncResult.Failure -> Result.retry()

@@ -61,6 +61,24 @@ class LiveFocusSession @Inject constructor(
         write()
     }
 
+    /**
+     * Withdraws a session THIS install announced but no longer runs
+     * (2026-11-04): a process killed mid-session never published its end, so
+     * the tablet stayed walled until the dead session's end time. Only our own
+     * document is touched — a peer's session must keep walling us.
+     */
+    suspend fun releaseIfOwnStale() {
+        val db = firestore ?: return
+        val uid = accounts.currentUid() ?: return
+        if (!preferences.isEnabled()) return
+        runCatching {
+            val doc = db.collection(USERS).document(uid).collection(LIVE).document(FOCUS_SESSION).get().await()
+            val from = doc.getString(INSTALL_ID)
+            val endsAt = doc.getLong(ENDS_AT) ?: 0L
+            if (from == preferences.installId() && endsAt > System.currentTimeMillis()) publish(0L)
+        }.onFailure { Log.w(TAG, "Stale focus session release failed", it) }
+    }
+
     private suspend fun write() {
         val now = System.currentTimeMillis()
         val endsAtMillis = maxOf(ownEndsAt, watchEndsAt.takeIf { it > now } ?: 0L)

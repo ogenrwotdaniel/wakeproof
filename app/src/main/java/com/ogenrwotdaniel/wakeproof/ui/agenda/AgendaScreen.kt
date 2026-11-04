@@ -21,6 +21,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import com.ogenrwotdaniel.wakeproof.agenda.EventFocusDialog
+import com.ogenrwotdaniel.wakeproof.agenda.eventFocusOffer
+import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextDecoration
@@ -38,6 +46,10 @@ import java.util.Locale
  * Agenda: upcoming calendar events (next 7 days, read from the device
  * calendar provider that Google Calendar syncs into) with a local tick-off
  * checkbox per event instance. Gated on the READ_CALENDAR runtime permission.
+ *
+ * Like the home-screen agenda (2026-11-04): the checkbox ticks, and tapping a
+ * TITLE offers a focus session that ends with the event — for what can be
+ * focused for ([eventFocusOffer]); anything else the title tap ticks.
  */
 @Composable
 fun AgendaScreen(
@@ -47,6 +59,22 @@ fun AgendaScreen(
 ) {
     val hasPermission by viewModel.hasPermission.collectAsStateWithLifecycle()
     val items by viewModel.items.collectAsStateWithLifecycle()
+    val timer by viewModel.timer.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var confirming by remember { mutableStateOf<Pair<AgendaEvent, Int>?>(null) }
+    confirming?.let { (event, minutes) ->
+        EventFocusDialog(
+            title = event.title,
+            minutes = minutes,
+            onConfirm = {
+                confirming = null
+                if (!viewModel.focusForEvent(event)) {
+                    Toast.makeText(context, "Too little of it is left to focus for.", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { confirming = null }
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -92,6 +120,13 @@ fun AgendaScreen(
                 AgendaList(
                     items = items,
                     onToggle = viewModel::setDone,
+                    onTitle = { item ->
+                        val minutes = eventFocusOffer(
+                            item.event, item.done, timer.active, System.currentTimeMillis()
+                        )
+                        if (minutes == null) viewModel.setDone(item, !item.done)
+                        else confirming = item.event to minutes
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -105,6 +140,7 @@ fun AgendaScreen(
 private fun AgendaList(
     items: List<AgendaItem>,
     onToggle: (AgendaItem, Boolean) -> Unit,
+    onTitle: (AgendaItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val zone = ZoneId.systemDefault()
@@ -122,7 +158,7 @@ private fun AgendaList(
                 )
             }
             items(dayItems, key = { it.event.key }) { item ->
-                AgendaRow(item = item, onToggle = { onToggle(item, it) })
+                AgendaRow(item = item, onToggle = { onToggle(item, it) }, onTitle = { onTitle(item) })
             }
         }
     }
@@ -132,18 +168,23 @@ private fun AgendaList(
 private fun AgendaRow(
     item: AgendaItem,
     onToggle: (Boolean) -> Unit,
+    onTitle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onToggle(!item.done) }
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Checkbox(checked = item.done, onCheckedChange = onToggle)
-            Column(modifier = Modifier.weight(1f).padding(vertical = 8.dp)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onTitle)
+                    .padding(vertical = 8.dp)
+            ) {
                 Text(
                     text = item.event.title,
                     style = MaterialTheme.typography.bodyLarge,

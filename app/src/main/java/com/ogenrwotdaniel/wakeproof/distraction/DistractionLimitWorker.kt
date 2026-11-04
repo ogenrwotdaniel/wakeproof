@@ -46,6 +46,8 @@ class DistractionLimitWorker(
         AppBlockService.sync(applicationContext)
         // Calendar edits since the last reminder are picked up here at the latest.
         runCatching { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.reschedule(applicationContext) }
+        // ...and onto the watch's "Today" list.
+        com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync.push(applicationContext)
         if (limits.isEmpty() || !usageRepository.hasAccess()) return Result.success()
 
         val usedToday = usageRepository.todayMinutesFor(limits.keys)

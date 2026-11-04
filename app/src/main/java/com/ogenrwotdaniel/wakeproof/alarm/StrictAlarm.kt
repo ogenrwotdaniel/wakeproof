@@ -33,7 +33,7 @@ object StrictAlarm {
     /** In order; slot 0 keeps the storage keys from when there was only one. */
     val SLOTS = listOf(Slot(3, 0), Slot(5, 30))
 
-    const val REPS = 25
+    const val REPS = com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
     const val MATH_FALLBACK_PROBLEMS = 10
     val TYPE = AlarmType.PUSHUP
     const val DAYS_MASK = 127

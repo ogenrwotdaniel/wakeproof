@@ -53,8 +53,24 @@ data class WatchTimerState(
     /** Focus blocks this session runs before stopping itself. */
     val targetFocusBlocks: Int = 0,
     /** A long break follows every this-many focus blocks (3 in the 3-hour preset). */
-    val longBreakEvery: Int = WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK
+    val longBreakEvery: Int = WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK,
+    /**
+     * The LAST focus block's length; the others run the focus duration.
+     * Differs only in an event session ([WatchTimer.startExact]), whose last
+     * block is trimmed or stretched so it ends with the event. Defaults to the
+     * focus length, which is what every state stored before it means.
+     */
+    val lastFocusSeconds: Int = durations.focusMinutes.coerceAtLeast(1) * 60
 ) {
+    /** How long focus block [block] (1-based) runs; see [WatchTimer.focusSecondsForBlock]. */
+    fun focusMillisOfBlock(block: Int): Long = 1_000L * WatchTimer.focusSecondsForBlock(
+        block, targetFocusBlocks, (durations.millisOf(WatchPhase.FOCUS) / 1_000L).toInt(), lastFocusSeconds
+    )
+
+    /** Focus minutes in blocks 1..[blocks], for the end-of-session summary. */
+    fun focusMinutesThrough(blocks: Int): Int =
+        (1..blocks).sumOf { (focusMillisOfBlock(it) / 60_000L).toInt() }
+
     fun remainingMillisAt(now: Long): Long =
         if (running) (phaseEndsAt - now).coerceAtLeast(0L) else remainingMillis
 
@@ -106,6 +122,15 @@ enum class WatchSession(val label: String, val minutes: Int) {
 }
 
 /**
+ * An event session's shape: [focusBlocks] of 25 minutes with 5-minute breaks
+ * and no long break, the last one [lastFocusMinutes] long. A hand-kept COPY of
+ * the phone's `pomodoro/SessionLength.kt` `exactSessionPlan` (which returns a
+ * `SessionPlan`; only these two numbers vary). Pinned by the same vectors in
+ * the phone's `ExactSessionTest` and the watch's `WatchTimerTest`.
+ */
+data class WatchExactPlan(val focusBlocks: Int, val lastFocusMinutes: Int)
+
+/**
  * Pure transitions for the watch timer — no clock, no Android, unit-tested.
  * `WatchTimerEngine` applies them and does the side effects.
  */
@@ -118,6 +143,72 @@ object WatchTimer {
     val THREE_HOUR_DURATIONS = WatchDurations(25, 5, 15)
     const val THREE_HOUR_BLOCKS = 6
     const val THREE_HOUR_LONG_BREAK_EVERY = 3
+
+    /** Focus and break lengths of an exact (event) session. COPY of the phone's `EXACT_*`. */
+    const val EXACT_FOCUS_MINUTES = 25
+    const val EXACT_BREAK_MINUTES = 5
+
+    /** Shortest event session, and shortest last block. COPY of the phone's `MIN_EXACT_SESSION_MINUTES`. */
+    const val MIN_EXACT_SESSION_MINUTES = 10
+
+    /**
+     * A session lasting EXACTLY [totalMinutes]: 25 + 5 blocks, the last one
+     * trimmed — or, when trimming would leave a stub under
+     * [MIN_EXACT_SESSION_MINUTES], stretched — so it ends on the minute.
+     * A COPY of the phone's `exactSessionPlan`; keep the two in step by hand.
+     */
+    fun exactSessionPlan(totalMinutes: Int): WatchExactPlan {
+        val total = totalMinutes.coerceAtLeast(MIN_EXACT_SESSION_MINUTES)
+        val cycle = EXACT_FOCUS_MINUTES + EXACT_BREAK_MINUTES
+        var blocks = ((total + EXACT_BREAK_MINUTES + cycle - 1) / cycle).coerceAtLeast(1)
+        var last = total - (blocks - 1) * cycle
+        if (last < MIN_EXACT_SESSION_MINUTES && blocks > 1) {
+            blocks -= 1
+            last += cycle
+        }
+        return WatchExactPlan(blocks, last)
+    }
+
+    /**
+     * How long focus block [block] (1-based) runs in a session of
+     * [targetFocusBlocks]: the last [lastFocusSeconds], the rest [focusSeconds].
+     * A COPY of the phone's `focusSecondsForBlock`.
+     */
+    fun focusSecondsForBlock(block: Int, targetFocusBlocks: Int, focusSeconds: Int, lastFocusSeconds: Int): Int =
+        if (targetFocusBlocks > 0 && block >= targetFocusBlocks) lastFocusSeconds else focusSeconds
+
+    /**
+     * Minutes a session for a calendar event from [beginMillis] to [endMillis]
+     * runs if started at [now], or null when it cannot be focused for — over,
+     * or under [MIN_EXACT_SESSION_MINUTES] left. Counted from now when the
+     * event has begun, so the session ends with it. A COPY of the phone's
+     * `agenda/eventFocusMinutes` (all-day events never reach the watch).
+     */
+    fun eventFocusMinutes(beginMillis: Long, endMillis: Long, now: Long): Int? {
+        if (endMillis <= now) return null
+        val minutes = ((endMillis - maxOf(beginMillis, now)) / 60_000L).toInt()
+        return minutes.takeIf { it >= MIN_EXACT_SESSION_MINUTES }
+    }
+
+    /**
+     * An event session of exactly [totalMinutes], on the watch's own timer —
+     * the same nuclear rules as any other: no pause, no stop.
+     */
+    fun startExact(totalMinutes: Int, subject: String?, now: Long): WatchTimerState {
+        val plan = exactSessionPlan(totalMinutes)
+        val state = WatchTimerState(
+            active = true,
+            running = true,
+            phase = WatchPhase.FOCUS,
+            focusStartedAt = now,
+            durations = WatchDurations(EXACT_FOCUS_MINUTES, EXACT_BREAK_MINUTES, EXACT_BREAK_MINUTES),
+            subject = subject,
+            targetFocusBlocks = plan.focusBlocks,
+            longBreakEvery = Int.MAX_VALUE,
+            lastFocusSeconds = plan.lastFocusMinutes * 60
+        )
+        return state.copy(phaseEndsAt = now + state.focusMillisOfBlock(1))
+    }
 
     fun start(
         durations: WatchDurations,
@@ -189,15 +280,15 @@ object WatchTimer {
         if (state.phase != WatchPhase.FOCUS) return Advance(focusFrom(state, now), null)
 
         val endedAt = state.phaseEndsAt
+        val done = state.completedFocus + 1
         val block = FocusBlock(
             id = newId(),
             startedAt = state.focusStartedAt,
             endedAt = endedAt,
-            minutes = state.durations.focusMinutes,
+            minutes = (state.focusMillisOfBlock(done) / 60_000L).toInt(),
             epochDay = epochDayOf(endedAt, zone),
             subject = state.subject
         )
-        val done = state.completedFocus + 1
         // A timed session ends on its last focus block; its trailing break is
         // never run, as on the phone.
         if (state.targetFocusBlocks in 1..done) {
@@ -223,7 +314,7 @@ object WatchTimer {
     private fun focusFrom(state: WatchTimerState, now: Long) = state.copy(
         running = true,
         phase = WatchPhase.FOCUS,
-        phaseEndsAt = now + state.durations.millisOf(WatchPhase.FOCUS),
+        phaseEndsAt = now + state.focusMillisOfBlock(state.completedFocus + 1),
         remainingMillis = 0L,
         focusStartedAt = now
     )

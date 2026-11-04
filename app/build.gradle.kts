@@ -156,6 +156,8 @@ dependencies {
     // orientation applied, and a sideways bottle defeats the whole method.
     implementation(libs.androidx.exifinterface)
     implementation(libs.mlkit.pose.detection)
+    // WakeProof Clip pairing: reads the laptop's QR (bundled model, no Play download).
+    implementation(libs.mlkit.barcode.scanning)
     implementation(libs.play.review.ktx)
 
     // Networking (Kimi API)

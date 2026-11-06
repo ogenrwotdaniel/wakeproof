@@ -371,11 +371,9 @@ fun SettingsScreen(
             HorizontalDivider()
 
             ApiKeySection(
-                provider = keyState.provider,
                 hasKey = keyState.hasKey,
                 testing = keyState.testing,
                 testResult = keyState.testResult,
-                onProviderChange = viewModel::setProvider,
                 onSave = viewModel::saveKey,
                 onClear = viewModel::clearKey,
                 onTest = viewModel::testConnection
@@ -452,8 +450,7 @@ fun SettingsScreen(
                 // version actually shipped.
                 text = "WakeProof ${BuildConfig.VERSION_NAME} — alarms you can only " +
                     "dismiss by proving it. " +
-                    "Pushups are verified on-device; water via the selected vision AI " +
-                    "(Kimi or Gemini).",
+                    "Pushups and water are verified on-device (with optional Gemini fallback).",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

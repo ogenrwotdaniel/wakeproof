@@ -28,6 +28,19 @@ class TimeChangeReceiver : BroadcastReceiver() {
                 CoroutineScope(Dispatchers.Default).launch {
                     try {
                         alarmInitializer.initialize()
+                        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                            runCatching { StrictAlarm.resumeIfPending(context) }
+                            runCatching {
+                                com.ogenrwotdaniel.wakeproof.distraction.AppBlockService.sync(
+                                    context.applicationContext
+                                )
+                            }
+                            runCatching {
+                                com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService.restore(
+                                    context.applicationContext
+                                )
+                            }
+                        }
                     } finally {
                         pendingResult.finish()
                     }

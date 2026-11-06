@@ -26,7 +26,6 @@ import com.ogenrwotdaniel.wakeproof.data.sync.StudyUsageSync
 import com.ogenrwotdaniel.wakeproof.data.WallDay
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.distraction.AppGate
-import com.ogenrwotdaniel.wakeproof.distraction.GateLog
 import com.ogenrwotdaniel.wakeproof.distraction.PendingRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
@@ -244,19 +243,20 @@ class UsageViewModel @Inject constructor(
     val today: StateFlow<TodayStatus> = statsRepository.observeToday()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TodayStatus())
 
-    /** Gate counts from this device's log, joined with the time spent in waiting apps. */
+    /** Time spent in gated apps over each of the last 7 days, oldest first. */
     private suspend fun measureWallWeek(): List<WallDay> {
         val gateBrowsers = wallRulesRepository.current().gateBrowsers
-        val waiting = withContext(Dispatchers.IO) {
+        val gated = withContext(Dispatchers.IO) {
             val essentials = essentialPackages(context)
             val browsers = AppGate.browserPackages(context)
             usageStatsRepository.installedApps().map { it.packageName }.filter {
                 AppGate.isGated(context, it, essentials, browsers, gateBrowsers)
             }.toSet()
         }
-        val minutes = usageStatsRepository.weekMinutesFor(waiting).associate { it.epochDay to it.minutes }
-        return GateLog.lastDays(context).map { day ->
-            WallDay(day.epochDay, day.opened, day.walkedAway, minutes[day.epochDay] ?: 0L)
+        val minutes = usageStatsRepository.weekMinutesFor(gated).associate { it.epochDay to it.minutes }
+        val today = LocalDate.now().toEpochDay()
+        return ((today - 6)..today).map { day ->
+            WallDay(epochDay = day, waitingAppMinutes = minutes[day] ?: 0L)
         }
     }
 

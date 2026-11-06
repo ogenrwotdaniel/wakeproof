@@ -39,17 +39,20 @@ class AppGateTest {
     }
 
     @Test
-    fun `social, video and messaging apps wait, a notes app does not`() {
+    fun `social, video and messaging apps are gated, a notes app is not`() {
         assertTrue(AppGate.isGated("com.whatsapp", ApplicationInfo.CATEGORY_UNDEFINED, null))
         assertTrue(AppGate.isGated("x.y", ApplicationInfo.CATEGORY_SOCIAL, null))
         assertTrue(AppGate.isGated("x.y", ApplicationInfo.CATEGORY_VIDEO, null))
         assertFalse(
             AppGate.isGated("com.samsung.android.app.notes", ApplicationInfo.CATEGORY_PRODUCTIVITY, null)
         )
+        assertFalse(
+            AppGate.isGated("com.google.android.apps.bard", ApplicationInfo.CATEGORY_PRODUCTIVITY, null)
+        )
     }
 
     @Test
-    fun `the default sms app never waits, even when it calls itself social`() {
+    fun `the default sms app is never gated, even when it calls itself social`() {
         assertFalse(AppGate.isGated("sms.app", ApplicationInfo.CATEGORY_SOCIAL, "sms.app"))
         assertFalse(
             AppGate.isGated("com.samsung.android.messaging", ApplicationInfo.CATEGORY_UNDEFINED, null)
@@ -57,38 +60,17 @@ class AppGateTest {
     }
 
     @Test
-    fun `every messenger waits, whatsapp business telegram and kakaotalk included`() {
+    fun `every messenger and the Google Discover app are gated`() {
         assertTrue(AppGate.isGated("com.whatsapp.w4b", ApplicationInfo.CATEGORY_UNDEFINED, null))
         assertTrue(AppGate.isGated("org.telegram.messenger", ApplicationInfo.CATEGORY_UNDEFINED, null))
         assertTrue(AppGate.isGated("com.kakao.talk", ApplicationInfo.CATEGORY_UNDEFINED, null))
         assertTrue(AppGate.isGated("com.whatsapp", ApplicationInfo.CATEGORY_UNDEFINED, null))
-    }
-
-    @Test
-    fun `a pass survives launching and use, and ends on leaving`() {
-        val fresh = GatePass(grantedAt = 1_000, used = false)
-        // Still launching: our own wait screen is in front.
-        val launching = GatePasses.passAfter(fresh, APP, WAKEPROOF, now = 2_000)
-        assertEquals(fresh, launching)
-        val inUse = GatePasses.passAfter(fresh, APP, APP, now = 3_000)
-        assertEquals(GatePass(1_000, used = true), inUse)
-        // Switching anywhere else, WakeProof included, ends the visit at once.
-        assertNull(GatePasses.passAfter(inUse!!, APP, "com.other", now = 3_500))
-        assertNull(GatePasses.passAfter(inUse, APP, WAKEPROOF, now = 3_500))
-    }
-
-    @Test
-    fun `the shade or a file picker over the app does not end the visit`() {
-        val inUse = GatePass(grantedAt = 1_000, used = true)
-        assertEquals(inUse, GatePasses.passAfter(inUse, APP, "com.android.systemui", now = 9_000))
-        assertEquals(inUse, GatePasses.passAfter(inUse, APP, "com.google.android.documentsui", now = 9_000))
-    }
-
-    @Test
-    fun `a pass the app never used lapses after the launch window`() {
-        val fresh = GatePass(grantedAt = 1_000, used = false)
-        assertNull(
-            GatePasses.passAfter(fresh, APP, WAKEPROOF, now = 1_001 + AppGate.PASS_LAUNCH_MILLIS)
+        assertTrue(
+            AppGate.isGated(
+                "com.google.android.googlequicksearchbox",
+                ApplicationInfo.CATEGORY_UNDEFINED,
+                null
+            )
         )
     }
 
@@ -98,56 +80,102 @@ class AppGateTest {
             GateVerdict.ALLOW,
             gateVerdict(
                 essential = true, focusSessionActive = true, onFocusList = false,
-                capSpent = true, gated = true, hasPass = false
+                capSpent = true, gated = true, outsideWindow = true
             )
         )
     }
 
     @Test
-    fun `a focus session walls anything off the list, pass or not`() {
+    fun `a focus session walls anything off the list`() {
         assertEquals(
             GateVerdict.FOCUS_WALL,
             gateVerdict(
                 essential = false, focusSessionActive = true, onFocusList = false,
-                capSpent = false, gated = true, hasPass = true
+                capSpent = false, gated = true
             )
         )
         assertEquals(
             GateVerdict.ALLOW,
             gateVerdict(
                 essential = false, focusSessionActive = true, onFocusList = true,
-                capSpent = false, gated = false, hasPass = false
+                capSpent = false, gated = false
             )
         )
     }
 
     @Test
-    fun `a spent cap outranks the wait, and a pass opens a gated app`() {
+    fun `a spent cap outranks the window, and inside the window gated apps open directly`() {
         assertEquals(
             GateVerdict.CAP_WALL,
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = true, gated = true, hasPass = true
+                capSpent = true, gated = true, outsideWindow = true
             )
         )
         assertEquals(
-            GateVerdict.WAIT,
+            GateVerdict.WINDOW_WALL,
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = false, gated = true, hasPass = false
+                capSpent = false, gated = true, outsideWindow = true
             )
         )
         assertEquals(
             GateVerdict.ALLOW,
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = false, gated = true, hasPass = true
+                capSpent = false, gated = true, outsideWindow = false
             )
         )
     }
 
-    private companion object {
-        const val APP = "com.instagram.android"
-        const val WAKEPROOF = "com.ogenrwotdaniel.wakeproof"
+    @Test
+    fun `holdSuspended holds walled or forced apps and spares neverSuspend`() {
+        assertFalse(holdSuspended(neverSuspend = false, verdict = GateVerdict.ALLOW))
+        assertTrue(holdSuspended(neverSuspend = false, verdict = GateVerdict.WINDOW_WALL))
+        assertTrue(holdSuspended(neverSuspend = false, verdict = GateVerdict.ALLOW, forced = true))
+        assertFalse(holdSuspended(neverSuspend = true, verdict = GateVerdict.WINDOW_WALL, forced = true))
+        assertTrue(AppGate.PLAY_STORE in AppGate.NEVER_SUSPEND)
+        assertTrue(AppGate.GOOGLE_APP in AppGate.NEVER_SUSPEND)
+    }
+
+    @Test
+    fun `hosted Gemini activities inside Google app resolve to Gemini while Discover and SilkPane stay Google`() {
+        val fold = ResumedActivities()
+        fold.onResumed(
+            "com.google.android.apps.bard",
+            "com.google.android.apps.bard.shellapp.BardEntryPointActivity",
+            at = 1_000
+        )
+        fold.onLeft(
+            "com.google.android.apps.bard",
+            "com.google.android.apps.bard.shellapp.BardEntryPointActivity"
+        )
+        fold.onResumed(
+            "com.google.android.googlequicksearchbox",
+            "com.google.apps.tiktok.nav.gateway.GatewayActivity",
+            at = 1_050
+        )
+        fold.onLeft(
+            "com.google.android.googlequicksearchbox",
+            "com.google.apps.tiktok.nav.gateway.GatewayActivity"
+        )
+        fold.onResumed(
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity",
+            at = 1_100
+        )
+        assertEquals(AppGate.GEMINI_APP, fold.foreground())
+
+        // Opening the in-app search browser or Discover from Gemini switches foreground to GOOGLE_APP.
+        fold.onLeft(
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity"
+        )
+        fold.onResumed(
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.apps.search.googleapp.silkpane.SilkPaneActivity",
+            at = 2_000
+        )
+        assertEquals(AppGate.GOOGLE_APP, fold.foreground())
     }
 }

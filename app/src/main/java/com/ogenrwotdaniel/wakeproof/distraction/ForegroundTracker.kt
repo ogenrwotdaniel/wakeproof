@@ -28,15 +28,17 @@ class ResumedActivities {
     private val lastResumedAt = mutableMapOf<String, Long>()
 
     fun onResumed(packageName: String, className: String, at: Long) {
-        resumed.getOrPut(packageName) { mutableSetOf() } += className
-        lastResumedAt[packageName] = at
+        val pkg = AppGate.effectivePackage(packageName, className)
+        resumed.getOrPut(pkg) { mutableSetOf() } += className
+        lastResumedAt[pkg] = at
     }
 
     /** PAUSED, STOPPED and DESTROYED all mean the same here: no longer in front. */
     fun onLeft(packageName: String, className: String) {
-        val set = resumed[packageName] ?: return
+        val pkg = AppGate.effectivePackage(packageName, className)
+        val set = resumed[pkg] ?: return
         set -= className
-        if (set.isEmpty()) resumed -= packageName
+        if (set.isEmpty()) resumed -= pkg
     }
 
     /** The package in front, or null when nothing is known to be resumed. */

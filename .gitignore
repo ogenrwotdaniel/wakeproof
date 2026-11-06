@@ -16,8 +16,10 @@ keystore.properties
 # carries its API keys. See docs/CLOUD_SYNC.md.
 google-services.json
 
-# Private working documents — never commit
+# Private working documents & agent state — never commit
+AGENTS.md
 CLAUDE.md
+.claude/
 docs/TESTER_EMAIL.md
 
 # Water-verification corpus: bottle photographs. The privacy policy promises
@@ -25,6 +27,7 @@ docs/TESTER_EMAIL.md
 # See tools/water/README.md.
 tools/water/corpus/
 tools/**/__pycache__/
+.pytest_cache/
 tools/water/.pytest_cache/
 
 # Play Console working notes (release checklist, store texts) — kept locally

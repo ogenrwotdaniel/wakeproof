@@ -32,6 +32,7 @@ class WakeProofApp : Application() {
         // covers that window from the device-protected mirror instead.
         if (getSystemService(UserManager::class.java).isUserUnlocked) {
             applicationScope.launch { alarmInitializer.initialize() }
+            runCatching { com.ogenrwotdaniel.wakeproof.distraction.AppBlockService.sync(this) }
             DistractionLimitWorker.schedule(this)
             // Re-arms the periodic pass after a reboot. Only for users who turned
             // sync on — an hourly wake-up that can only report "nothing to do" is

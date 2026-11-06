@@ -9,17 +9,26 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * OpenAI-compatible Chat Completions DTOs. `content` is a [JsonElement]
- * because the API accepts BOTH a plain string and an array of
- * {type:"text"} / {type:"image_url"} parts.
+ * Gemini OpenAI-compatible Chat Completions DTOs (`v1beta/openai/chat/completions`).
+ *
+ * `content` is a [JsonElement] because the API accepts BOTH a plain string and
+ * an array of `{type:"text"}` / `{type:"image_url"}` parts. `temperature` is
+ * omitted on Gemini 3.x models per Google's migration guidance; thinking latency
+ * is capped via [reasoningEffort] (`"low"`, the minimum supported on
+ * `gemini-3.8-flash`), and JSON-returning calls set [responseFormat]
+ * (`{"type":"json_object"}`).
  */
 @Serializable
 data class KimiChatRequest(
     val model: String,
     val messages: List<KimiMessage>,
-    val temperature: Double? = null,
-    @SerialName("max_tokens") val maxTokens: Int? = null
+    @SerialName("max_tokens") val maxTokens: Int? = null,
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+    @SerialName("response_format") val responseFormat: KimiResponseFormat? = null
 )
+
+@Serializable
+data class KimiResponseFormat(val type: String)
 
 @Serializable
 data class KimiMessage(val role: String, val content: JsonElement)
@@ -46,8 +55,7 @@ data class KimiResponseMessage(
 fun textContent(text: String): JsonElement = JsonPrimitive(text)
 
 /**
- * Multimodal content: the images (as base64 data URIs — Kimi does not fetch
- * URLs) followed by the instruction text.
+ * Multimodal content: base64 JPEG data URIs followed by the instruction text.
  */
 fun imagesWithTextContent(text: String, base64Jpegs: List<String>): JsonElement = buildJsonArray {
     base64Jpegs.forEach { b64 ->

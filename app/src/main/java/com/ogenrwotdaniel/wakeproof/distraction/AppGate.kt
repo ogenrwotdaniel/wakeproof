@@ -8,66 +8,45 @@ import android.net.Uri
 import android.provider.Telephony
 
 /**
- * Social, video and messaging apps — and browsers, while
- * [WallRule.GATE_BROWSERS] is on — open only after a wait of at least
- * [GATE_WAIT_SECONDS], however they are opened.
+ * Social, video, messaging and feed apps — and browsers, while
+ * [WallRule.GATE_BROWSERS] is on — are walled by [AppBlockService] outside the
+ * Monday–Thursday 08:10–08:50 open window and all day Friday through Sunday.
  *
- * The wait used to live on the WakeProof home screen only, so it guarded one
- * door out of many: the Edge panel, Recents, a notification or a share sheet
- * all opened the app at once, and the Edge panel in particular let the user
- * peek at a feed during the very pause that was meant to talk them out of it.
- * The wait is now enforced by [AppBlockService], which watches what is on
- * screen no matter how it got there, and the home screen simply opens the same
- * [GateActivity].
+ * Inside that 40-minute window on Monday–Thursday they open directly with no
+ * countdown wait and no separate 25-minute budget (2026-11-06, user's choice:
+ * only 40 minutes exist in the window anyway). Outside it they are held
+ * OS-suspended via Device Owner and covered by [BlockedActivity].
  */
 object AppGate {
 
     /**
-     * Five minutes: long enough that the urge rarely survives it. The first
-     * wait of the day; later ones grow (see [gateWaitSeconds]).
-     */
-    const val GATE_WAIT_SECONDS = 5 * 60
-
-    /**
-     * How long a fresh pass may go unused while the app is still launching. Past
-     * it, a pass that never reached the screen (the launch failed, or the user
-     * went elsewhere first) is dropped.
-     */
-    const val PASS_LAUNCH_MILLIS = 10_000L
-
-    /**
      * WhatsApp Business. Off the home screen's permanent pins since 2026-11-03
-     * (user: "forget about being there for others"). Since
-     * 2026-11-02 it is a waiting app like every other messenger (user's choice:
-     * the same restrictions everywhere) — no exemption from the wait, no
-     * one-hour cap of its own. It was exempt from the wait 2026-10-28, then
-     * windowed with a one-hour BLOCK cap 2026-10-29.
+     * and gated under the same schedule as every other messenger.
      */
     const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
 
     /**
-     * Screens that sit over an app for a moment without the user having left
-     * it: the shade, permission prompts, the share sheet, the system file and
-     * photo pickers an "attach" button opens. Seeing one of these in front does
-     * not end a pass. Anything else does — see [GatePasses.track].
+     * The Google app: carries the Discover feed and an in-app search browser
+     * (`SilkPaneActivity`) that opened YouTube, Reddit and X links without
+     * triggering [browserPackages]. Closed on 2026-11-06; standalone Google
+     * Gemini ([GEMINI_APP]) is pinned on the home screen instead (`HomeTools.kt`).
      */
-    val PASS_TRANSIENT_PACKAGES = setOf(
-        "com.android.systemui",
-        "android",
-        "com.google.android.permissioncontroller",
-        "com.android.permissioncontroller",
-        "com.google.android.documentsui",
-        "com.android.documentsui",
-        "com.google.android.providers.media.module",
-        "com.android.providers.media.module",
-        "com.google.android.photopicker"
-    )
+    const val GOOGLE_APP = "com.google.android.googlequicksearchbox"
+
+    /**
+     * Standalone Google Gemini (`BardShell`). On Android 16 its launcher entry
+     * trampolines into `.voice.robin.*` activities hosted inside [GOOGLE_APP];
+     * [effectivePackage] attributes those Gemini activities back to [GEMINI_APP]
+     * while keeping Discover, Search and `SilkPaneActivity` gated as [GOOGLE_APP].
+     */
+    const val GEMINI_APP = "com.google.android.apps.bard"
+
+    const val PLAY_STORE = "com.android.vending"
 
     /**
      * Named outright because an app's declared category is optional and many
-     * leave it unset. Messaging apps are on it by the user's choice: a reply
-     * that can wait five minutes is how a feed gets opened "just to answer".
-     * SMS apps are NOT — see [isGated].
+     * leave it unset. Messaging apps are on it by the user's choice; SMS apps
+     * are NOT — see [isGated].
      */
     val KNOWN_GATED_PACKAGES = setOf(
         // Social
@@ -81,9 +60,8 @@ object AppGate {
         "com.whatsapp", WHATSAPP_BUSINESS, "com.facebook.orca", "org.telegram.messenger",
         "org.telegram.messenger.web", "org.thoughtcrime.securesms", "com.discord",
         "com.kakao.talk", "jp.naver.line.android", "com.tencent.mm", "com.viber.voip",
-        // Feeds the audit found ungated (2026-11-04). The Google app (Discover)
-        // is left alone on purpose: Gemini runs through it and the user relies
-        // on Gemini for questions.
+        // Feeds & portals (including Google Discover / in-app search browser)
+        GOOGLE_APP,
         "com.google.android.apps.youtube.music", "com.google.android.apps.youtube.kids",
         "com.samsung.android.app.spage", "com.samsung.android.tvplus",
         "net.daum.android.daum", "com.nhn.android.search",
@@ -94,13 +72,29 @@ object AppGate {
         "xyz.blueskyweb.app", "org.joinmastodon.android", "ml.docilealligator.infinityforreddit"
     )
 
-    const val PLAY_STORE = "com.android.vending"
+    /**
+     * Gated via [BlockedActivity] / [PopupCover] / [WindowNotificationGuard],
+     * but never OS-suspended: suspending [PLAY_STORE] stalls app updates, and
+     * suspending [GOOGLE_APP] breaks [GEMINI_APP] (`BardShell` trampolines into
+     * `.voice.robin.*` inside [GOOGLE_APP]) as well as system voice services.
+     */
+    val NEVER_SUSPEND = setOf(PLAY_STORE, GOOGLE_APP)
 
     /**
-     * Gated but never SUSPENDED: suspending the Play Store would stall every
-     * app's updates and licence checks. It is walled the ordinary way.
+     * Attributes Gemini's `.voice.robin.*` UI (and its brief `tiktok.nav.gateway`
+     * trampoline) hosted inside [GOOGLE_APP] to [GEMINI_APP], while leaving
+     * Google Discover (`GoogleAppActivity`, `ContentViewerActivity`), Search
+     * (`SearchActivity`), and the in-app web viewer (`SilkPaneActivity`) under
+     * [GOOGLE_APP] so they remain gated.
      */
-    val NEVER_SUSPEND = setOf(PLAY_STORE)
+    fun effectivePackage(packageName: String, className: String): String =
+        if (packageName == GOOGLE_APP &&
+            (".voice.robin." in className || "tiktok.nav.gateway." in className)
+        ) {
+            GEMINI_APP
+        } else {
+            packageName
+        }
 
     /**
      * Browsers, named outright for the same reason as [KNOWN_GATED_PACKAGES];
@@ -130,16 +124,13 @@ object AppGate {
     /**
      * Pure rule, so it can be tested without a PackageManager.
      *
-     * The default SMS app never waits, even if it declares itself social. It
+     * The default SMS app is never gated, even if it declares itself social: it
      * carries one-time sign-in codes and bank confirmations that expire in
-     * minutes, and nobody scrolls an SMS inbox for fun. (It waited at first,
-     * by the user's choice, and was exempted on review, 2026-10-27.) It is
-     * still behind the focus wall during a session; the code itself shows in
-     * the notification.
+     * minutes, and nobody scrolls an SMS inbox for fun. It is still behind the
+     * focus wall during a session; the code itself shows in the notification.
      *
-     * Browsers wait when [gateBrowsers] (2026-10-28, user's choice: exactly like
-     * social apps). Otherwise instagram.com and youtube.com in a browser skipped
-     * every wall the apps themselves are behind.
+     * Browsers are gated when [gateBrowsers]: otherwise instagram.com and
+     * youtube.com in a browser skip every wall the apps themselves are behind.
      */
     fun isGated(
         packageName: String,
@@ -155,7 +146,7 @@ object AppGate {
                 (gateBrowsers && isBrowser)
             )
 
-    /** Whether [packageName] waits, never true for an essential app. */
+    /** Whether [packageName] is gated, never true for an essential app. */
     fun isGated(
         context: Context,
         packageName: String,
@@ -172,72 +163,9 @@ object AppGate {
     }
 }
 
-/**
- * Passes earned by sitting out the wait, one per app. Process-wide on purpose:
- * [GateActivity] grants them and [AppBlockService] reads them, and both run in
- * the app's process. Losing them to process death only means waiting again,
- * which is the strict direction.
- *
- * A pass is good for ONE visit (2026-10-28, user's request). Closing the app,
- * switching to another, going home or turning the screen off ends it, and the
- * next visit sits through the whole five minutes again. It used to survive a
- * minute off screen, which made "just check one more thing" free.
- */
-object GatePasses {
-    private val passes = mutableMapOf<String, GatePass>()
-
-    @Synchronized
-    fun grant(packageName: String, now: Long) {
-        passes[packageName] = GatePass(grantedAt = now, used = false)
-    }
-
-    /**
-     * Called every tick with what is in front. Marks a pass used once its app
-     * is seen and drops every pass whose visit is over.
-     */
-    @Synchronized
-    fun track(foreground: String, now: Long) {
-        val entries = passes.entries.iterator()
-        while (entries.hasNext()) {
-            val entry = entries.next()
-            val next = passAfter(entry.value, entry.key, foreground, now)
-            if (next == null) entries.remove() else entry.setValue(next)
-        }
-    }
-
-    /** The screen went off or locked: every visit is over. */
-    @Synchronized
-    fun revokeAll() = passes.clear()
-
-    @Synchronized
-    fun isValid(packageName: String): Boolean = packageName in passes
-
-    /**
-     * Pure: what is left of [pass] (for [passPackage]) once [foreground] is
-     * seen in front. Null means the visit is over.
-     *
-     * - Its own app in front: the visit is on, and from now on leaving ends it.
-     * - A [AppGate.PASS_TRANSIENT_PACKAGES] screen: a moment over the app, not
-     *   a departure.
-     * - Anything else before the app was ever seen: still launching (WakeProof's
-     *   own wait screen is in front then), allowed for [AppGate.PASS_LAUNCH_MILLIS].
-     * - Anything else after: the user left.
-     */
-    fun passAfter(pass: GatePass, passPackage: String, foreground: String, now: Long): GatePass? =
-        when {
-            foreground == passPackage -> pass.copy(used = true)
-            foreground in AppGate.PASS_TRANSIENT_PACKAGES -> pass
-            !pass.used && now - pass.grantedAt <= AppGate.PASS_LAUNCH_MILLIS -> pass
-            else -> null
-        }
-}
-
-/** One earned visit to a waiting app; [used] once the app reached the screen. */
-data class GatePass(val grantedAt: Long, val used: Boolean)
-
 /** What [AppBlockService] does about the app on screen. */
 enum class GateVerdict {
-    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL, EARN_WALL, BUDGET_WALL, WAIT,
+    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL, EARN_WALL,
     /** The night's sleep wall over every non-essential app; see [sleepWallActive]. */
     SLEEP_WALL
 }
@@ -246,16 +174,15 @@ enum class GateVerdict {
  * The single decision, in priority order:
  *
  * 1. Essential apps (phone, settings, home, WakeProof itself) are never touched.
- * 2. During a focus session, anything not on the focus list is walled — the
- *    whole session, breaks included, by the user's choice. A session running
- *    on another of the user's devices counts too.
- * 3. An app whose daily cap is spent is walled until midnight.
- * 4. Shut outside the open window (08:10–08:50 by default). The caller
- *    decides who [outsideWindow] applies to: the waiting apps.
- * 5. Everything else here is about the waiting apps only: the bedtime wall,
- *    then the feed not yet earned by a focus block, then the shared daily
- *    budget spent, and finally the wait itself. A pass earned at the wait does
- *    not get past any of the walls before it.
+ * 2. The night's sleep wall over every non-essential app (except focus-list apps
+ *    during an active session).
+ * 3. During a focus session, anything not on the focus list is walled — the
+ *    whole session, breaks included, across all of the user's devices.
+ * 4. An app whose daily cap is spent is walled until midnight (or next open window).
+ * 5. Shut outside the Monday–Thursday open window or all day Friday–Sunday
+ *    ([GateVerdict.WINDOW_WALL]). The caller scopes [outsideWindow] to gated apps.
+ * 6. For gated apps inside the window: bedtime wall, then earn-the-feed; otherwise
+ *    [GateVerdict.ALLOW] directly (no countdown wait, no separate daily budget).
  */
 fun gateVerdict(
     essential: Boolean,
@@ -263,11 +190,9 @@ fun gateVerdict(
     onFocusList: Boolean,
     capSpent: Boolean,
     gated: Boolean,
-    hasPass: Boolean,
     outsideWindow: Boolean = false,
     bedtime: Boolean = false,
     feedEarned: Boolean = true,
-    budgetSpent: Boolean = false,
     sleeping: Boolean = false
 ): GateVerdict = when {
     essential -> GateVerdict.ALLOW
@@ -279,17 +204,14 @@ fun gateVerdict(
     !gated -> GateVerdict.ALLOW
     bedtime -> GateVerdict.BEDTIME_WALL
     !feedEarned -> GateVerdict.EARN_WALL
-    budgetSpent -> GateVerdict.BUDGET_WALL
-    !hasPass -> GateVerdict.WAIT
     else -> GateVerdict.ALLOW
 }
 
 /**
- * Pure: whether a waiting or capped app is held suspended
- * (`AppBlockService.syncSuspensions`). The wait counts — a suspended app is
- * reached only through the wait screen, which lifts the hold with the pass.
- * [forced] holds whatever the verdict: an app in its first week
- * ([NewAppQuarantine]), or every waiting app while notification history is on.
+ * Pure: whether a gated or capped app is held suspended
+ * (`AppBlockService.syncSuspensions`). [forced] holds whatever the verdict: an
+ * app in its first week ([NewAppQuarantine]), or every gated app while
+ * notification history is on.
  */
 fun holdSuspended(neverSuspend: Boolean, verdict: GateVerdict, forced: Boolean = false): Boolean =
     !neverSuspend && (forced || verdict != GateVerdict.ALLOW)

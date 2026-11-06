@@ -7,7 +7,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import dagger.hilt.android.AndroidEntryPoint
-import java.time.LocalTime
+import java.time.LocalDateTime
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,14 +21,13 @@ import kotlinx.coroutines.launch
  * A walled app shows nothing at all — its notifications are removed as they
  * arrive, and whatever is still in the shade when a wall goes up is swept.
  *
- * Was outside-the-open-window only (2026-10-29). Since 2026-11-01 it asks
- * [AppBlockService.walledNow] and follows EVERY wall — a focus session (on any
- * of the user's devices), a spent cap, bedtime, earn-the-feed, the budget —
- * because a notification is a way to read an app the wall keeps shut: the
- * shade, the Edge panel, Edge lighting and an icon's long-press preview all
- * show it. The wait is not a wall and leaves notifications alone. With the
- * blocker not running it falls back to the open window alone, for the
- * waiting apps.
+ * Since 2026-11-01 it asks [AppBlockService.walledNow] and follows EVERY wall —
+ * a focus session (on any of the user's devices), a spent cap, the Monday–Thursday
+ * open window and Friday–Sunday shutdown, bedtime, earn-the-feed, and the night
+ * sleep wall — because a notification is a way to read an app the wall keeps
+ * shut: the shade, the Edge panel, Edge lighting and an icon's long-press preview
+ * all show it. With the blocker not running it falls back to [windowShutActive]
+ * directly for gated apps.
  *
  * LIMIT, accepted: the system plays a notification's sound and vibration before
  * any listener hears of it, so a single buzz can still get through. What this
@@ -106,8 +105,16 @@ class WindowNotificationGuard : NotificationListenerService() {
         if (sbn.isOngoing || !sbn.isClearable) return false
         if (sbn.packageName == smsApp) return false
         AppBlockService.walledNow(sbn.packageName)?.let { return it }
-        val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
-        if (!outsideOpenWindow(minuteOfDay, rules.openWindowStartMinutes, rules.openWindowEndMinutes)) {
+        val now = LocalDateTime.now()
+        val minuteOfDay = now.hour * 60 + now.minute
+        if (!windowShutActive(
+                dayOfWeek = now.dayOfWeek,
+                minuteOfDay = minuteOfDay,
+                weekendShut = rules.weekendShut,
+                startMinutes = rules.openWindowStartMinutes,
+                endMinutes = rules.openWindowEndMinutes
+            )
+        ) {
             return false
         }
         val pkg = sbn.packageName

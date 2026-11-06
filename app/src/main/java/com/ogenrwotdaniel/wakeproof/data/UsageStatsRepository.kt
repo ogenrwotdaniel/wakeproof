@@ -6,6 +6,7 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.os.Process
+import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
 import java.time.ZoneId
@@ -170,7 +171,9 @@ class UsageStatsRepository @Inject constructor(
         }
 
         val topApps = spans[days.lastIndex]
-            .map { (pkg, millis) -> AppUsage(pkg, labels.getValue(pkg), millis / 60_000) }
+            .map { (pkg, millis) ->
+                AppUsage(pkg, labels[pkg] ?: appLabel(pkg), millis / 60_000)
+            }
             .filter { it.minutes >= 1 }
             .sortedByDescending { it.minutes }
             .take(TOP_APP_COUNT)
@@ -244,7 +247,9 @@ class UsageStatsRepository @Inject constructor(
         val event = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            if (packages != null && event.packageName !in packages) continue
+            val className = event.className ?: ""
+            val pkg = AppGate.effectivePackage(event.packageName, className)
+            if (packages != null && pkg !in packages) continue
             val resumed = when (event.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> true
                 UsageEvents.Event.ACTIVITY_PAUSED,
@@ -252,8 +257,8 @@ class UsageStatsRepository @Inject constructor(
                 else -> continue
             }
             collected += ForegroundEvent(
-                packageName = event.packageName,
-                className = event.className ?: "",
+                packageName = pkg,
+                className = className,
                 resumed = resumed,
                 timestamp = event.timeStamp
             )

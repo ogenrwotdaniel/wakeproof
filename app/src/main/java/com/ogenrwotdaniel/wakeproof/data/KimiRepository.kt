@@ -1,13 +1,14 @@
 package com.ogenrwotdaniel.wakeproof.data
 
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
+import com.ogenrwotdaniel.wakeproof.data.remote.GEMINI_MODEL
 import com.ogenrwotdaniel.wakeproof.data.remote.ImageCompressor
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiChatRequest
 import com.ogenrwotdaniel.wakeproof.data.remote.KimiMessage
+import com.ogenrwotdaniel.wakeproof.data.remote.KimiResponseFormat
 import com.ogenrwotdaniel.wakeproof.data.remote.imagesWithTextContent
 import com.ogenrwotdaniel.wakeproof.data.remote.textContent
-import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
 import com.ogenrwotdaniel.wakeproof.verify.water.WaterVerdictRules
 import java.io.IOException
 import java.util.Base64
@@ -18,7 +19,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** Outcome of a Kimi API call; UI decides fallbacks per case. */
+/** Outcome of a Gemini API call; UI decides fallbacks per case. */
 sealed interface KimiResult<out T> {
     data class Success<T>(val value: T) : KimiResult<T>
     data class ApiError(val code: Int?, val message: String) : KimiResult<Nothing>
@@ -29,6 +30,9 @@ sealed interface KimiResult<out T> {
 /** One AI-drafted flashcard, reviewed by the user before saving. */
 @Serializable
 data class FlashcardDraft(val front: String = "", val back: String = "")
+
+@Serializable
+private data class FlashcardEnvelope(val cards: List<FlashcardDraft> = emptyList())
 
 /**
  * The strict-JSON verdict for one before/after pair of bottle photos.
@@ -62,13 +66,12 @@ data class WaterVerdict(
 )
 
 /**
- * The calls that still need a model on the other end: water verification,
+ * Gemini API calls (`gemini-3.8-flash`): water verification second-opinion,
  * flashcard drafting and the Pomodoro study chat. One retry with backoff on
  * 429/5xx; malformed responses become [KimiResult.ApiError], never a crash.
  *
- * Motivational lines and the weekly report used to live here too. Both were
- * arithmetic and phrasing over numbers the app already holds, so they moved
- * on-device — see [com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation] and
+ * Motivational lines and the weekly report live on-device — see
+ * [com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation] and
  * [WeeklyReportGenerator]. Neither needs a key, a network, or a round trip.
  */
 @Singleton
@@ -88,13 +91,7 @@ class KimiRepository @Inject constructor(
      * observations. A pair is [WaterVerdict.accepted] when it is the same bottle,
      * the water line is readable in both shots, nothing was refilled, and the
      * level fell far enough to be a real gulp rather than reading noise
-     * ([WaterVerdictRules.MIN_FILL_DROP] of the bottle, or a legible ml reading). It does NOT have
-     * to cover the whole per-alarm target — the caller keeps asking for more
-     * photos until the accepted amounts add up, which is what makes a single
-     * mouthful count instead of being rejected outright.
-     *
-     * [bottleCapacityMl] is the user's declared full-bottle volume, used to turn
-     * the fill-fraction drop into ml when no printed scale is legible.
+     * ([WaterVerdictRules.MIN_FILL_DROP] of the bottle, or a legible ml reading).
      */
     suspend fun verifyWater(
         beforePhoto: ByteArray,
@@ -108,8 +105,9 @@ class KimiRepository @Inject constructor(
             )
         }
         val request = KimiChatRequest(
-            model = keyStore.getProvider().model,
-            temperature = 0.2,
+            model = GEMINI_MODEL,
+            reasoningEffort = REASONING_LOW,
+            responseFormat = JSON_OBJECT_FORMAT,
             messages = listOf(
                 KimiMessage("system", textContent(WATER_SYSTEM_PROMPT)),
                 KimiMessage(
@@ -136,9 +134,9 @@ class KimiRepository @Inject constructor(
     /** Multi-turn study chat for the Pomodoro assistant. Roles: "user"/"assistant". */
     suspend fun studyChat(history: List<Pair<String, String>>): KimiResult<String> {
         val request = KimiChatRequest(
-            model = keyStore.getProvider().model,
-            temperature = 0.6,
+            model = GEMINI_MODEL,
             maxTokens = 4096,
+            reasoningEffort = REASONING_LOW,
             messages = listOf(
                 KimiMessage(
                     "system",
@@ -172,30 +170,36 @@ class KimiRepository @Inject constructor(
             textContent(instruction)
         }
         val request = KimiChatRequest(
-            model = keyStore.getProvider().model,
-            temperature = 0.4,
+            model = GEMINI_MODEL,
             maxTokens = 8192,
+            reasoningEffort = REASONING_LOW,
+            responseFormat = JSON_OBJECT_FORMAT,
             messages = listOf(
                 KimiMessage("system", textContent(FLASHCARD_SYSTEM_PROMPT)),
                 KimiMessage("user", userContent)
             )
         )
         return call(request) { content ->
-            json.decodeFromString<List<FlashcardDraft>>(stripMarkdownFences(content))
-                .filter { it.front.isNotBlank() && it.back.isNotBlank() }
-                .take(30)
+            val cleaned = stripMarkdownFences(content)
+            val cards = if (cleaned.startsWith("[")) {
+                json.decodeFromString<List<FlashcardDraft>>(cleaned)
+            } else {
+                json.decodeFromString<FlashcardEnvelope>(cleaned).cards
+            }
+            cards.filter { it.front.isNotBlank() && it.back.isNotBlank() }.take(30)
         }
     }
 
     /**
-     * Cheapest possible round trip to validate the stored key. Thinking models
-     * (Gemini 3.x, Kimi K2.x) spend the whole 1-token budget on reasoning and
-     * return no content — an HTTP 200 alone proves the key and model are valid.
+     * Cheapest possible round trip to validate the stored Gemini key. Capped at
+     * low reasoning (the minimum supported on `gemini-3.8-flash`) and 1 output
+     * token; HTTP 200 proves the key and model work.
      */
     suspend fun testConnection(): KimiResult<Unit> {
         val request = KimiChatRequest(
-            model = keyStore.getProvider().model,
+            model = GEMINI_MODEL,
             maxTokens = 1,
+            reasoningEffort = REASONING_LOW,
             messages = listOf(KimiMessage("user", textContent("ping")))
         )
         return when (val result = call(request, allowEmpty = true) { }) {
@@ -261,6 +265,10 @@ class KimiRepository @Inject constructor(
         const val WATER_IMAGE_DIMENSION = 1600
         const val WATER_JPEG_QUALITY = 88
 
+        // gemini-3.8-flash accepts "low", "medium", "high" ("minimal" returns HTTP 400).
+        const val REASONING_LOW = "low"
+        val JSON_OBJECT_FORMAT = KimiResponseFormat("json_object")
+
         val FLASHCARD_SYSTEM_PROMPT = """
             You turn study notes (text or a photo of notes) into concise flashcards for
             spaced repetition. Rules:
@@ -269,8 +277,8 @@ class KimiRepository @Inject constructor(
             - Prefer "why/how" and formula cards over trivia for STEM material.
             - Produce between 5 and 20 cards depending on how much material there is.
             - Write math in plain text (e.g. "integral of x^2 dx = x^3/3 + C").
-            Respond with ONLY a JSON array, no markdown, no extra text:
-            [{"front": "string", "back": "string"}, ...]
+            Respond with ONLY this JSON object, no markdown, no extra text:
+            {"cards": [{"front": "string", "back": "string"}]}
         """.trimIndent()
 
         val WATER_SYSTEM_PROMPT = """

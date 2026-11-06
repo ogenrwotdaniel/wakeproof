@@ -93,8 +93,9 @@ class BlockedActivity : ComponentActivity() {
         private const val EXTRA_REOPENS_AT = "reopens_at"
 
         /**
-         * [reopensAt] is tomorrow's time ("08:10") when the open window keeps
-         * the app shut past midnight; null counts down to midnight.
+         * [reopensAt] describes when the app next opens after today (e.g.
+         * `"tomorrow at 08:10"` or `"Monday at 08:10"`) when the open window or
+         * Friday–Sunday shutdown outlasts midnight; null counts down to midnight.
          */
         fun intent(
             context: Context,
@@ -190,7 +191,7 @@ private fun BlockedWall(
                 modifier = Modifier.padding(top = 12.dp)
             )
             Text(
-                text = (reopensAt?.let { "Opens again tomorrow at $it." }
+                text = (reopensAt?.let { "Opens again $it." }
                     ?: "Unlocks in ${timeUntilMidnight()}.") +
                     " You set this limit — there is no way around it, which is exactly why it works.",
                 style = MaterialTheme.typography.bodyMedium,

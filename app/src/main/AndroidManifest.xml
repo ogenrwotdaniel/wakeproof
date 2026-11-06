@@ -50,7 +50,7 @@
         <package android:name="com.spotify.music" />
         <!-- WakeProof Clip: "Open in Notes" on a received image. -->
         <package android:name="com.samsung.android.app.notes" />
-        <!-- Finding the browsers, which wait like social apps. -->
+        <!-- Finding the browsers, which are gated like social apps. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
@@ -129,19 +129,6 @@
             android:taskAffinity=""
             android:theme="@style/Theme.WakeProof" />
 
-        <!-- The five-minute wait in front of social, video and messaging apps.
-             Same isolation as the wall above; noHistory plus finishing in onStop
-             means leaving it resets the wait. Standard launch mode, not
-             singleTask: a wait for a second app must be a new wait, and the
-             one it covers finishes itself on stop. -->
-        <activity
-            android:name=".distraction.GateActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:noHistory="true"
-            android:taskAffinity=""
-            android:theme="@style/Theme.WakeProof" />
-
         <service
             android:name=".distraction.AppBlockService"
             android:exported="false"
@@ -176,8 +163,6 @@
             android:directBootAware="true"
             android:exported="false" />
 
-        <!-- Wake-up check prompt + "I'm up". Direct-boot aware for the same
-             reason as AlarmReceiver: a verification can precede the first unlock. -->
         <!-- Calendar-event reminders and the end-of-event check-in (agenda/). -->
         <receiver
             android:name=".agenda.EventReminderReceiver"
@@ -198,11 +183,6 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@style/Theme.WakeProof.Translucent" />
-
-        <receiver
-            android:name=".alarm.WakeCheckReceiver"
-            android:directBootAware="true"
-            android:exported="false" />
 
         <receiver
             android:name=".alarm.BootReceiver"

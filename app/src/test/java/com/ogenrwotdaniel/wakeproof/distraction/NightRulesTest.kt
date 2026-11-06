@@ -25,7 +25,7 @@ class NightRulesTest {
         fun v(essential: Boolean = false, session: Boolean = false, onList: Boolean = false, gated: Boolean = false) =
             gateVerdict(
                 essential = essential, focusSessionActive = session, onFocusList = onList,
-                capSpent = false, gated = gated, hasPass = true, sleeping = true
+                capSpent = false, gated = gated, sleeping = true
             )
         assertEquals(GateVerdict.SLEEP_WALL, v())
         assertEquals(GateVerdict.SLEEP_WALL, v(gated = true))

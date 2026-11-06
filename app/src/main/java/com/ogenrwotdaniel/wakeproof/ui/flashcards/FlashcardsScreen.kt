@@ -273,8 +273,7 @@ private fun DeckPane(
                     }
                     if (!hasApiKey) {
                         Text(
-                            text = "AI drafting needs an API key (Settings → AI provider — " +
-                                "Gemini is free).",
+                            text = "AI drafting needs a Gemini API key (Settings → Gemini API key — free).",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

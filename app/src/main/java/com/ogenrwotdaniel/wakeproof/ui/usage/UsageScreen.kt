@@ -736,17 +736,15 @@ private fun WallRulesSection(
 }
 
 private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Context): String = when (rule) {
-    WallRule.GATE_BROWSERS -> "Browsers wait too"
-    WallRule.ESCALATING_WAIT -> "Each wait today is longer"
-    WallRule.DAILY_BUDGET_MINUTES ->
-        if (value <= 0) "Daily budget: off" else "Daily budget: $value min"
+    WallRule.GATE_BROWSERS -> "Gate browsers too"
+    WallRule.WEEKEND_SHUT -> "Shut Friday to Sunday"
     WallRule.EARN_THE_FEED -> "Earn the feed"
     WallRule.BEDTIME_START_MINUTES ->
         if (value < 0) "Bedtime wall: off"
         else "Bedtime wall from ${formatAlarmTime(context, value / 60, value % 60)}"
     WallRule.SESSION_DND -> "Do Not Disturb in sessions"
     WallRule.OPEN_WINDOW_START_MINUTES ->
-        if (value < 0) "Open window: off (open all day)"
+        if (value < 0) "Open window: off (open all day Mon–Thu)"
         else "Open window starts ${formatAlarmTime(context, value / 60, value % 60)}"
     WallRule.OPEN_WINDOW_END_MINUTES ->
         "Open window ends ${formatAlarmTime(context, value / 60, value % 60)}"
@@ -754,28 +752,28 @@ private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Conte
 
 /** Rules that are a number, edited with a slider rather than switched. */
 private val NUMBER_RULES = setOf(
-    WallRule.DAILY_BUDGET_MINUTES,
     WallRule.BEDTIME_START_MINUTES,
     WallRule.OPEN_WINDOW_START_MINUTES,
     WallRule.OPEN_WINDOW_END_MINUTES
 )
 
 private fun ruleSubtitle(rule: WallRule): String = when (rule) {
-    WallRule.GATE_BROWSERS -> "Chrome, Samsung Internet and the rest wait like social apps."
-    WallRule.ESCALATING_WAIT -> "5 min, then 10, 15… up to 30 min for each visit today."
-    WallRule.DAILY_BUDGET_MINUTES -> "Shared by every waiting app. Spent = shut until midnight."
+    WallRule.GATE_BROWSERS ->
+        "Chrome, Samsung Internet and other browsers follow the same schedule as social apps."
+    WallRule.WEEKEND_SHUT ->
+        "Gated apps stay completely shut from Friday through Sunday, reopening Monday."
     WallRule.EARN_THE_FEED ->
-        "Waiting apps stay shut until today's first focus block. The open window counts as earned."
-    WallRule.BEDTIME_START_MINUTES -> "Waiting apps shut until your morning alarm is verified."
+        "When no open window is set, gated apps stay shut until today's first focus block."
+    WallRule.BEDTIME_START_MINUTES -> "Gated apps shut until your morning alarm is verified."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
     WallRule.OPEN_WINDOW_START_MINUTES ->
-        "Outside the window every waiting app is shut, and its notifications are removed."
-    WallRule.OPEN_WINDOW_END_MINUTES -> "Inside it the wait, the budget and the rest still apply."
+        "Monday to Thursday gated apps open at this time; outside the window their notifications are removed."
+    WallRule.OPEN_WINDOW_END_MINUTES ->
+        "Inside the Monday–Thursday window gated apps open directly with no countdown wait."
 }
 
 private fun pendingRuleText(rule: WallRule, value: Int, context: android.content.Context): String =
     when (rule) {
-        WallRule.DAILY_BUDGET_MINUTES -> if (value <= 0) "Budget off" else "Becomes $value min"
         WallRule.BEDTIME_START_MINUTES ->
             if (value < 0) "Bedtime wall off"
             else "Moves to ${formatAlarmTime(context, value / 60, value % 60)}"
@@ -796,11 +794,8 @@ private fun RuleValueDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val budget = rule == WallRule.DAILY_BUDGET_MINUTES
     fun clock(minutes: Int) = formatAlarmTime(context, minutes / 60, minutes % 60)
-    // Budget: 5–120 min in 5s. Times: quarter hours across the useful span.
     val range = when (rule) {
-        WallRule.DAILY_BUDGET_MINUTES -> 5f..120f
         WallRule.BEDTIME_START_MINUTES -> (12 * 60f)..(23 * 60f + 45)
         WallRule.OPEN_WINDOW_START_MINUTES -> 0f..(23 * 60f + 30)
         else -> 15f..(23 * 60f + 45)
@@ -808,17 +803,15 @@ private fun RuleValueDialog(
     // The window is set to the minute the user asked for (08:10), so it moves in 5s:
     // a quarter-hour slider would round 08:10 down to 08:00 on Set, a loosening.
     val step = when (rule) {
-        WallRule.DAILY_BUDGET_MINUTES,
         WallRule.OPEN_WINDOW_START_MINUTES,
         WallRule.OPEN_WINDOW_END_MINUTES -> 5
         else -> 15
     }
     val fallback = when (rule) {
-        WallRule.DAILY_BUDGET_MINUTES -> 25
         WallRule.BEDTIME_START_MINUTES -> 17 * 60
         else -> rule.default
     }
-    val turnedOff = current < 0 || (budget && current == 0)
+    val turnedOff = current < 0
     var picked by remember {
         mutableFloatStateOf((if (turnedOff) fallback else current).toFloat().coerceIn(range))
     }
@@ -828,7 +821,6 @@ private fun RuleValueDialog(
         title = {
             Text(
                 when (rule) {
-                    WallRule.DAILY_BUDGET_MINUTES -> "Daily budget"
                     WallRule.BEDTIME_START_MINUTES -> "Bedtime wall"
                     WallRule.OPEN_WINDOW_START_MINUTES -> "Open window starts"
                     else -> "Open window ends"
@@ -839,11 +831,11 @@ private fun RuleValueDialog(
             Column {
                 Text(
                     when (rule) {
-                        WallRule.DAILY_BUDGET_MINUTES -> "$value min a day across every waiting app."
                         WallRule.BEDTIME_START_MINUTES ->
                             "From ${clock(value)} until your morning alarm is verified."
-                        WallRule.OPEN_WINDOW_START_MINUTES -> "Waiting apps open at ${clock(value)}."
-                        else -> "Waiting apps shut again at ${clock(value)}."
+                        WallRule.OPEN_WINDOW_START_MINUTES ->
+                            "Monday to Thursday gated apps open at ${clock(value)}."
+                        else -> "Gated apps shut again at ${clock(value)}."
                     }
                 )
                 Slider(
@@ -864,7 +856,7 @@ private fun RuleValueDialog(
             Row {
                 // The window's end has no "off": switching the window off is its start's job.
                 if (rule != WallRule.OPEN_WINDOW_END_MINUTES) {
-                    TextButton(onClick = { onSet(if (budget) 0 else RULE_OFF_MINUTES) }) {
+                    TextButton(onClick = { onSet(RULE_OFF_MINUTES) }) {
                         Text("Turn off in 7 days")
                     }
                 }
@@ -874,7 +866,7 @@ private fun RuleValueDialog(
     )
 }
 
-/** Waiting apps WakeProof cannot see, because they live in another profile. */
+/** Gated apps WakeProof cannot see, because they live in another profile. */
 @Composable
 private fun OtherProfileWarning(apps: List<String>) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -887,7 +879,7 @@ private fun OtherProfileWarning(apps: List<String>) {
             Text(
                 text = "${apps.joinToString()} ${if (apps.size == 1) "is" else "are"} also " +
                     "installed in Secure Folder, Dual Messenger or a work profile. WakeProof " +
-                    "can't see that copy, so it has no wait, no budget and no focus wall. " +
+                    "can't see that copy, so it bypasses the schedule and focus walls. " +
                     "Uninstall it there.",
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -895,17 +887,14 @@ private fun OtherProfileWarning(apps: List<String>) {
     }
 }
 
-/** The last 7 days at the wall, today last. */
+/** The last 7 days in gated apps, today last. */
 @Composable
 private fun WallWeekCard(week: List<WallDay>) {
-    val walked = week.sumOf { it.walkedAway }
-    val opened = week.sumOf { it.opened }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text = "This week at the wall", style = MaterialTheme.typography.titleSmall)
+            Text(text = "Gated apps — last 7 days", style = MaterialTheme.typography.titleSmall)
             Text(
-                text = "Walked away $walked · opened $opened · " +
-                    "${formatMinutes(week.sumOf { it.waitingAppMinutes })} in waiting apps",
+                text = "${formatMinutes(week.sumOf { it.waitingAppMinutes })} across gated apps",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -916,17 +905,12 @@ private fun WallWeekCard(week: List<WallDay>) {
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "↩ ${day.walkedAway} · ✓ ${day.opened} · ${formatMinutes(day.waitingAppMinutes)}",
+                        text = formatMinutes(day.waitingAppMinutes),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            Text(
-                text = "↩ walked away from the wait · ✓ waited and opened",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

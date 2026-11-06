@@ -58,7 +58,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
-import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import java.time.Instant
@@ -110,7 +109,6 @@ private const val SHUFFLE_SECONDS = 4
 fun LauncherScreen(
     viewModel: LauncherViewModel,
     onLaunch: (String) -> Unit,
-    onWait: (InstalledApp) -> Unit,
     onOpenWakeProof: () -> Unit,
     onAppInfo: (String) -> Unit
 ) {
@@ -138,14 +136,14 @@ fun LauncherScreen(
         if (granted) viewModel.refresh()
     }
 
-    // Social, video and messaging apps sit out the five-minute wait — the same
-    // one AppBlockService throws up however else they are opened. Other capped
-    // apps get the shorter mindful pause; everything else opens at once.
+    // Gated apps open directly inside their Mon–Thu 08:10–08:50 window (no 5-min
+    // wait) and hit BlockedActivity via onLaunch outside it. Non-gated capped apps
+    // keep the 45 s mindful pause; everything else opens at once.
     val open: (InstalledApp) -> Unit = { app ->
-        when {
-            app.packageName in gated -> onWait(app)
-            app.packageName in limits -> pausing = app
-            else -> onLaunch(app.packageName)
+        if (app.packageName in limits && app.packageName !in gated) {
+            pausing = app
+        } else {
+            onLaunch(app.packageName)
         }
     }
 

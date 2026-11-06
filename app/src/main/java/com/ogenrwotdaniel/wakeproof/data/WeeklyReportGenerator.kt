@@ -17,15 +17,13 @@ data class WeekStats(
     /** Today's heaviest apps, longest first; empty without usage access. */
     val topApps: List<AppUsage> = emptyList(),
     val dailyGoalMinutes: Int = 120,
-    /** The wait and the waiting apps, day by day; empty when not measured. */
+    /** Time spent in gated apps day by day; empty when not measured. */
     val wall: List<WallDay> = emptyList()
 )
 
-/** One day in front of the wall: waits sat out vs walked away, and time spent past them. */
+/** One day's measured minutes across gated social, video, messaging and browser apps. */
 data class WallDay(
     val epochDay: Long,
-    val opened: Int = 0,
-    val walkedAway: Int = 0,
     val waitingAppMinutes: Long = 0
 )
 
@@ -71,11 +69,6 @@ class WeeklyReportGenerator @Inject constructor() {
         stats.focusBySubject.filter { it.minutes > 0 }.maxByOrNull { it.minutes }?.let { top ->
             lines += "Most time went to ${top.subject ?: "untagged work"} " +
                 "(${formatDuration(top.minutes)})."
-        }
-        val walkedAway = stats.wall.sumOf { it.walkedAway }
-        if (walkedAway > 0) {
-            lines += "Walked away from the wait $walkedAway ${if (walkedAway == 1) "time" else "times"}" +
-                " instead of opening the app."
         }
         val pushupDays = stats.days.count { it.pushupDone }
         if (pushupDays > 0) {

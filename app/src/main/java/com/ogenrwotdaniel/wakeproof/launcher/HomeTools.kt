@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.telecom.TelecomManager
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
+import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -18,6 +19,9 @@ private const val SAMSUNG_NOTES = "com.samsung.android.app.notes"
 
 /** Claude. */
 private const val CLAUDE = "com.anthropic.claude"
+
+/** Standalone Google Gemini — replaces the gated Google app (`googlequicksearchbox`), 2026-11-06. */
+private const val GEMINI = AppGate.GEMINI_APP
 
 /** KakaoBank — added by the user's request, 2026-10-27. */
 private const val KAKAOBANK = "com.kakaobank.channel"
@@ -34,8 +38,8 @@ private const val EXPERT_RAW_LABEL = "Expert RAW"
 
 /**
  * The tools that are always on the home screen and cannot be unpinned, in
- * order: the phone, the cameras, notes, Claude, the bank, UNIST attendance,
- * the clock and the calendar.
+ * order: the phone, the cameras, notes, Claude, Gemini, the bank, UNIST
+ * attendance, the clock and the calendar.
  * Chosen by the user as things a phone is FOR rather than things it is used
  * to fill time with. Roles (phone, camera, clock, calendar) are resolved from
  * whatever app holds them, so a non-Samsung default still lands here; apps
@@ -56,7 +60,7 @@ fun permanentPackages(context: Context): List<String> {
         Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
     )
     return listOfNotNull(
-        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, KAKAOBANK, UNIST_SMART_CHECK,
+        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, KAKAOBANK, UNIST_SMART_CHECK,
         clock, calendar
     )
         .filter { it != context.packageName }

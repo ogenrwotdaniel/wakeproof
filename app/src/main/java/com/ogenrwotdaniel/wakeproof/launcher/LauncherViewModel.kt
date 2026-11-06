@@ -61,7 +61,7 @@ class LauncherViewModel @Inject constructor(
 
     private val _gated = MutableStateFlow<Set<String>>(emptySet())
 
-    /** Apps that open only through the five-minute wait ([AppGate]). */
+    /** Gated social, video, messaging, portal and browser apps ([AppGate]). */
     val gated: StateFlow<Set<String>> = _gated.asStateFlow()
 
     private val _agenda = MutableStateFlow<List<AgendaEvent>>(emptyList())

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.DayOfWeek
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +20,7 @@ import kotlinx.coroutines.flow.map
 private val Context.wallRulesDataStore: DataStore<Preferences> by preferencesDataStore("wall_rules")
 
 /**
- * The tightening rules added on 2026-10-28, each one number so a single
+ * The tightening rules over gated apps, each stored as one integer so a single
  * looseness test covers them all. Booleans are stored as [RULE_ON]/[RULE_OFF].
  *
  * Every rule is on by default — the user asked for all of them — and, like an
@@ -28,16 +29,16 @@ private val Context.wallRulesDataStore: DataStore<Preferences> by preferencesDat
  * moment overrule nothing.
  */
 enum class WallRule(val key: String, val default: Int) {
-    /** Browsers wait like social apps; instagram.com otherwise skips every wall. */
+    /** Browsers follow the same walls as social apps; instagram.com otherwise skips every wall. */
     GATE_BROWSERS("gate_browsers", RULE_ON),
 
-    /** Each visit through the wait today makes the next wait longer. */
-    ESCALATING_WAIT("escalating_wait", RULE_ON),
+    /**
+     * Gated apps stay completely shut from Friday 00:00 through Sunday 24:00,
+     * reopening Monday at the open window (2026-11-06, user's choice).
+     */
+    WEEKEND_SHUT("weekend_shut", RULE_ON),
 
-    /** Minutes per day across every waiting app together; 0 = no budget. */
-    DAILY_BUDGET_MINUTES("daily_budget_minutes", 25),
-
-    /** Waiting apps stay shut until today's first focus block is done. */
+    /** Gated apps stay shut until today's first focus block is done (when no window is set). */
     EARN_THE_FEED("earn_the_feed", RULE_ON),
 
     /**
@@ -50,12 +51,11 @@ enum class WallRule(val key: String, val default: Int) {
     SESSION_DND("session_dnd", RULE_ON),
 
     /**
-     * Minute of the day the waiting apps' open window starts; [RULE_OFF_MINUTES]
-     * = no window, open all day. Covers social, video, messaging, browsers and
-     * WhatsApp Business. Was 14:00–17:00 (2026-10-29); 08:10–08:50 since
-     * 2026-11-01, the user's choice ([WallRulesRepository.seedMorningWindow]).
-     * Outside the window they are shut; inside it every rule but earn-the-feed
-     * still applies (see [feedEarned]).
+     * Minute of the day the gated apps' open window starts; [RULE_OFF_MINUTES]
+     * = no window, open all day (except Friday–Sunday while [WEEKEND_SHUT] is on).
+     * Covers social, video, messaging, the Google app, Play Store and browsers.
+     * 08:10–08:50 since 2026-11-01 ([WallRulesRepository.seedMorningWindow]):
+     * 40 minutes Monday to Thursday, with no 5-minute wait or 25-minute budget.
      */
     OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 8 * 60 + 10),
 
@@ -67,7 +67,6 @@ enum class WallRule(val key: String, val default: Int) {
      * more. Off is the loosest value every rule can take.
      */
     fun looseness(value: Int): Int = when (this) {
-        DAILY_BUDGET_MINUTES -> if (value <= 0) Int.MAX_VALUE else value
         // A later start leaves more of the evening open.
         BEDTIME_START_MINUTES -> if (value < 0) Int.MAX_VALUE else value
         // The window opening earlier, or closing later, leaves more of the day open.
@@ -86,6 +85,13 @@ const val RULE_OFF = 0
 const val RULE_OFF_MINUTES = -1
 const val MINUTES_PER_DAY = 24 * 60
 
+/** Days of the week on which [WallRule.WEEKEND_SHUT] keeps gated apps closed all day. */
+val WEEKEND_SHUT_DAYS: Set<DayOfWeek> = setOf(
+    DayOfWeek.FRIDAY,
+    DayOfWeek.SATURDAY,
+    DayOfWeek.SUNDAY
+)
+
 /** A loosening waiting out the week. */
 data class PendingRule(val value: Int, val effectiveAtMillis: Long)
 
@@ -93,8 +99,7 @@ data class PendingRule(val value: Int, val effectiveAtMillis: Long)
 data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
     fun value(rule: WallRule): Int = values[rule] ?: rule.default
     val gateBrowsers: Boolean get() = value(WallRule.GATE_BROWSERS) != RULE_OFF
-    val escalatingWait: Boolean get() = value(WallRule.ESCALATING_WAIT) != RULE_OFF
-    val dailyBudgetMinutes: Int get() = value(WallRule.DAILY_BUDGET_MINUTES).coerceAtLeast(0)
+    val weekendShut: Boolean get() = value(WallRule.WEEKEND_SHUT) != RULE_OFF
     val earnTheFeed: Boolean get() = value(WallRule.EARN_THE_FEED) != RULE_OFF
     val bedtimeStartMinutes: Int get() = value(WallRule.BEDTIME_START_MINUTES)
     val sessionDnd: Boolean get() = value(WallRule.SESSION_DND) != RULE_OFF
@@ -235,21 +240,12 @@ fun bedtimeActive(minuteOfDay: Int, startMinutes: Int, alarmVerifiedToday: Boole
             (minuteOfDay < BEDTIME_FALLBACK_END_MINUTES && !alarmVerifiedToday)
         )
 
-/** Longest the escalating wait grows to: half an hour. */
-const val MAX_ESCALATED_WAIT_SECONDS = 30 * 60
+/** Pure: whether gated apps are shut all day on [dayOfWeek] under [WallRule.WEEKEND_SHUT]. */
+fun weekendShutActive(dayOfWeek: DayOfWeek, weekendShut: Boolean): Boolean =
+    weekendShut && dayOfWeek in WEEKEND_SHUT_DAYS
 
 /**
- * Pure: how long the wait is after [opensToday] visits through it today. Five
- * minutes, then ten, fifteen… capped at [MAX_ESCALATED_WAIT_SECONDS]. The tenth
- * visit used to cost what the first did.
- */
-fun gateWaitSeconds(opensToday: Int, escalating: Boolean): Int =
-    if (!escalating) AppGate.GATE_WAIT_SECONDS
-    else (AppGate.GATE_WAIT_SECONDS * (opensToday.coerceAtLeast(0) + 1))
-        .coerceAtMost(MAX_ESCALATED_WAIT_SECONDS)
-
-/**
- * Pure: whether [minuteOfDay] falls outside the waiting apps' open window
+ * Pure: whether [minuteOfDay] falls outside the gated apps' open window
  * `[startMinutes, endMinutes)`. A negative start means no window — open all
  * day. A window that ends at or before it starts is open at no time at all:
  * the strict reading of a setting that makes no sense.
@@ -258,13 +254,88 @@ fun outsideOpenWindow(minuteOfDay: Int, startMinutes: Int, endMinutes: Int): Boo
     startMinutes >= 0 && minuteOfDay !in startMinutes until endMinutes
 
 /**
- * When an app shut until midnight (cap or budget spent) can actually be used
- * again: at midnight, unless the open window keeps it shut until the window's
- * start tomorrow. Minute of day, or null for midnight. An empty window (end ≤
- * start) also answers null — there is no honest time to promise.
+ * Pure: whether a gated app is shut by the schedule on [dayOfWeek] at
+ * [minuteOfDay] — either all day Friday–Sunday ([weekendShutActive]) or
+ * outside `[startMinutes, endMinutes)` ([outsideOpenWindow]).
  */
-fun reopensTomorrowAtMinutes(windowed: Boolean, startMinutes: Int, endMinutes: Int): Int? =
-    if (windowed && startMinutes != RULE_OFF_MINUTES && endMinutes > startMinutes) startMinutes else null
+fun windowShutActive(
+    dayOfWeek: DayOfWeek,
+    minuteOfDay: Int,
+    weekendShut: Boolean,
+    startMinutes: Int,
+    endMinutes: Int
+): Boolean =
+    weekendShutActive(dayOfWeek, weekendShut) ||
+        outsideOpenWindow(minuteOfDay, startMinutes, endMinutes)
+
+/**
+ * Pure: when an app whose daily cap is spent on [today] can actually be used
+ * again after today. Null means midnight tonight (ordinary countdown); otherwise
+ * a concrete phrase such as `"tomorrow at 08:10"`, `"Monday at 08:10"`, or
+ * `"Monday"`. An empty window (`endMinutes <= startMinutes` with a non-negative
+ * start) returns null rather than promising an opening that will not happen.
+ */
+fun nextOpenAfterToday(
+    gated: Boolean,
+    today: DayOfWeek,
+    weekendShut: Boolean,
+    startMinutes: Int,
+    endMinutes: Int,
+    formatClock: (Int) -> String
+): String? {
+    if (!gated) return null
+    val hasWindow = startMinutes != RULE_OFF_MINUTES
+    if (hasWindow && endMinutes <= startMinutes) return null
+    val shutTomorrow = weekendShutActive(today.plus(1), weekendShut)
+    return when {
+        shutTomorrow && hasWindow -> "Monday at ${formatClock(startMinutes)}"
+        shutTomorrow -> "Monday"
+        hasWindow -> "tomorrow at ${formatClock(startMinutes)}"
+        else -> null
+    }
+}
+
+/**
+ * Pure: headline and body for [GateVerdict.WINDOW_WALL] on [today] at [minuteOfDay].
+ */
+fun windowWallCopy(
+    label: String,
+    today: DayOfWeek,
+    minuteOfDay: Int,
+    weekendShut: Boolean,
+    startMinutes: Int,
+    endMinutes: Int,
+    formatClock: (Int) -> String
+): Pair<String, String> {
+    val validWindow = startMinutes != RULE_OFF_MINUTES && endMinutes > startMinutes
+    if (weekendShutActive(today, weekendShut)) {
+        val reopens = if (validWindow) {
+            "Monday between ${formatClock(startMinutes)} and ${formatClock(endMinutes)}"
+        } else {
+            "on Monday"
+        }
+        return "Shut Friday to Sunday" to
+            "$label and every other gated app stay shut from Friday through Sunday. " +
+            "They open again $reopens. The phone and SMS always work."
+    }
+    if (!validWindow) {
+        return "Not open now" to
+            "$label and every other gated app are shut right now. The phone and SMS always work."
+    }
+    val span = "${formatClock(startMinutes)} and ${formatClock(endMinutes)}"
+    val body = if (weekendShut && today == DayOfWeek.THURSDAY && minuteOfDay >= endMinutes) {
+        "$label and every other gated app open Monday to Thursday between $span, " +
+            "and stay shut Friday through Sunday — next open Monday at ${formatClock(startMinutes)}. " +
+            "The phone and SMS always work."
+    } else if (weekendShut) {
+        "$label and every other gated app open Monday to Thursday between $span " +
+            "(shut Friday through Sunday). The phone and SMS always work."
+    } else {
+        "$label and every other gated app open only between $span. " +
+            "The phone and SMS always work."
+    }
+    return "Not open now" to body
+}
 
 /**
  * Pure: whether the feed is earned. The open window counts as earned

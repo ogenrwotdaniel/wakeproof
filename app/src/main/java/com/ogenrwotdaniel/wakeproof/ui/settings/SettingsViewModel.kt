@@ -21,7 +21,6 @@ import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
-import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
@@ -46,7 +45,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Settings state: alarm times/enabled (rescheduled immediately on change),
- * goal targets, and Kimi API key management.
+ * goal targets, and Gemini API key management.
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -155,7 +154,6 @@ class SettingsViewModel @Inject constructor(
     fun suggestedBackupName(): String = backupFilename(LocalDate.now().toString())
 
     data class KeyUiState(
-        val provider: AiProvider = AiProvider.GEMINI,
         val hasKey: Boolean = false,
         val testing: Boolean = false,
         val testResult: String? = null
@@ -186,9 +184,7 @@ class SettingsViewModel @Inject constructor(
     val settings: StateFlow<WakeProofSettings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WakeProofSettings())
 
-    private val _keyState = MutableStateFlow(
-        KeyUiState(provider = keyStore.getProvider(), hasKey = keyStore.hasKey())
-    )
+    private val _keyState = MutableStateFlow(KeyUiState(hasKey = keyStore.hasKey()))
     val keyState: StateFlow<KeyUiState> = _keyState
 
     private val _reliability = MutableStateFlow(reliabilityChecker.check())
@@ -255,10 +251,6 @@ class SettingsViewModel @Inject constructor(
                 value.coerceIn(MathChallenge.MIN_PROBLEMS, MathChallenge.MAX_PROBLEMS)
             )
         }
-    }
-
-    fun setWakeUpCheck(value: Boolean) {
-        viewModelScope.launch { settingsRepository.setWakeUpCheck(value) }
     }
 
     fun setWaterAmountMl(value: Int) {
@@ -364,14 +356,6 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.setDailyFocusGoalMinutes(
                 value.coerceIn(MIN_DAILY_FOCUS_GOAL_MINUTES, MAX_DAILY_FOCUS_GOAL_MINUTES)
             )
-        }
-    }
-
-    /** Switching provider re-reads that provider's own saved key. */
-    fun setProvider(provider: AiProvider) {
-        keyStore.setProvider(provider)
-        _keyState.update {
-            it.copy(provider = provider, hasKey = keyStore.hasKey(), testResult = null)
         }
     }
 

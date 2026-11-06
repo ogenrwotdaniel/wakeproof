@@ -7,9 +7,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
 import com.ogenrwotdaniel.wakeproof.alarm.SnoozeStore
-import com.ogenrwotdaniel.wakeproof.alarm.WakeCheck
-import com.ogenrwotdaniel.wakeproof.alarm.WakeCheckStore
-import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.alarm.EXTRA_MISSION
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
@@ -22,7 +19,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -34,9 +30,7 @@ class AlarmRingingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: AlarmRepository,
     private val scheduler: AlarmScheduler,
-    private val snoozeStore: SnoozeStore,
-    private val wakeCheckStore: WakeCheckStore,
-    private val settingsRepository: SettingsRepository
+    private val snoozeStore: SnoozeStore
 ) : ViewModel() {
 
     private val alarmId = MutableStateFlow(-1L)
@@ -88,10 +82,7 @@ class AlarmRingingViewModel @Inject constructor(
         onSnoozed()
     }
 
-    /**
-     * Marks today's goal done for this alarm, then runs [onDone] on the main
-     * thread. The old "Still up?" [WakeCheck] is never armed any more.
-     */
+    /** Marks today's goal done for this alarm, then runs [onDone] on the main thread. */
     fun markCompletedToday(onDone: () -> Unit) {
         viewModelScope.launch {
             alarmId.value.takeIf { it != -1L }?.let { id ->
@@ -99,10 +90,6 @@ class AlarmRingingViewModel @Inject constructor(
                 runCatching { repository.markCompletedToday(id) }
                 // Done: a restart no longer brings it back.
                 if (StrictAlarm.isStrictId(context, id)) StrictAlarm.clearRinging(context)
-                // No wake-up check any more (removed 2026-11-04, user's request):
-                // a re-ring five minutes after a full set of pushups meant a
-                // second full set. Only cancel one an older build armed.
-                scheduler.cancelWakeCheck(id)
             }
             onDone()
         }

@@ -57,22 +57,23 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * The one thing that stands in front of other apps. Three jobs, decided per
- * tick by [gateVerdict]:
+ * The one thing that stands in front of other apps. Decided per tick by
+ * [gateVerdict]:
  *
  * * NUCLEAR FOCUS — while a Pomodoro session is active (breaks included), any
  *   app not on the focus list (Settings → Study apps) is walled until the
  *   session ends. The timer has no pause or stop, so neither does this.
  * * [LimitMode.BLOCK] caps — once an app's daily allowance is spent,
- *   [BlockedActivity] is thrown in front of it until midnight. No override.
- * * The WAIT — social, video and messaging apps ([AppGate]) open only after
- *   five minutes on [GateActivity], however they were opened.
- * * The [WallRules] in front of those same waiting apps: shut at bedtime, shut
- *   until the day's first focus block, shut once the shared daily budget is
- *   spent.
+ *   [BlockedActivity] is thrown in front of it until midnight (or next open
+ *   window for gated apps). No override.
+ * * The [WallRules] in front of gated apps ([AppGate]): open only Monday to
+ *   Thursday inside the open window (08:10–08:50 by default) with no countdown
+ *   wait or separate daily budget, completely shut Friday through Sunday, shut
+ *   at bedtime, and shut until the day's first focus block when no window is set.
  *
  * Losing either grant ends enforcement, so it is announced loudly
  * ([announceWallDown]) and, mid-session, costs the block's tree.
@@ -139,15 +140,8 @@ class AppBlockService : Service() {
     private val watchTimer: LiveWatchTimer?
         get() = LiveWatchTimerRules.newest(bluetoothWatchTimer, cloudWatchTimer)
 
-    /** Every installed app that waits — the pool the daily budget is spent from. */
+    /** Every installed gated app — held suspended outside the open window. */
     @Volatile private var allGated: Set<String> = emptySet()
-
-    /** Budget measurement, kept apart from the per-app cap's. */
-    private var budgetBaselineMillis = 0L
-    private var budgetBaselineAt = 0L
-    private var budgetBaselineValid = false
-    /** The budget (minutes) found spent today; a raised budget re-measures. */
-    private var budgetSpentAgainst: Int? = null
 
     private var ticks = 0L
 
@@ -469,8 +463,6 @@ class AppBlockService : Service() {
                 syncSuspensions()
                 popupCover.hide()
                 pinCover.hide()
-                // Screen off ends a visit through the wait, like leaving the app.
-                GatePasses.revokeAll()
                 // Force a fresh measurement on wake rather than extrapolating
                 // across the whole time the phone was down.
                 baselineFor = null
@@ -482,8 +474,6 @@ class AppBlockService : Service() {
             if (today != spentDay) {
                 spentToday.clear()
                 spentDay = today
-                budgetSpentAgainst = null
-                budgetBaselineValid = false
             }
             syncSuspensions()
 
@@ -492,10 +482,6 @@ class AppBlockService : Service() {
             val current = runCatching { tracker.current() }
                 .onFailure { Log.w(TAG, "foreground query failed", it) }
                 .getOrNull()
-            // Before the early exits below: WakeProof itself in front also ends
-            // a visit, once the app it was granted for has been on screen.
-            if (current != null) GatePasses.track(current, System.currentTimeMillis())
-            if (keyguardManager.isKeyguardLocked) GatePasses.revokeAll()
             if (current == null || keyguardManager.isKeyguardLocked) {
                 popupCover.hide()
                 pinCover.hide()
@@ -516,14 +502,11 @@ class AppBlockService : Service() {
             val gated = gatedCache.getOrPut(current) {
                 AppGate.isGated(this, current, untouchable, browsers, rules.gateBrowsers)
             }
-            if (!gated) budgetBaselineValid = false
             val limit = blockedLimits[current]
             val verdict = verdictFor(
                 current = current,
                 gated = gated,
-                hasPass = GatePasses.isValid(current),
-                capSpent = limit != null && capSpent(current, limit),
-                budgetSpent = gated && budgetSpent(current)
+                capSpent = limit != null && capSpent(current, limit)
             )
             logVerdict(current, verdict)
             // A pinned task refuses every activity from outside it, wall
@@ -542,7 +525,7 @@ class AppBlockService : Service() {
                 if (pinCover.isShowing) Log.i(TAG, "pin cover down ($current, pinned=$pinned)")
                 pinCover.hide()
                 if (verdict != GateVerdict.ALLOW) {
-                    wall(current, killAfter = verdict != GateVerdict.WAIT) { wallIntent(current, verdict, limit) }
+                    wall(current) { wallIntent(current, verdict, limit) }
                 }
             }
             delay(POLL_MILLIS)
@@ -568,11 +551,10 @@ class AppBlockService : Service() {
     private fun verdictFor(
         current: String,
         gated: Boolean,
-        hasPass: Boolean,
-        capSpent: Boolean,
-        budgetSpent: Boolean
+        capSpent: Boolean
     ): GateVerdict {
-        val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
+        val now = LocalDateTime.now()
+        val minuteOfDay = now.hour * 60 + now.minute
         return gateVerdict(
             // Settings is the one essential app a focus session walls
             // (2026-11-04, "once focus starts you can't run away"): it is where
@@ -584,9 +566,10 @@ class AppBlockService : Service() {
             onFocusList = current in focusList,
             capSpent = capSpent,
             gated = gated,
-            hasPass = hasPass,
-            outsideWindow = gated && outsideOpenWindow(
+            outsideWindow = gated && windowShutActive(
+                dayOfWeek = now.dayOfWeek,
                 minuteOfDay = minuteOfDay,
+                weekendShut = rules.weekendShut,
                 startMinutes = rules.openWindowStartMinutes,
                 endMinutes = rules.openWindowEndMinutes
             ),
@@ -596,7 +579,6 @@ class AppBlockService : Service() {
                 alarmVerifiedToday = alarmVerifiedToday
             ),
             feedEarned = feedEarned(rules.earnTheFeed, focusDoneToday, rules.openWindowStartMinutes),
-            budgetSpent = budgetSpent,
             sleeping = sleepWallActive(minuteOfDay) && current !in sleepExempt
         )
     }
@@ -604,27 +586,38 @@ class AppBlockService : Service() {
     /** The screen thrown in front of [current] for [verdict]; never called for ALLOW. */
     private fun wallIntent(current: String, verdict: GateVerdict, limit: AppLimit?): Intent {
         val label = usageRepository.appLabel(current)
+        val now = LocalDateTime.now()
+        val minuteOfDay = now.hour * 60 + now.minute
         return when (verdict) {
-            GateVerdict.ALLOW, GateVerdict.WAIT -> GateActivity.intent(this, current, label)
+            GateVerdict.ALLOW -> BlockedActivity.ruleIntent(
+                this,
+                "Not open now",
+                "$label is shut right now. The phone and SMS always work."
+            )
             GateVerdict.FOCUS_WALL -> BlockedActivity.focusIntent(this, label)
             GateVerdict.CAP_WALL -> BlockedActivity.intent(
                 context = this,
                 label = label,
                 usedMinutes = limit?.minutes ?: 0,
                 capMinutes = limit?.minutes ?: 0,
-                reopensAt = reopensTomorrowAt(current)
+                reopensAt = nextOpenFor(current, now.dayOfWeek)
             )
-            GateVerdict.WINDOW_WALL -> BlockedActivity.ruleIntent(
-                this,
-                "Not open now",
-                "$label and every other waiting app open only between " +
-                    "${clock(rules.openWindowStartMinutes)} and " +
-                    "${clock(rules.openWindowEndMinutes)}. The phone and SMS always work."
-            )
+            GateVerdict.WINDOW_WALL -> {
+                val (headline, body) = windowWallCopy(
+                    label = label,
+                    today = now.dayOfWeek,
+                    minuteOfDay = minuteOfDay,
+                    weekendShut = rules.weekendShut,
+                    startMinutes = rules.openWindowStartMinutes,
+                    endMinutes = rules.openWindowEndMinutes,
+                    formatClock = ::clock
+                )
+                BlockedActivity.ruleIntent(this, headline, body)
+            }
             GateVerdict.BEDTIME_WALL -> BlockedActivity.ruleIntent(
                 this,
                 "Bedtime",
-                "$label and every other waiting app are shut for the night. They open once " +
+                "$label and every other gated app are shut for the night. They open once " +
                     "your morning alarm is verified, or at 07:00 on a day without one."
             )
             GateVerdict.SLEEP_WALL -> BlockedActivity.ruleIntent(
@@ -638,91 +631,93 @@ class AppBlockService : Service() {
                 "Earn it first",
                 "$label opens after today's first focus block. One pomodoro, then the feed."
             )
-            GateVerdict.BUDGET_WALL -> BlockedActivity.ruleIntent(
-                this,
-                "Today's budget is spent",
-                "${rules.dailyBudgetMinutes} minutes across every waiting app are used up. " +
-                    "$label opens again " +
-                    (reopensTomorrowAt(current)?.let { "tomorrow at $it." } ?: "at midnight.")
-            )
         }
     }
 
     /**
-     * The wall that stands BEFORE the wait for [packageName], if any. Asked by
-     * [GateActivity] as it opens: the WakeProof home screen launches the wait
-     * screen directly, and that path never passed through [watch] — so TikTok
-     * tapped there at 00:52 got a five-minute countdown instead of "not open
-     * now" (2026-10-29).
+     * Checks whether [packageName] is walled right now when tapped on the
+     * WakeProof home screen ([com.ogenrwotdaniel.wakeproof.launcher.LauncherActivity]).
      *
-     * Measures afresh and leaves the loop's usage baselines alone: those
-     * extrapolate as though the app were on screen, and it is not — the wait is.
+     * Outside the Monday–Thursday open window (or on Friday–Sunday) gated apps
+     * are held OS-suspended, so launching them raw would show Android's generic
+     * "App suspended" dialog; returning [wallIntent] opens [BlockedActivity]
+     * with the real reason instead. Inside the window when allowed, this lifts
+     * any lingering hold immediately so a tap right at 08:10 never races the
+     * 500 ms [syncSuspensions] tick.
      */
     private suspend fun wallBefore(packageName: String): Intent? {
+        val label = usageRepository.appLabel(packageName)
+        if (packageName in quarantined) {
+            return BlockedActivity.ruleIntent(
+                this,
+                "New app quarantine",
+                "$label was installed less than a week ago and stays shut until its 7-day quarantine ends."
+            )
+        }
         val gated = gatedCache.getOrPut(packageName) {
             AppGate.isGated(this, packageName, untouchable, browsers, rules.gateBrowsers)
         }
         val limit = blockedLimits[packageName]
+        if (historyOn && (gated || limit != null)) {
+            return BlockedActivity.ruleIntent(
+                this,
+                "Notification history is on",
+                "Turn off Notification history in Android Settings before opening $label."
+            )
+        }
         val capSpent = limit != null &&
             (usageRepository.todayForegroundMillisFor(setOf(packageName))[packageName] ?: 0L) >=
             limit.minutes * 60_000L
-        val budget = rules.dailyBudgetMinutes
-        val budgetSpent = gated && budget > 0 &&
-            usageRepository.todayForegroundMillisFor(allGated + packageName).values.sum() >=
-            budget * 60_000L
-        val verdict = verdictFor(packageName, gated, hasPass = false, capSpent, budgetSpent)
+        val verdict = verdictFor(packageName, gated, capSpent)
         logVerdict(packageName, verdict)
-        return when (verdict) {
-            GateVerdict.ALLOW, GateVerdict.WAIT -> null
-            else -> wallIntent(packageName, verdict, limit)
+        return if (verdict == GateVerdict.ALLOW) {
+            if (AppCloser.available(this)) AppCloser.release(this, packageName)
+            null
+        } else {
+            wallIntent(packageName, verdict, limit)
         }
     }
 
     /**
      * Whether [pkg] stands behind a wall right now — the focus wall, a spent
-     * cap, the window, bedtime, earn-the-feed or the budget; NOT the wait,
-     * which is a door rather than a wall. Asked by [WindowNotificationGuard]
-     * so a walled app's notifications go too (2026-11-01): the shade, the Edge
+     * cap, the Monday–Thursday window / Friday–Sunday shutdown, bedtime,
+     * earn-the-feed, or the sleep wall. Asked by [WindowNotificationGuard] so
+     * a walled app's notifications go too (2026-11-01): the shade, the Edge
      * panel and an icon's long-press preview were all ways to read an app the
      * wall kept shut.
      *
-     * No measuring: a cap or budget counts only once [watch] has found it
-     * spent today, so this can run on every posted notification.
+     * No measuring: a cap counts only once [watch] has found it spent today,
+     * so this can run on every posted notification.
      */
     private fun walledNow(pkg: String): Boolean {
         if (pkg == packageName) return false
-        val verdict = standingVerdict(pkg, hasPass = false)
-        return verdict != GateVerdict.ALLOW && verdict != GateVerdict.WAIT
+        return standingVerdict(pkg) != GateVerdict.ALLOW
     }
 
     /**
-     * [pkg]'s verdict were it opened now, without measuring: a cap or budget
-     * counts only once [watch] has found it spent today.
+     * [pkg]'s verdict were it opened now, without measuring: a cap counts only
+     * once [watch] has found it spent today.
      */
-    private fun standingVerdict(pkg: String, hasPass: Boolean): GateVerdict {
+    private fun standingVerdict(pkg: String): GateVerdict {
         val gated = gatedCache.getOrPut(pkg) {
             AppGate.isGated(this, pkg, untouchable, browsers, rules.gateBrowsers)
         }
         val capMinutes = blockedLimits[pkg]?.minutes
         val spentAt = spentToday[pkg]
-        val budget = rules.dailyBudgetMinutes
         return verdictFor(
             current = pkg,
             gated = gated,
-            hasPass = hasPass,
-            capSpent = capMinutes != null && spentAt != null && capMinutes <= spentAt,
-            budgetSpent = gated && budget > 0 && budgetSpentAgainst?.let { budget <= it } == true
+            capSpent = capMinutes != null && spentAt != null && capMinutes <= spentAt
         )
     }
 
     /**
-     * Holds every waiting or capped app SUSPENDED while it stands behind any
-     * wall or the wait (2026-11-04), so it cannot be opened at all — not from
-     * its icon, Recents, a pop-up window or a link. The wait's way in is the
-     * WakeProof home screen's [GateActivity], which lifts the hold as it grants
-     * the pass; when the visit ends, the pass goes and the hold comes back.
-     * See [com.ogenrwotdaniel.wakeproof.admin.AppCloser]. Changes only, so a
-     * steady state costs no system calls.
+     * Holds every gated or capped app SUSPENDED while it stands behind any wall
+     * (2026-11-04 / 2026-11-06), so it cannot be opened from its icon, Recents,
+     * a pop-up window or a link. Inside the Monday–Thursday open window,
+     * [standingVerdict] flips to [GateVerdict.ALLOW] and releases the hold
+     * automatically. See [com.ogenrwotdaniel.wakeproof.admin.AppCloser].
+     * Changes only, so a steady state costs no system calls.
      */
     private fun syncSuspensions() {
         if (!rulesLoaded || !limitsLoaded) return
@@ -732,7 +727,7 @@ class AppBlockService : Service() {
         for (pkg in allGated + blockedLimits.keys + quarantined + held) {
             val want = holdSuspended(
                 neverSuspend = pkg == packageName || pkg in neverSuspend,
-                verdict = standingVerdict(pkg, hasPass = GatePasses.isValid(pkg)),
+                verdict = standingVerdict(pkg),
                 forced = pkg in quarantined || (shutAll && (pkg in allGated || pkg in blockedLimits))
             )
             if (want && pkg !in held) {
@@ -763,43 +758,24 @@ class AppBlockService : Service() {
         return true
     }
 
-    /**
-     * Whether today's shared budget ([WallRules.dailyBudgetMinutes]) is spent.
-     * Measured across every waiting app on entering one, then extrapolated
-     * while a waiting app stays in front, like a single app's cap.
-     */
-    private suspend fun budgetSpent(current: String): Boolean {
-        val budget = rules.dailyBudgetMinutes
-        if (budget <= 0) return false
-        budgetSpentAgainst?.let { if (budget <= it) return true }
-        val now = SystemClock.elapsedRealtime()
-        if (!budgetBaselineValid || now - budgetBaselineAt > BASELINE_REFRESH_MILLIS) {
-            budgetBaselineMillis = usageRepository
-                .todayForegroundMillisFor(allGated + current).values.sum()
-            budgetBaselineAt = SystemClock.elapsedRealtime()
-            budgetBaselineValid = true
-        }
-        val used = budgetBaselineMillis + (SystemClock.elapsedRealtime() - budgetBaselineAt)
-        if (used < budget * 60_000L) return false
-        budgetSpentAgainst = budget
-        return true
-    }
-
-    /** Tomorrow's opening time for [current] if the open window outlasts midnight. */
-    private fun reopensTomorrowAt(current: String): String? {
+    /** Next opening phrase after today for [current] if gated (`"tomorrow at 08:10"`, `"Monday at 08:10"`). */
+    private fun nextOpenFor(current: String, today: java.time.DayOfWeek): String? {
         val gated = gatedCache[current] ?: false
-        return reopensTomorrowAtMinutes(
-            windowed = gated,
+        return nextOpenAfterToday(
+            gated = gated,
+            today = today,
+            weekendShut = rules.weekendShut,
             startMinutes = rules.openWindowStartMinutes,
-            endMinutes = rules.openWindowEndMinutes
-        )?.let(::clock)
+            endMinutes = rules.openWindowEndMinutes,
+            formatClock = ::clock
+        )
     }
 
     /** "08:10" or "8:10 AM", as the phone tells time. */
     private fun clock(minutes: Int): String =
         com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime(this, minutes / 60, minutes % 60)
 
-    /** Recomputes [allGated] from the installed apps; the budget is measured over it. */
+    /** Recomputes [allGated] and [quarantined] from the installed apps. */
     private fun refreshAllGated() {
         scope.launch {
             val gateBrowsers = rules.gateBrowsers
@@ -993,7 +969,7 @@ class AppBlockService : Service() {
      * so the next tick sees WakeProof in front and leaves it alone. The debounce
      * only covers the tick or two before the wall's own resume lands.
      */
-    private fun wall(packageName: String, killAfter: Boolean, intent: () -> Intent) {
+    private fun wall(packageName: String, intent: () -> Intent) {
         val now = SystemClock.elapsedRealtime()
         if (packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS) return
         lastBlockedPackage = packageName
@@ -1003,10 +979,10 @@ class AppBlockService : Service() {
                 coverFor = packageName
                 coverWallAt = now
                 coverGraceUntil = 0L
-                killPending = killAfter
+                killPending = true
                 // A hard wall closes the app outright, so nothing of it is left
                 // to reach in a pop-up, split screen or Recents.
-                if (killAfter) closeBesideWall(packageName)
+                closeBesideWall(packageName)
             }
             .onFailure { Log.w(TAG, "could not raise the wall over $packageName", it) }
     }
@@ -1017,7 +993,6 @@ class AppBlockService : Service() {
      * left the screen, kills its background process (2026-11-01). Recents
      * shows a thumbnail no ordinary app can blank, but a tap on a killed app
      * cold-starts it, which gives the wall the second it needs to land first.
-     * Not after a wait — that app may be opened on a pass in a minute.
      */
     private fun followWalledApp(current: String) {
         val pkg = coverFor ?: return popupCover.hide()
@@ -1094,7 +1069,7 @@ class AppBlockService : Service() {
     private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_launcher_foreground)
         .setContentTitle("Distractions are behind a wall")
-        .setContentText("Social apps wait 5 minutes. Spent and off-focus apps stay shut.")
+        .setContentText("Gated apps open Mon–Thu 08:10–08:50 only. Spent and off-focus apps stay shut.")
         .setOngoing(true)
         .setContentIntent(
             PendingIntent.getActivity(

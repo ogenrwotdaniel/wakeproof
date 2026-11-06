@@ -1,11 +1,11 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -20,21 +20,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import com.ogenrwotdaniel.wakeproof.data.remote.AiProvider
-import android.content.Intent
+import com.ogenrwotdaniel.wakeproof.data.remote.GEMINI_KEY_HINT
+import com.ogenrwotdaniel.wakeproof.data.remote.GEMINI_KEY_SOURCE
+import com.ogenrwotdaniel.wakeproof.data.remote.GEMINI_KEY_URL
 
 /**
- * AI provider + API key management: pick Kimi (paid) or Gemini (free tier),
- * paste the matching key (stored encrypted, per provider), test with a
- * 1-token ping, clear.
+ * Gemini API key management: paste a free Google AI Studio key (stored encrypted
+ * on-device), test with a 1-token ping, or clear.
  */
 @Composable
 fun ApiKeySection(
-    provider: AiProvider,
     hasKey: Boolean,
     testing: Boolean,
     testResult: String?,
-    onProviderChange: (AiProvider) -> Unit,
     onSave: (String) -> Unit,
     onClear: () -> Unit,
     onTest: () -> Unit,
@@ -44,21 +42,12 @@ fun ApiKeySection(
     val context = LocalContext.current
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = "AI provider", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AiProvider.entries.forEach { candidate ->
-                FilterChip(
-                    selected = candidate == provider,
-                    onClick = { onProviderChange(candidate) },
-                    label = { Text(candidate.label) }
-                )
-            }
-        }
+        Text(text = "Gemini API key", style = MaterialTheme.typography.titleMedium)
         Text(
             text = if (hasKey) {
-                "A ${provider.label} key is saved (stored encrypted on-device)."
+                "A Gemini key is saved (stored encrypted on-device)."
             } else {
-                "Paste your key from ${provider.keySource}. Flashcard drafting and the " +
+                "Paste your key from $GEMINI_KEY_SOURCE. Flashcard drafting and the " +
                     "study chat stay disabled without it. Water verification does not " +
                     "need it — that runs on the device — but a key lets it ask for a " +
                     "second opinion before rejecting a photo."
@@ -67,24 +56,21 @@ fun ApiKeySection(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (!hasKey) {
-            // The key is the one thing the user cannot get from inside the app, and
-            // "go to aistudio.google.com/api-keys" typed on a phone is where people
-            // give up. One tap out to the page instead.
             OutlinedButton(
                 onClick = {
                     runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, provider.keyUrl.toUri()))
+                        context.startActivity(Intent(Intent.ACTION_VIEW, GEMINI_KEY_URL.toUri()))
                     }
                 }
             ) {
-                Text(if (provider == AiProvider.GEMINI) "Get a free key" else "Get a key")
+                Text("Get a free key")
             }
         }
         OutlinedTextField(
             value = keyInput,
             onValueChange = { keyInput = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text(provider.keyHint) },
+            label = { Text(GEMINI_KEY_HINT) },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true
         )

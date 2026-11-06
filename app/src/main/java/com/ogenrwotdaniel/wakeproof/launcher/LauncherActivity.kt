@@ -8,13 +8,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.clip.ClipHub
 import com.ogenrwotdaniel.wakeproof.clip.ClipTriggers
-import com.ogenrwotdaniel.wakeproof.distraction.GateActivity
+import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.ui.theme.WakeProofTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 /**
  * WakeProof as the phone's home screen — opt-in, chosen in Settings → Home
@@ -43,12 +45,6 @@ class LauncherActivity : ComponentActivity() {
                 LauncherScreen(
                     viewModel = viewModel,
                     onLaunch = ::launch,
-                    onWait = { app ->
-                        startActivity(
-                            GateActivity.intent(this, app.packageName, app.label)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    },
                     onOpenWakeProof = {
                         startActivity(
                             Intent(this, MainActivity::class.java)
@@ -67,12 +63,20 @@ class LauncherActivity : ComponentActivity() {
     }
 
     private fun launch(packageName: String) {
-        val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return
-        runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        lifecycleScope.launch {
+            val wall = AppBlockService.wallBefore(packageName)
+            if (wall != null) {
+                runCatching { startActivity(wall.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                return@launch
+            }
+            val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return@launch
+            runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        runCatching { AppBlockService.sync(applicationContext) }
         viewModel.refresh()
     }
 

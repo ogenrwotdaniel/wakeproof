@@ -1,51 +1,13 @@
 package com.ogenrwotdaniel.wakeproof.data.remote
 
 /**
- * Kimi (Moonshot AI) endpoint constants. Moonshot rotates model ids
- * (K2.5/K2.6 generation as of mid-2026); check platform.moonshot.ai before
- * release.
+ * Google Gemini OpenAI-compatible endpoint constants (`ai.google.dev/gemini-api/docs/openai`).
+ *
+ * Kimi / Moonshot was retired on 2026-11-06; WakeProof talks exclusively to
+ * Gemini's free AI Studio tier (`gemini-3.8-flash` GA).
  */
-const val KIMI_BASE_URL = "https://api.moonshot.ai/v1/"
-const val KIMI_MODEL = "kimi-k2.5"
-
-/**
- * Selectable OpenAI-compatible chat/vision backends. Both speak the same
- * `chat/completions` wire format (including base64 `image_url` parts), so the
- * whole difference is base URL + model id + which key the interceptor sends.
- * Gemini's AI Studio tier is free (no card) — the escape hatch for users who
- * don't want to pay for Kimi.
- */
-enum class AiProvider(
-    val id: String,
-    val label: String,
-    val baseUrl: String,
-    val model: String,
-    val keyHint: String,
-    val keySource: String,
-    /** Where the "Get a key" button in Settings sends you. */
-    val keyUrl: String
-) {
-    GEMINI(
-        id = "gemini",
-        label = "Gemini (free)",
-        baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/",
-        model = "gemini-3.5-flash",
-        keyHint = "AIza…",
-        keySource = "aistudio.google.com/api-keys (free, no card needed)",
-        keyUrl = "https://aistudio.google.com/api-keys"
-    ),
-    KIMI(
-        id = "kimi",
-        label = "Kimi (paid)",
-        baseUrl = KIMI_BASE_URL,
-        model = KIMI_MODEL,
-        keyHint = "sk-…",
-        keySource = "platform.moonshot.ai",
-        keyUrl = "https://platform.moonshot.ai"
-    );
-
-    companion object {
-        /** Unset (fresh install) resolves to the free provider. */
-        fun fromId(id: String?): AiProvider = entries.firstOrNull { it.id == id } ?: GEMINI
-    }
-}
+const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+const val GEMINI_MODEL = "gemini-3.8-flash"
+const val GEMINI_KEY_HINT = "AIza…"
+const val GEMINI_KEY_SOURCE = "aistudio.google.com/api-keys (free, no card needed)"
+const val GEMINI_KEY_URL = "https://aistudio.google.com/api-keys"

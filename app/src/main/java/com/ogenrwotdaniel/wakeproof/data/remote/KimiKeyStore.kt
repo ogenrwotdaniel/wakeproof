@@ -7,23 +7,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Read/write access to the AI provider choice and its API keys. Keys are kept
- * per provider, so switching Kimi ↔ Gemini doesn't lose the other's key.
- */
+/** Read/write access to the user's Gemini API key. */
 interface ApiKeyStore {
     fun getKey(): String?
     fun setKey(value: String)
     fun clear()
     fun hasKey(): Boolean = getKey() != null
-    fun getProvider(): AiProvider
-    fun setProvider(provider: AiProvider)
 }
 
 /**
- * Stores the key in EncryptedSharedPreferences — never in code, never in the
- * regular (backup-able) prefs. security-crypto is deprecated upstream but is
- * this project's mandated storage; revisit if the library is removed.
+ * Stores the Gemini key in EncryptedSharedPreferences — never in code, never in
+ * regular (backup-able) prefs. Keeps the historical file name (`kimi_secure_prefs`)
+ * and entry name (`api_key_gemini`) so existing Gemini keys saved before Kimi was
+ * removed keep working without re-entry.
  */
 @Singleton
 class KimiKeyStore @Inject constructor(
@@ -45,29 +41,17 @@ class KimiKeyStore @Inject constructor(
     }
 
     override fun getKey(): String? =
-        prefs.getString(keyName(getProvider()), null)?.takeIf { it.isNotBlank() }
+        prefs.getString(KEY_GEMINI, null)?.takeIf { it.isNotBlank() }
 
     override fun setKey(value: String) {
-        prefs.edit().putString(keyName(getProvider()), value.trim()).apply()
+        prefs.edit().putString(KEY_GEMINI, value.trim()).apply()
     }
 
     override fun clear() {
-        prefs.edit().remove(keyName(getProvider())).apply()
+        prefs.edit().remove(KEY_GEMINI).apply()
     }
-
-    override fun getProvider(): AiProvider =
-        AiProvider.fromId(prefs.getString(KEY_PROVIDER, null))
-
-    override fun setProvider(provider: AiProvider) {
-        prefs.edit().putString(KEY_PROVIDER, provider.id).apply()
-    }
-
-    /** Kimi keeps the pre-provider-era pref name so existing keys survive. */
-    private fun keyName(provider: AiProvider) =
-        if (provider == AiProvider.KIMI) KEY_API_LEGACY else "api_key_${provider.id}"
 
     private companion object {
-        const val KEY_API_LEGACY = "kimi_api_key"
-        const val KEY_PROVIDER = "ai_provider"
+        const val KEY_GEMINI = "api_key_gemini"
     }
 }

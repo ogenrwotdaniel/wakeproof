@@ -188,6 +188,12 @@ dependencies {
     implementation(libs.play.services.wearable)
     implementation(libs.kotlinx.coroutines.play.services)
 
+    constraints {
+        implementation(libs.guava) {
+            because("CameraX, Firebase and WorkManager pull in an older Guava with CVE-2026-102554")
+        }
+    }
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)

@@ -140,5 +140,11 @@ dependencies {
     implementation(libs.google.identity.googleid)
     implementation(libs.androidx.work.runtime.ktx)
 
+    constraints {
+        implementation(libs.guava) {
+            because("CameraX, Firebase and WorkManager pull in an older Guava with CVE-2026-102554")
+        }
+    }
+
     testImplementation(libs.junit)
 }

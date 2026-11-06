@@ -17,6 +17,8 @@ import java.net.Socket
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -102,10 +104,19 @@ object ClipLan {
  * The tiny HTTP/1.1 server: `POST /clip` and `GET /ping`, one connection per
  * request (`Connection: close`). Runs on IO threads of the scope it is started in.
  */
-class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -> Int) {
+class ClipLanServer(
+    private val port: Int = ClipLan.CLIP_PORT,
+    private val handler: suspend (id: String, body: ByteArray) -> Int
+) {
 
     @Volatile private var server: ServerSocket? = null
     private var job: Job? = null
+
+    /** The port actually bound, or -1 while not listening. */
+    val boundPort: Int get() = server?.localPort ?: -1
+
+    /** One permit per connection being served; a newcomer beyond that is turned away. */
+    private val slots = Semaphore(MAX_CONNECTIONS)
 
     fun start(scope: CoroutineScope) {
         if (job?.isActive == true) return
@@ -113,9 +124,9 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
             val socket = runCatching {
                 ServerSocket().apply {
                     reuseAddress = true
-                    bind(java.net.InetSocketAddress(ClipLan.CLIP_PORT))
+                    bind(java.net.InetSocketAddress(port))
                 }
-            }.onFailure { Log.w(TAG, "cannot listen on ${ClipLan.CLIP_PORT}", it) }.getOrNull() ?: return@launch
+            }.onFailure { Log.w(TAG, "cannot listen on $port", it) }.getOrNull() ?: return@launch
             server = socket
             try {
                 while (isActive) {
@@ -124,7 +135,30 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
                     } catch (_: SocketException) {
                         break
                     }
-                    launch { serve(client) }
+                    if (!slots.tryAcquire()) {
+                        // Full. Each connection may hold a body of MAX_BODY_BYTES
+                        // before any key is checked, so the count is capped and the
+                        // newcomer dropped rather than queued; a real peer retries.
+                        runCatching { client.close() }
+                        continue
+                    }
+                    launch {
+                        try {
+                            serve(client)
+                        } catch (c: CancellationException) {
+                            throw c
+                        } catch (_: Throwable) {
+                            // A reset, a stall, or a body too large to allocate ends
+                            // this one connection and nothing else. Anyone who can
+                            // reach the port can cause any of them, and a failure
+                            // that escaped from here would cancel the listener and
+                            // then, with no handler in the scope above, end the whole
+                            // process — a ringing alarm and the app wall with it.
+                        } finally {
+                            runCatching { client.close() }
+                            slots.release()
+                        }
+                    }
                 }
             } finally {
                 runCatching { socket.close() }
@@ -142,9 +176,12 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
     private suspend fun serve(socket: Socket) {
         socket.use { s ->
             s.soTimeout = 15_000
+            // soTimeout bounds one read, not the request: a peer feeding a byte
+            // every few seconds would otherwise hold its slot indefinitely.
+            val deadline = System.nanoTime() + REQUEST_DEADLINE_NANOS
             val input = BufferedInputStream(s.getInputStream())
             val out = s.getOutputStream()
-            val request = runCatching { readHead(input) }.getOrNull()
+            val request = runCatching { readHead(input, deadline) }.getOrNull()
             if (request == null) {
                 respond(out, 400, "Bad Request")
                 return
@@ -159,7 +196,7 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
                         id.isNullOrBlank() || length == null || length < 0 -> respond(out, 400, "Bad Request")
                         length > ClipLan.MAX_BODY_BYTES -> respond(out, 413, "Payload Too Large")
                         else -> {
-                            val body = readBody(input, length.toInt())
+                            val body = readBody(input, length.toInt(), deadline)
                             if (body == null) {
                                 respond(out, 400, "Bad Request")
                             } else {
@@ -176,7 +213,7 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
 
     private class Head(val method: String, val path: String, val headers: Map<String, String>)
 
-    private fun readHead(input: InputStream): Head? {
+    private fun readHead(input: InputStream, deadline: Long): Head? {
         val lines = mutableListOf<String>()
         val line = ByteArrayOutputStream()
         var total = 0
@@ -184,6 +221,7 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
             val b = input.read()
             if (b < 0) return null
             if (++total > MAX_HEAD_BYTES) return null
+            if (total % 256 == 0 && System.nanoTime() > deadline) return null
             if (b == '\n'.code) {
                 val text = line.toString(Charsets.ISO_8859_1.name()).trimEnd('\r')
                 line.reset()
@@ -202,10 +240,11 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
         return Head(first[0].uppercase(), first[1].substringBefore('?'), headers)
     }
 
-    private fun readBody(input: InputStream, length: Int): ByteArray? {
+    private fun readBody(input: InputStream, length: Int, deadline: Long): ByteArray? {
         val body = ByteArray(length)
         var at = 0
         while (at < length) {
+            if (System.nanoTime() > deadline) return null
             val n = input.read(body, at, length - at)
             if (n < 0) return null
             at += n
@@ -230,6 +269,12 @@ class ClipLanServer(private val handler: suspend (id: String, body: ByteArray) -
     private companion object {
         const val TAG = "ClipLanServer"
         const val MAX_HEAD_BYTES = 16 * 1024
+
+        /** A paired household is a handful of devices; this leaves room to spare. */
+        const val MAX_CONNECTIONS = 4
+
+        /** Whole-request limit. A 20 MiB image over slow Wi-Fi fits comfortably. */
+        const val REQUEST_DEADLINE_NANOS = 60_000_000_000L
     }
 }
 

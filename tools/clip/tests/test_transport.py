@@ -74,6 +74,23 @@ def test_lan_too_big_is_413(server):
     conn.close()
 
 
+@pytest.mark.parametrize("length", ["-1", "0"])
+def test_lan_non_positive_length_is_400_and_reads_nothing(server, length):
+    import http.client
+
+    conn = http.client.HTTPConnection("127.0.0.1", server[2].port, timeout=3)
+    conn.putrequest("POST", "/clip")
+    conn.putheader("X-Clip-Id", "neg")
+    conn.putheader("Content-Length", length)
+    conn.endheaders()
+    # Answered straight away: the server must not sit reading a body it was
+    # told has no end.
+    assert conn.getresponse().status == 400
+    conn.close()
+    assert server[1] == []
+    assert lan.ping("127.0.0.1", server[2].port)
+
+
 # --- Firestore encoding (no network) ------------------------------------------
 
 def test_firestore_values():

@@ -64,6 +64,9 @@ class ClipServer:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
             server_version = "wakeproof-clip"
+            # Anyone on the network can connect before any key is checked, so a
+            # peer that goes quiet may hold its thread for this long and no longer.
+            timeout = 15
 
             def log_message(self, fmt, *args):
                 log.debug("%s %s", self.client_address[0], fmt % args)
@@ -93,10 +96,19 @@ class ClipServer:
                 except ValueError:
                     self._reply(411, close=True)
                     return
+                if length <= 0:
+                    # A negative length would make read() run to the end of the
+                    # stream, however long a stranger cares to keep sending.
+                    self._reply(400, close=True)
+                    return
                 if length > MAX_SEALED:
                     self._reply(413, close=True)
                     return
-                body = self.rfile.read(length)
+                try:
+                    body = self.rfile.read(length)
+                except OSError:  # went quiet or reset partway through the body
+                    self.close_connection = True
+                    return
                 clip_id = (self.headers.get("X-Clip-Id") or "").strip()
                 if not clip_id or len(body) != length:
                     self._reply(400, close=True)

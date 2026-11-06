@@ -37,7 +37,7 @@ WakeProof is an Android alarm, deep-focus, spaced-repetition, and distraction-wa
 ## Tech Stack & Requirements
 
 - **Modules:** `:app` (Android 14+, `minSdk = 34`, `targetSdk = 36`, `compileSdk = 37`) and `:wear` (Wear OS, `minSdk = 30`, `targetSdk = 35`)
-- **Build:** Gradle 9.4.1 wrapper, AGP 9.4.1 with built-in Kotlin 2.4 (do **not** apply `org.jetbrains.kotlin.android`)
+- **Build:** Gradle 9.8.2 wrapper, AGP 9.5.1 with built-in Kotlin 2.4 (do **not** apply `org.jetbrains.kotlin.android`)
 - **Architecture:** Kotlin Coroutines + Flow, Jetpack Compose + Material 3 Adaptive, Hilt, Room v5 (WAL) + DataStore, WorkManager, Glance AppWidget
 - **Vision & AI:** CameraX + ExifInterface, ML Kit Pose Detection & Barcode Scanning, on-device water-line CV (`tools/water/`), optional Google Gemini (`gemini-3.8-flash`) via Retrofit 3 / OkHttp 5
 

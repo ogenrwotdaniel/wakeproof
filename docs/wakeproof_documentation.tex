@@ -479,7 +479,7 @@ Gemini API key & Local encrypted store & Stored in \texttt{EncryptedSharedPrefer
 
 \subsection{Engineering Stack Summary}
 \begin{itemize}
-  \item \textbf{Core Android (\texttt{:app}):} Kotlin 2.4, Gradle 9.4 / AGP 9.4, Jetpack Compose + Material~3, Hilt DI, Room SQLite (v5, WAL) + Preferences DataStore, CameraX + ExifInterface, ML~Kit Pose Detection \& Barcode Scanning, WorkManager, Jetpack Glance AppWidget, Retrofit~3 + OkHttp~5 + \texttt{kotlinx.serialization} targeting Google Gemini (\texttt{gemini-3.8-flash}).
+  \item \textbf{Core Android (\texttt{:app}):} Kotlin 2.4, Gradle 9.8 / AGP 9.5, Jetpack Compose + Material~3, Hilt DI, Room SQLite (v5, WAL) + Preferences DataStore, CameraX + ExifInterface, ML~Kit Pose Detection \& Barcode Scanning, WorkManager, Jetpack Glance AppWidget, Retrofit~3 + OkHttp~5 + \texttt{kotlinx.serialization} targeting Google Gemini (\texttt{gemini-3.8-flash}).
   \item \textbf{Wear OS (\texttt{:wear}):} \texttt{ComponentActivity} with \texttt{AmbientLifecycle\allowbreak Observer}, Wear ProtoLayout Tiles (\texttt{StatsTile\allowbreak Service}, \texttt{AgendaTile\allowbreak Service}), Watch-Face Complications (\texttt{AgendaComplication\allowbreak Service}), Ongoing Activity API, Wearable Data Layer / MessageClient, and direct Firebase Auth + Firestore upload.
   \item \textbf{Companion Tooling (\texttt{tools/}):} Cross-language synthetic LCG fixture \& evaluation pipeline for water-line computer vision (\texttt{tools/water/}), circular stereo OGG Vorbis soundscape synthesizer (\texttt{tools/sounds/}), and the Ubuntu GNOME Wayland D-Bus + Python AES-256-GCM clipboard daemon (\texttt{tools/clip/}).
 \end{itemize}

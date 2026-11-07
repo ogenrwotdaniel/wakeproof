@@ -526,10 +526,12 @@ class AppBlockService : Service() {
                 tracker.forgetResumed()
                 besideRepeats.clear()
                 historyBackoff.clear()
-                // A read begun before the screen went off says nothing about after it.
-                historyReads.values.forEach { it.cancel() }
-                historyReads.clear()
+                // A read or a confirmation from before the screen went off says nothing
+                // about after it. A read still running is left to finish, unheard, so a
+                // second read of the same app cannot start beside it.
+                screenOnRun++
                 historyAnswers.clear()
+                besideConfirmedAt.clear()
                 // Force a fresh measurement on wake rather than extrapolating
                 // across the whole time the phone was down.
                 baselineFor = null
@@ -1218,6 +1220,9 @@ class AppBlockService : Service() {
      * other's read away.
      */
     private val historyReads = mutableMapOf<String, Job>()
+
+    /** Counts screen-offs, so a read begun before one is not heard after it. */
+    private var screenOnRun = 0
     private val historyAnswers = mutableMapOf<String, HistoryAnswer>()
 
     /**
@@ -1245,10 +1250,13 @@ class AppBlockService : Service() {
         if (pkg in historyReads) return OpenCheck.UNKNOWN
         val from = tracker.confirmFrom(pkg) ?: return OpenCheck.CLOSED
         val lastResumedAt = tracker.lastResumedAt(pkg)
+        val run = screenOnRun
         historyReads[pkg] = scope.launch {
             val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
             val at = SystemClock.elapsedRealtime()
-            if (read == null) {
+            if (run != screenOnRun) {
+                // Begun before the screen went off: unheard.
+            } else if (read == null) {
                 historyBackoff[pkg] = at + BESIDE_CONFIRM_MILLIS
             } else {
                 historyAnswers[pkg] = HistoryAnswer(read, at, lastResumedAt)
@@ -1344,10 +1352,10 @@ class AppBlockService : Service() {
             return
         }
         val now = SystemClock.elapsedRealtime()
-        // The app just walled is the cover's until its limit: walling it again over
-        // its own wall would only push the cover back and spend its repeat gap.
-        val coverOwns = coverFor?.takeIf { now - coverWallAt <= COVER_MAX_MILLIS }
-        val walled = resumed.filter { it != packageName && it != coverOwns && mayLandOver(current, it) }
+        val walled = resumed.filter {
+            it != packageName && mayLandOver(current, it) &&
+                !leftToCover(it, coverFor, now - coverWallAt, ownFront = current == packageName)
+        }
             .associateWith(::standingVerdict)
             .filterValues { it != GateVerdict.ALLOW }
         // Consecutive ticks: a tick that came another way must not count as the last.

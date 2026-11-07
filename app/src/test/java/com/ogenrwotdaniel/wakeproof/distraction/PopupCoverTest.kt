@@ -143,4 +143,22 @@ class PopupCoverTest {
         assertFalse(frontMayHaveChanged(startedAt = 1_000L, endedAt = 1_000L + SLOW_VERDICT_MILLIS - 1))
         assertTrue(frontMayHaveChanged(startedAt = 1_000L, endedAt = 1_000L + SLOW_VERDICT_MILLIS))
     }
+
+    @Test
+    fun `the app just walled is left to the cover while its wall is in front`() {
+        assertTrue(leftToCover("popup", coverFor = "popup", coverAgeMillis = 0L, ownFront = true))
+        assertTrue(leftToCover("popup", "popup", COVER_MAX_MILLIS, ownFront = true))
+    }
+
+    @Test
+    fun `a pop-up left beside another app is walled again at once`() {
+        assertFalse(leftToCover("popup", coverFor = "popup", coverAgeMillis = 0L, ownFront = false))
+    }
+
+    @Test
+    fun `the cover lets go at its limit, and never holds another app`() {
+        assertFalse(leftToCover("popup", "popup", COVER_MAX_MILLIS + 1, ownFront = true))
+        assertFalse(leftToCover("other", "popup", 0L, ownFront = true))
+        assertFalse(leftToCover("popup", null, 0L, ownFront = true))
+    }
 }

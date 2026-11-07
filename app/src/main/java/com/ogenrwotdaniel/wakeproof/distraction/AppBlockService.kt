@@ -53,6 +53,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -1222,6 +1223,7 @@ class AppBlockService : Service() {
      */
     private val historyReads = mutableMapOf<String, HistoryRead>()
 
+    /** [startedAt] is on [SystemClock.uptimeMillis]; see [readStuck]. */
     private class HistoryRead(val job: Job, val startedAt: Long)
 
     /**
@@ -1231,18 +1233,25 @@ class AppBlockService : Service() {
     private val abandonedReads = mutableListOf<Job>()
 
     /**
+     * On the uptime clock: deep sleep pauses a read without it being stuck, and
+     * counted as stuck it would spend the cap on a healthy one.
+     */
+    private fun readStuck(read: HistoryRead): Boolean =
+        historyReadAbandoned(read.startedAt, SystemClock.uptimeMillis(), abandonedReads.count { it.isActive })
+
+    /**
      * A read for [pkg] is under way. One stuck on a hung binder call is given up
      * on, so it cannot keep the app from ever being walled, and is never heard:
      * the slot is the read's ticket, and a read no longer in it stays silent.
      */
-    private fun readRunning(pkg: String, now: Long): Boolean {
+    private fun readRunning(pkg: String): Boolean {
         val read = historyReads[pkg] ?: return false
         if (!read.job.isActive) {
             historyReads.remove(pkg)
             return false
         }
         abandonedReads.removeAll { !it.isActive }
-        if (!historyReadAbandoned(read.startedAt, now, abandonedReads.size)) return true
+        if (!readStuck(read)) return true
         Log.w(TAG, "history read for $pkg stuck, given up on")
         abandonedReads += read.job
         historyReads.remove(pkg)
@@ -1275,11 +1284,11 @@ class AppBlockService : Service() {
             if (!answer.open && tracker.lastResumedAt(pkg) != answer.lastResumedAt) return OpenCheck.UNKNOWN
             return judgeOpen(pkg, front, answer.open, now)
         }
-        if (readRunning(pkg, now)) return OpenCheck.UNKNOWN
+        if (readRunning(pkg)) return OpenCheck.UNKNOWN
         val from = tracker.confirmFrom(pkg) ?: return OpenCheck.CLOSED
         val lastResumedAt = tracker.lastResumedAt(pkg)
         val run = screenOnRun
-        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
             val at = SystemClock.elapsedRealtime()
             val stillTicketed = historyReads[pkg]?.job === coroutineContext[Job]
@@ -1292,7 +1301,7 @@ class AppBlockService : Service() {
             }
         }
         // In its slot before it runs, so its own check of the ticket finds it.
-        historyReads[pkg] = HistoryRead(job, now)
+        historyReads[pkg] = HistoryRead(job, SystemClock.uptimeMillis())
         job.start()
         return OpenCheck.UNKNOWN
     }
@@ -1406,7 +1415,7 @@ class AppBlockService : Service() {
                 now - (besideConfirmedAt[app] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS ||
                 historyHeldOff(app, now) ||
                 // Its read is running: a second app beside it must not wait on that.
-                readRunning(app, now)
+                historyReads[app]?.let { it.job.isActive && !readStuck(it) } == true
         }
         val settled = walled.keys.firstOrNull { it in previous && !waiting(it) }
         besideLastTick = walled.keys

@@ -109,21 +109,6 @@ const val SLOW_VERDICT_MILLIS = 500L
 fun leftToCover(app: String, coverFor: String?, coverAgeMillis: Long, ownFront: Boolean): Boolean =
     ownFront && app == coverFor && coverAgeMillis <= COVER_MAX_MILLIS
 
-/**
- * Pure: a whole-history read begun at [startedAt] is given up on as stuck, so a
- * hung binder call cannot keep its app from ever being walled. Only while fewer
- * than [MAX_ABANDONED_READS] given-up reads still hold a thread: past that a
- * binder hung for good would use up the IO pool, and the tick, asking the same
- * service, has stalled anyway.
- */
-fun historyReadAbandoned(startedAt: Long, now: Long, abandonedStillRunning: Int): Boolean =
-    now - startedAt > HISTORY_READ_STUCK_MILLIS && abandonedStillRunning < MAX_ABANDONED_READS
-
-/** Longer than any healthy read: twice the wait between two reads of one app. */
-const val HISTORY_READ_STUCK_MILLIS = 60_000L
-
-const val MAX_ABANDONED_READS = 3
-
 /** At most this often per app: the whole-history check, and the read of a cap beside the front app. */
 const val BESIDE_CONFIRM_MILLIS = 30_000L
 

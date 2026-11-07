@@ -100,11 +100,11 @@ fun frontMayHaveChanged(startedAt: Long, endedAt: Long): Boolean = endedAt - sta
 const val SLOW_VERDICT_MILLIS = 500L
 
 /**
- * Pure: [app] is the one just walled, with its own wall in front, so the cover
- * deals with it until [COVER_MAX_MILLIS]; a second wall over the first would only
- * push the cover back and spend its repeat gap. Only with WakeProof in front
- * ([ownFront]): beside any other app the cover never shows, and the beside check
- * is all that walls a pop-up left there.
+ * Pure: [app] is the one just walled and a WakeProof screen is in front
+ * ([ownFront]: its wall, or any other WakeProof screen), so the cover deals with
+ * it until [COVER_MAX_MILLIS]; a second wall over the first would only push the
+ * cover back and spend its repeat gap. Beside any other app the cover never
+ * shows, and the beside check is all that walls a pop-up left there.
  */
 fun leftToCover(app: String, coverFor: String?, coverAgeMillis: Long, ownFront: Boolean): Boolean =
     ownFront && app == coverFor && coverAgeMillis <= COVER_MAX_MILLIS

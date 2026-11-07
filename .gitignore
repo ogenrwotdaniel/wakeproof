@@ -38,3 +38,28 @@ docs/STORE_LISTING.md
 # use only, never published. The app falls back to the phone's alarm sound without it.
 app/src/main/res/raw/locked_alarm.*
 wear/src/main/res/raw/locked_alarm.*
+
+# Secrets and private files: never committed
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+local.properties
+GoogleService-Info.plist
+service-account*.json
+credentials.json
+secrets.json
+.npmrc
+.pypirc
+.netrc
+deploy.env
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.log
+dump.sql

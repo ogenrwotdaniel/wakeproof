@@ -449,7 +449,11 @@ class AppBlockService : Service() {
         // they are in: with an empty essential set the dialer or the home screen
         // could be judged an ordinary app.
         scope.launch {
-            refreshDefaults()
+            // A failed read must not leave the walls unstarted for good.
+            while (!defaultsLoaded.isCompleted) {
+                runCatching { refreshDefaults() }.onFailure { Log.w(TAG, "default apps unreadable", it) }
+                if (!defaultsLoaded.isCompleted) delay(DEFAULTS_RETRY_MILLIS)
+            }
             awaitReady()
             watch()
         }
@@ -481,6 +485,9 @@ class AppBlockService : Service() {
         scope.cancel()
         super.onDestroy()
     }
+
+    /** The front app at the last tick, so the clock is re-read when it changes. */
+    private var lastFront: String? = null
 
     private suspend fun watch() {
         // Give the collectors a tick to land before the first decision.
@@ -531,6 +538,12 @@ class AppBlockService : Service() {
                 pinCover.hide()
                 delay(POLL_MILLIS)
                 continue
+            }
+            // A clock changed in Settings and a quick switch to a gated app must
+            // not slip in on the 2 s loop's old verdict.
+            if (current != lastFront) {
+                lastFront = current
+                clockDoubted = runCatching { clockUntrusted(this) }.getOrDefault(clockDoubted)
             }
             followWalledApp(current)
             if (current == packageName) {
@@ -728,7 +741,10 @@ class AppBlockService : Service() {
      * the app has shown anything.
      */
     private suspend fun wallBefore(packageName: String): Intent? {
-        awaitReady()
+        // A tap is never held for long: without the default apps nothing can be
+        // judged safely, so it opens, and the tick walls it once they are in.
+        withTimeoutOrNull(READY_TIMEOUT_MILLIS) { awaitReady() }
+        if (!defaultsLoaded.isCompleted) return null
         val limit = blockedLimit(packageName)
         val capSpent = limit != null &&
             (usageRepository.todayForegroundMillisFor(setOf(packageName))[packageName] ?: 0L) >=
@@ -834,8 +850,13 @@ class AppBlockService : Service() {
      *
      * The lookups run off the main thread, where the 500 ms tick runs.
      */
-    private suspend fun refreshDefaults() =
+    private suspend fun refreshDefaults() = defaultsLock.withLock {
+        // One read at a time: an older one finishing last would put a retired
+        // home or SMS app back.
         applyDefaults(withContext(Dispatchers.Default) { readDefaults() })
+    }
+
+    private val defaultsLock = Mutex()
 
     private class Defaults(val apps: DefaultApps, val exempt: Set<String>)
 
@@ -1129,6 +1150,9 @@ class AppBlockService : Service() {
         besideConfirmedAt[pkg] = now
         if (!still) {
             Log.i(TAG, "$pkg was not really running beside $current")
+            // Forgotten by the tracker, so only a real reopen brings it back, and
+            // that one must be checked at once, not after the 30 s wait.
+            besideConfirmedAt.remove(pkg)
             besideLastTick = emptySet()
             return
         }
@@ -1269,6 +1293,7 @@ class AppBlockService : Service() {
         private const val CHARGE_NOTIFICATION_ID = 72
         private const val CAMERA_NOTIFICATION_ID = 73
         private const val READY_TIMEOUT_MILLIS = 5_000L
+        private const val DEFAULTS_RETRY_MILLIS = 2_000L
         private const val WALL_PREFS = "walls"
         private const val KEY_ARMED = "armed"
         private const val BESIDE_CONFIRM_MILLIS = 30_000L

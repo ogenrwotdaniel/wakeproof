@@ -355,6 +355,9 @@ private fun PhotoCaptureView(
         val bound = bindForScreen(context, lifecycleOwner, useFrontCamera) {
             listOf(Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }, imageCapture)
         }
+        // Again once the bind is done: a photo tapped while it was still running
+        // had its camera closed by it, and that is not the camera's fault.
+        session.bound()
         if (!bound) onCameraFailed()
     }
 

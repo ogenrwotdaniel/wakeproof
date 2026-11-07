@@ -1250,13 +1250,6 @@ class AppBlockService : Service() {
         historyReads.clear()
         historyAnswers.clear()
         besideConfirmedAt.clear()
-        historyBackoff.clear()
-        // The beside checks count ticks and walls "so far this screen-on".
-        besideLastTick = emptySet()
-        besideRepeats.clear()
-        // Force a fresh measurement on wake rather than extrapolating
-        // across the whole time the phone was down.
-        baselineFor = null
     }
 
     /** Whether the screen-off branch already reset for this time the screen is off. */
@@ -1274,7 +1267,15 @@ class AppBlockService : Service() {
         // Nothing stays resumed with the screen off, and whatever really
         // is on screen resumes again on waking.
         tracker.forgetResumed()
+        // Kept across a screen-off only the broadcast saw: a broadcast landing late
+        // for one already dealt with would otherwise drop them mid screen-on, and a
+        // phantom still in the resumed set would lose its back-off.
+        besideRepeats.clear()
+        historyBackoff.clear()
         resetHistory()
+        // Force a fresh measurement on wake rather than extrapolating
+        // across the whole time the phone was down.
+        baselineFor = null
     }
 
     /** Counts [resetHistory]s, so a read begun before one is not heard after it. */

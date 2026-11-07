@@ -1173,6 +1173,28 @@ class AppBlockService : Service() {
         val now = SystemClock.elapsedRealtime()
         val age = now - coverWallAt
         val resumed = tracker.isResumed(pkg)
+        // "Let me close it" ran out with the pop-up still open: the wall comes
+        // back, or the app would stay usable until the next beside check. Never
+        // over a call or an alarm: only over an ordinary app, the home screen, or
+        // WakeProof's own wall and home screen.
+        if (coverGraceUntil != 0L && now >= coverGraceUntil) {
+            coverGraceUntil = 0L
+            val frontMayBeWalledOver = when (current) {
+                pkg -> false
+                packageName -> tracker.isResumed(packageName, BlockedActivity::class.java.name) ||
+                    tracker.isResumed(packageName, LauncherActivity::class.java.name)
+                else -> current !in untouchable || current in homeApps
+            }
+            if (resumed && frontMayBeWalledOver) {
+                val verdict = standingVerdict(pkg)
+                if (verdict != GateVerdict.ALLOW) {
+                    Log.i(TAG, "$pkg still open after its grace -> $verdict")
+                    lastBlockedPackage = null // not a re-entry to debounce
+                    wall(pkg) { wallIntent(pkg, verdict, blockedLimit(pkg)) }
+                    return
+                }
+            }
+        }
         val want = popupCoverWanted(
             wallAgeMillis = age,
             ownWallInFront = current == packageName,

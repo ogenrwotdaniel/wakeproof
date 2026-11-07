@@ -264,12 +264,11 @@ class AppBlockService : Service() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             // Counted here, not only by the tick: a sleep that begins and ends inside
-            // one tick's delay is never seen there. Only counted, so a tick suspended
-            // mid-way does not resume on state pulled from under it; the tick resets
-            // ([screenOffReset]). Only while the screen really is off: one landing
-            // late, after waking, must not throw away what was learnt since.
+            // one tick's delay is never seen there, and the broadcast for it often
+            // lands only after waking. Only counted, so a tick suspended mid-way does
+            // not resume on state pulled from under it; see [resetHistory].
             if (intent.action == Intent.ACTION_SCREEN_OFF) {
-                if (!powerManager.isInteractive) screenOffsSeen++
+                screenOffsSeen++
                 return
             }
             // The clock may have been changed while the screen was off, when the
@@ -540,7 +539,7 @@ class AppBlockService : Service() {
             }
             offResetDone = false
             // Off and on again inside one tick: only the broadcast saw it.
-            if (screenOffsSeen != screenOffsReset) screenOffReset()
+            if (screenOffsSeen != screenOffsReset) resetHistory()
 
             val today = LocalDate.now().toEpochDay()
             if (today != spentDay) {
@@ -1236,16 +1235,33 @@ class AppBlockService : Service() {
     private var screenOffsSeen = 0
     private var screenOffsReset = 0
 
+    /**
+     * A read or a confirmation from before the screen went off says nothing about
+     * after it. Cancelled: one still queued never runs, and one already blocked in
+     * the system finishes unheard ([screenOnRun]), its slot freed so its app gets a
+     * fresh check on waking. Also from the tick's next pass after a screen-off it
+     * did not see; then, with the screen on, only this, and one landing late
+     * costs no more than a check run again.
+     */
+    private fun resetHistory() {
+        screenOffsReset = screenOffsSeen
+        screenOnRun++
+        historyReads.values.forEach { it.cancel() }
+        historyReads.clear()
+        historyAnswers.clear()
+        besideConfirmedAt.clear()
+    }
+
     /** Whether the screen-off branch already reset for this time the screen is off. */
     private var offResetDone = false
 
     /**
-     * Everything the tick knows only while the screen is on. Once per time the
-     * screen is off, from the tick: in its screen-off branch, or at its next pass
-     * when the screen was off and on again inside one tick.
+     * Everything the tick knows only while the screen is on. From the tick's
+     * screen-off branch, once per time off, and only there: with the screen on
+     * again, forgetting the resumed set would lose the app in front and leave it
+     * unwalled until it resumes again.
      */
     private fun screenOffReset() {
-        screenOffsReset = screenOffsSeen
         popupCover.hide()
         pinCover.hide()
         // Nothing stays resumed with the screen off, and whatever really
@@ -1253,15 +1269,7 @@ class AppBlockService : Service() {
         tracker.forgetResumed()
         besideRepeats.clear()
         historyBackoff.clear()
-        // A read or a confirmation from before the screen went off says nothing
-        // about after it. Cancelled: one still queued never runs, and one already
-        // blocked in the system finishes unheard ([screenOnRun]), its slot freed so
-        // its app gets a fresh check on waking.
-        screenOnRun++
-        historyReads.values.forEach { it.cancel() }
-        historyReads.clear()
-        historyAnswers.clear()
-        besideConfirmedAt.clear()
+        resetHistory()
         // Force a fresh measurement on wake rather than extrapolating
         // across the whole time the phone was down.
         baselineFor = null
@@ -1388,9 +1396,10 @@ class AppBlockService : Service() {
      * moment two apps overlap in a plain app switch is not mistaken for one.
      * [followWalledApp] then covers it from the wall. The set is folded from
      * events, so a lost PAUSED could leave a phantom here; [watch] empties the
-     * set at every screen-off, which is the most a phantom can cost: one off and
-     * on again inside a single 500 ms tick too, when its broadcast lands while the
-     * screen is still off ([screenOffsSeen]).
+     * set at every screen-off it sees, which is the most a phantom can cost. One
+     * off and on again inside a single 500 ms tick resets only the history checks
+     * ([resetHistory]), so a phantom then lasts to the next, and its whole-history
+     * read still has to say it is open.
      */
     private fun wallBeside(current: String) {
         val resumed = tracker.resumedPackages()
@@ -1426,7 +1435,7 @@ class AppBlockService : Service() {
                 now - (besideConfirmedAt[app] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS ||
                 historyHeldOff(app, now) ||
                 // Its read is running: a second app beside it must not wait on that.
-                historyReads[app]?.isActive == true
+                readRunning(app)
         }
         val settled = walled.keys.firstOrNull { it in previous && !waiting(it) }
         besideLastTick = walled.keys

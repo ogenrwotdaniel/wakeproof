@@ -161,4 +161,20 @@ class PopupCoverTest {
         assertFalse(leftToCover("other", "popup", 0L, ownFront = true))
         assertFalse(leftToCover("popup", null, 0L, ownFront = true))
     }
+
+    @Test
+    fun `a slow history read is waited for`() {
+        assertFalse(historyReadAbandoned(startedAt = 0L, now = HISTORY_READ_STUCK_MILLIS, abandonedStillRunning = 0))
+    }
+
+    @Test
+    fun `a stuck history read is given up on`() {
+        assertTrue(historyReadAbandoned(startedAt = 0L, now = HISTORY_READ_STUCK_MILLIS + 1, abandonedStillRunning = 0))
+    }
+
+    @Test
+    fun `given-up reads stop piling up threads`() {
+        assertTrue(historyReadAbandoned(0L, HISTORY_READ_STUCK_MILLIS + 1, MAX_ABANDONED_READS - 1))
+        assertFalse(historyReadAbandoned(0L, HISTORY_READ_STUCK_MILLIS + 1, MAX_ABANDONED_READS))
+    }
 }

@@ -527,8 +527,9 @@ class AppBlockService : Service() {
                 besideRepeats.clear()
                 historyBackoff.clear()
                 // A read or a confirmation from before the screen went off says nothing
-                // about after it. A read still running is left to finish, unheard, so a
-                // second read of the same app cannot start beside it.
+                // about after it. A read still running keeps its slot and finishes unheard,
+                // so a second read of the same app does not start beside it unless the
+                // first is given up on as stuck ([readRunning]).
                 screenOnRun++
                 historyAnswers.clear()
                 besideConfirmedAt.clear()
@@ -1219,7 +1220,34 @@ class AppBlockService : Service() {
      * different app, and one slot shared between them would have each throw the
      * other's read away.
      */
-    private val historyReads = mutableMapOf<String, Job>()
+    private val historyReads = mutableMapOf<String, HistoryRead>()
+
+    private class HistoryRead(val job: Job, val startedAt: Long)
+
+    /**
+     * Reads given up on as stuck, still blocking an IO thread. Capped, so a binder
+     * hung for good cannot use up the pool; see [historyReadAbandoned].
+     */
+    private val abandonedReads = mutableListOf<Job>()
+
+    /**
+     * A read for [pkg] is under way. One stuck on a hung binder call is given up
+     * on, so it cannot keep the app from ever being walled, and is never heard:
+     * the slot is the read's ticket, and a read no longer in it stays silent.
+     */
+    private fun readRunning(pkg: String, now: Long): Boolean {
+        val read = historyReads[pkg] ?: return false
+        if (!read.job.isActive) {
+            historyReads.remove(pkg)
+            return false
+        }
+        abandonedReads.removeAll { !it.isActive }
+        if (!historyReadAbandoned(read.startedAt, now, abandonedReads.size)) return true
+        Log.w(TAG, "history read for $pkg stuck, given up on")
+        abandonedReads += read.job
+        historyReads.remove(pkg)
+        return false
+    }
 
     /** Counts screen-offs, so a read begun before one is not heard after it. */
     private var screenOnRun = 0
@@ -1238,7 +1266,7 @@ class AppBlockService : Service() {
         val now = SystemClock.elapsedRealtime()
         // An old answer says nothing about now: the app may have closed since.
         historyAnswers.entries.removeAll { now - it.value.at > HISTORY_ANSWER_MILLIS }
-        historyReads.entries.removeAll { !it.value.isActive }
+        historyReads.entries.removeAll { !it.value.job.isActive }
         val answer = historyAnswers[pkg]
         if (answer != null) {
             historyAnswers.remove(pkg)
@@ -1247,21 +1275,25 @@ class AppBlockService : Service() {
             if (!answer.open && tracker.lastResumedAt(pkg) != answer.lastResumedAt) return OpenCheck.UNKNOWN
             return judgeOpen(pkg, front, answer.open, now)
         }
-        if (pkg in historyReads) return OpenCheck.UNKNOWN
+        if (readRunning(pkg, now)) return OpenCheck.UNKNOWN
         val from = tracker.confirmFrom(pkg) ?: return OpenCheck.CLOSED
         val lastResumedAt = tracker.lastResumedAt(pkg)
         val run = screenOnRun
-        historyReads[pkg] = scope.launch {
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
             val at = SystemClock.elapsedRealtime()
-            if (run != screenOnRun) {
-                // Begun before the screen went off: unheard.
+            val stillTicketed = historyReads[pkg]?.job === coroutineContext[Job]
+            if (run != screenOnRun || !stillTicketed) {
+                // Begun before the screen went off, or given up on as stuck: unheard.
             } else if (read == null) {
                 historyBackoff[pkg] = at + BESIDE_CONFIRM_MILLIS
             } else {
                 historyAnswers[pkg] = HistoryAnswer(read, at, lastResumedAt)
             }
         }
+        // In its slot before it runs, so its own check of the ticket finds it.
+        historyReads[pkg] = HistoryRead(job, now)
+        job.start()
         return OpenCheck.UNKNOWN
     }
 
@@ -1374,7 +1406,7 @@ class AppBlockService : Service() {
                 now - (besideConfirmedAt[app] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS ||
                 historyHeldOff(app, now) ||
                 // Its read is running: a second app beside it must not wait on that.
-                historyReads[app]?.isActive == true
+                readRunning(app, now)
         }
         val settled = walled.keys.firstOrNull { it in previous && !waiting(it) }
         besideLastTick = walled.keys

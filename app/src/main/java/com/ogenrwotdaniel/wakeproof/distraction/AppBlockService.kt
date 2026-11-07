@@ -1221,12 +1221,6 @@ class AppBlockService : Service() {
      */
     private val historyReads = mutableMapOf<String, Job>()
 
-    private val historyReadStartedAt = mutableMapOf<String, Long>()
-
-    /** A read for [pkg] is under way. One stuck on a hung binder call must not hold its slot for good. */
-    private fun readRunning(pkg: String, now: Long): Boolean =
-        historyReads[pkg]?.isActive == true && now - (historyReadStartedAt[pkg] ?: 0L) <= HISTORY_READ_STUCK_MILLIS
-
     /** Counts screen-offs, so a read begun before one is not heard after it. */
     private var screenOnRun = 0
     private val historyAnswers = mutableMapOf<String, HistoryAnswer>()
@@ -1244,8 +1238,7 @@ class AppBlockService : Service() {
         val now = SystemClock.elapsedRealtime()
         // An old answer says nothing about now: the app may have closed since.
         historyAnswers.entries.removeAll { now - it.value.at > HISTORY_ANSWER_MILLIS }
-        historyReads.keys.retainAll { readRunning(it, now) }
-        historyReadStartedAt.keys.retainAll(historyReads.keys)
+        historyReads.entries.removeAll { !it.value.isActive }
         val answer = historyAnswers[pkg]
         if (answer != null) {
             historyAnswers.remove(pkg)
@@ -1258,7 +1251,6 @@ class AppBlockService : Service() {
         val from = tracker.confirmFrom(pkg) ?: return OpenCheck.CLOSED
         val lastResumedAt = tracker.lastResumedAt(pkg)
         val run = screenOnRun
-        historyReadStartedAt[pkg] = now
         historyReads[pkg] = scope.launch {
             val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
             val at = SystemClock.elapsedRealtime()
@@ -1382,7 +1374,7 @@ class AppBlockService : Service() {
                 now - (besideConfirmedAt[app] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS ||
                 historyHeldOff(app, now) ||
                 // Its read is running: a second app beside it must not wait on that.
-                readRunning(app, now)
+                historyReads[app]?.isActive == true
         }
         val settled = walled.keys.firstOrNull { it in previous && !waiting(it) }
         besideLastTick = walled.keys
@@ -1589,9 +1581,6 @@ class AppBlockService : Service() {
 
         /** How long a whole-history answer may wait for the tick; a tick is [POLL_MILLIS]. */
         private const val HISTORY_ANSWER_MILLIS = 2_000L
-
-        /** A whole-history read running longer than this is taken as stuck; see [confirmedOpen]. */
-        private const val HISTORY_READ_STUCK_MILLIS = 30_000L
         private const val WALL_PREFS = "walls"
         private const val KEY_ARMED = "armed"
 

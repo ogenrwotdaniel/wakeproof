@@ -1231,7 +1231,7 @@ class AppBlockService : Service() {
      */
     private fun readRunning(pkg: String): Boolean = historyReads[pkg]?.isActive == true
 
-    /** Screen-offs the broadcast saw, and the last one [screenOffReset] dealt with. Main thread. */
+    /** Screen-offs the broadcast saw, and the last one [resetHistory] dealt with. Main thread. */
     private var screenOffsSeen = 0
     private var screenOffsReset = 0
 
@@ -1250,6 +1250,13 @@ class AppBlockService : Service() {
         historyReads.clear()
         historyAnswers.clear()
         besideConfirmedAt.clear()
+        historyBackoff.clear()
+        // The beside checks count ticks and walls "so far this screen-on".
+        besideLastTick = emptySet()
+        besideRepeats.clear()
+        // Force a fresh measurement on wake rather than extrapolating
+        // across the whole time the phone was down.
+        baselineFor = null
     }
 
     /** Whether the screen-off branch already reset for this time the screen is off. */
@@ -1267,15 +1274,10 @@ class AppBlockService : Service() {
         // Nothing stays resumed with the screen off, and whatever really
         // is on screen resumes again on waking.
         tracker.forgetResumed()
-        besideRepeats.clear()
-        historyBackoff.clear()
         resetHistory()
-        // Force a fresh measurement on wake rather than extrapolating
-        // across the whole time the phone was down.
-        baselineFor = null
     }
 
-    /** Counts [screenOffReset]s, so a read begun before one is not heard after it. */
+    /** Counts [resetHistory]s, so a read begun before one is not heard after it. */
     private var screenOnRun = 0
     private val historyAnswers = mutableMapOf<String, HistoryAnswer>()
 

@@ -59,8 +59,7 @@ class AlarmRingingService : Service() {
     /**
      * The locked alarm cannot be turned down: the alarm stream is set to
      * [STRICT_STREAM_FRACTION] of the maximum when it starts and put back
-     * every couple of seconds if lowered, and the device-wide mute is lifted
-     * where WakeProof is device owner. Not the maximum — the user lives in a
+     * every couple of seconds if lowered. Not the maximum — the user lives in a
      * shared flat (2026-11-04), and the full speaker would wake the others.
      */
     private suspend fun holdAlarmVolume() {
@@ -73,12 +72,6 @@ class AlarmRingingService : Service() {
             runCatching {
                 if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < floor) {
                     audio.setStreamVolume(AudioManager.STREAM_ALARM, floor, 0)
-                }
-            }
-            runCatching {
-                if (com.ogenrwotdaniel.wakeproof.admin.DeviceLock.isDeviceOwner(this)) {
-                    getSystemService(android.app.admin.DevicePolicyManager::class.java)
-                        .setMasterVolumeMuted(com.ogenrwotdaniel.wakeproof.admin.DeviceLock.admin(this), false)
                 }
             }
             delay(VOLUME_HOLD_MILLIS)

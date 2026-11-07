@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.verify.pushup
 
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -41,17 +42,32 @@ class PoseAnalyzer(private val onFrame: (PoseFrame) -> Unit) : ImageAnalysis.Ana
             return
         }
         val rotation = imageProxy.imageInfo.rotationDegrees
-        val input = InputImage.fromMediaImage(mediaImage, rotation)
         val rotated = rotation == 90 || rotation == 270
         val width = if (rotated) imageProxy.height else imageProxy.width
         val height = if (rotated) imageProxy.width else imageProxy.height
 
-        detector.process(input)
-            .addOnSuccessListener { pose -> onFrame(pose.toPoseFrame(width, height)) }
-            .addOnCompleteListener { imageProxy.close() }
+        // A bad frame costs that frame. Thrown from here it would kill the process,
+        // and a locked alarm would come straight back to the same crash; if every
+        // frame fails, no frame arrives and the verify screen's stall check takes over.
+        try {
+            detector.process(InputImage.fromMediaImage(mediaImage, rotation))
+                .addOnSuccessListener { pose ->
+                    runCatching { onFrame(pose.toPoseFrame(width, height)) }
+                        .onFailure { Log.w(TAG, "frame dropped", it) }
+                }
+                .addOnFailureListener { Log.w(TAG, "detection failed", it) }
+                .addOnCompleteListener { imageProxy.close() }
+        } catch (e: Exception) {
+            Log.w(TAG, "frame dropped", e)
+            imageProxy.close()
+        }
     }
 
     fun shutdown() = detector.close()
+
+    private companion object {
+        const val TAG = "PoseAnalyzer"
+    }
 
     private fun Pose.toPoseFrame(width: Int, height: Int): PoseFrame {
         fun point(type: Int): PosePoint? =

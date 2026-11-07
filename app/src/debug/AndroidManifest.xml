@@ -1,21 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug (sideloaded) build only: WakeProof as device owner, so it cannot be
-     uninstalled without a factory reset. See admin/DeviceLock.kt. -->
+<!-- Debug (sideloaded) build only. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- WakeProof Clip's screenshot observer. Debug only: Play's photo-permission
-         policy would not accept it, and DeviceLock holds it granted here. -->
+         policy would not accept it. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <application>
-        <receiver
-            android:name=".admin.WakeProofAdmin"
-            android:exported="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-            </intent-filter>
-        </receiver>
-    </application>
+    <!-- Declared so "Select photos" reports what it is, a refusal of full access.
+         Undeclared, Android answers "granted", then takes it back in the background. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 </manifest>

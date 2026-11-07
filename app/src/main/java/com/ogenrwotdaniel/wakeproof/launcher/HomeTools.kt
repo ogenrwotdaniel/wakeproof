@@ -37,6 +37,13 @@ private const val EXPERT_RAW = "com.samsung.android.app.galaxyraw"
 private const val EXPERT_RAW_LABEL = "Expert RAW"
 
 /**
+ * The pins named outright, unlike the ones resolved from a role. Never held by
+ * the new-app quarantine: the bank and attendance apps are needed the day they
+ * are put back, and a role can be handed to any app, so role pins do not count.
+ */
+val NAMED_TOOLS = setOf(EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, KAKAOBANK, UNIST_SMART_CHECK)
+
+/**
  * The tools that are always on the home screen and cannot be unpinned, in
  * order: the phone, the cameras, notes, Claude, Gemini, the bank, UNIST
  * attendance, the clock and the calendar.

@@ -23,6 +23,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.ogenrwotdaniel.wakeproof.ui.theme.WakeProofTheme
 import java.time.Duration
 import java.time.LocalDate
@@ -44,15 +48,18 @@ import java.time.LocalDateTime
  */
 class BlockedActivity : ComponentActivity() {
 
+    /** singleTask: a second wall arrives here, and must not show the first one's reason. */
+    private var wall by mutableStateOf<Intent?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        wall = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val label = intent.getStringExtra(EXTRA_LABEL) ?: "That app"
-        val used = intent.getIntExtra(EXTRA_USED, 0)
-        val cap = intent.getIntExtra(EXTRA_CAP, 0)
-        val reopensAt = intent.getStringExtra(EXTRA_REOPENS_AT)
-        val focus = intent.getBooleanExtra(EXTRA_FOCUS, false)
-        val ruleTitle = intent.getStringExtra(EXTRA_TITLE)
-        val ruleBody = intent.getStringExtra(EXTRA_BODY).orEmpty()
+        wall = intent
 
         // Back must leave, not fall through to the app behind this screen.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -60,8 +67,24 @@ class BlockedActivity : ComponentActivity() {
         })
 
         setContent {
+            val shown = wall ?: intent
+            val label = shown.getStringExtra(EXTRA_LABEL) ?: "That app"
+            val used = shown.getIntExtra(EXTRA_USED, 0)
+            val cap = shown.getIntExtra(EXTRA_CAP, 0)
+            val reopensAt = shown.getStringExtra(EXTRA_REOPENS_AT)
+            val focus = shown.getBooleanExtra(EXTRA_FOCUS, false)
+            val ruleTitle = shown.getStringExtra(EXTRA_TITLE)
+            val ruleBody = shown.getStringExtra(EXTRA_BODY).orEmpty()
+            val fixAction = shown.getStringExtra(EXTRA_FIX_ACTION)
             WakeProofTheme {
-                if (ruleTitle != null) RuleWall(title = ruleTitle, body = ruleBody, onLeave = ::goHome)
+                if (ruleTitle != null) {
+                    RuleWall(
+                        title = ruleTitle,
+                        body = ruleBody,
+                        onLeave = ::goHome,
+                        onFix = fixAction?.let { action -> { openFix(action) } }
+                    )
+                }
                 else if (focus) FocusWall(label = label, onLeave = ::goHome)
                 else BlockedWall(
                     label = label,
@@ -72,6 +95,11 @@ class BlockedActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun openFix(action: String) {
+        runCatching { startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        finish()
     }
 
     private fun goHome() {
@@ -90,6 +118,7 @@ class BlockedActivity : ComponentActivity() {
         private const val EXTRA_FOCUS = "focus"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_BODY = "body"
+        private const val EXTRA_FIX_ACTION = "fix_action"
         private const val EXTRA_REOPENS_AT = "reopens_at"
 
         /**
@@ -117,16 +146,22 @@ class BlockedActivity : ComponentActivity() {
                 .putExtra(EXTRA_FOCUS, true)
 
         /** A [WallRules] wall: a headline and one plain paragraph. */
-        fun ruleIntent(context: Context, title: String, body: String): Intent =
+        /**
+         * [fixAction]: the Android Settings screen that lifts this wall, for a
+         * wall only a setting can lift. Leaving one that stands over the home
+         * screen would land straight back on it.
+         */
+        fun ruleIntent(context: Context, title: String, body: String, fixAction: String? = null): Intent =
             Intent(context, BlockedActivity::class.java)
                 .putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_BODY, body)
+                .putExtra(EXTRA_FIX_ACTION, fixAction)
     }
 }
 
 /** Grey on black like the focus wall: nothing here to argue with. */
 @Composable
-private fun RuleWall(title: String, body: String, onLeave: () -> Unit) {
+private fun RuleWall(title: String, body: String, onLeave: () -> Unit, onFix: (() -> Unit)?) {
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Column(
             modifier = Modifier
@@ -154,6 +189,12 @@ private fun RuleWall(title: String, body: String, onLeave: () -> Unit) {
                     .fillMaxWidth()
                     .padding(top = 40.dp)
             ) { Text("Back to it") }
+            if (onFix != null) {
+                TextButton(
+                    onClick = onFix,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) { Text("Open Android Settings") }
+            }
         }
     }
 }

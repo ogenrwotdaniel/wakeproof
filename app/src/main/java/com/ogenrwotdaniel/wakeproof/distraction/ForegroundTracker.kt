@@ -26,9 +26,12 @@ import android.app.usage.UsageStatsManager
 class ResumedActivities {
     private val resumed = mutableMapOf<String, MutableSet<String>>()
     private val lastResumedAt = mutableMapOf<String, Long>()
+    /** When each package last went from nothing resumed to something. */
+    private val resumedSince = mutableMapOf<String, Long>()
 
     fun onResumed(packageName: String, className: String, at: Long) {
         val pkg = AppGate.effectivePackage(packageName, className)
+        if (pkg !in resumed) resumedSince[pkg] = at
         resumed.getOrPut(pkg) { mutableSetOf() } += className
         lastResumedAt[pkg] = at
     }
@@ -50,6 +53,34 @@ class ResumedActivities {
      * is how a walled app stays usable beside the wall thrown over it.
      */
     fun isResumed(packageName: String): Boolean = packageName in resumed
+
+    /** Whether this exact activity is resumed, for an app that is more than one screen. */
+    fun isResumed(packageName: String, className: String): Boolean =
+        resumed[packageName]?.contains(className) == true
+
+    /**
+     * When [packageName]'s current run of resumed activities began; 0 when never
+     * seen. Earlier than its last resume when it has two windows up.
+     */
+    fun resumedSince(packageName: String): Long = resumedSince[packageName] ?: 0L
+
+    /** Drops [packageName] as no longer resumed. */
+    fun forget(packageName: String) {
+        resumed -= packageName
+    }
+
+    /** Everything resumed now, the app in front included. */
+    fun packages(): Set<String> = resumed.keys.toSet()
+
+    /**
+     * Forgets everything resumed: a shutdown records no PAUSED for what was on
+     * screen, and an entry whose PAUSED was lost would otherwise last for good.
+     */
+    fun clear() {
+        resumed.clear()
+        lastResumedAt.clear()
+        resumedSince.clear()
+    }
 }
 
 /**
@@ -72,21 +103,68 @@ class ForegroundTracker(private val usm: UsageStatsManager) {
         // run of events is the same as after the run once.
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            val className = event.className ?: ""
-            when (event.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED ->
-                    state.onResumed(event.packageName, className, event.timeStamp)
-                UsageEvents.Event.ACTIVITY_PAUSED,
-                UsageEvents.Event.ACTIVITY_STOPPED,
-                ACTIVITY_DESTROYED -> state.onLeft(event.packageName, className)
-            }
+            fold(state, event)
         }
         readUpTo = now
         return state.foreground()
     }
 
+    /**
+     * Folds [packageName]'s events again from its last resume. An event written
+     * to the store after the overlap had passed is missed by [current] for good,
+     * which leaves an app that has closed looking resumed; a fresh read sees it.
+     * Only that app's own span is read, and nothing else in the state is touched.
+     *
+     * In three steps so the slow read can leave the thread that owns the state:
+     * [confirmFrom] and [settle] on it, [resumedIn] on any thread.
+     */
+    fun confirmFrom(packageName: String): Long? =
+        if (state.isResumed(packageName)) state.resumedSince(packageName) - OVERLAP_MILLIS else null
+
+    /** Whether [packageName]'s own events since [from] leave it resumed. Reads the store only. */
+    fun resumedIn(packageName: String, from: Long, now: Long = System.currentTimeMillis()): Boolean {
+        val fresh = ResumedActivities()
+        val events = usm.queryEvents(from, now)
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (AppGate.effectivePackage(event.packageName, event.className ?: "") == packageName) {
+                fold(fresh, event)
+            }
+        }
+        return fresh.isResumed(packageName)
+    }
+
+    /** Applies a [resumedIn] answer: a closed app is forgotten. */
+    fun settle(packageName: String, stillResumed: Boolean): Boolean {
+        if (!stillResumed) state.forget(packageName)
+        return stillResumed
+    }
+
+    private fun fold(into: ResumedActivities, event: UsageEvents.Event) {
+        val className = event.className ?: ""
+        when (event.eventType) {
+            UsageEvents.Event.ACTIVITY_RESUMED -> into.onResumed(event.packageName, className, event.timeStamp)
+            UsageEvents.Event.ACTIVITY_PAUSED,
+            UsageEvents.Event.ACTIVITY_STOPPED,
+            ACTIVITY_DESTROYED -> into.onLeft(event.packageName, className)
+            UsageEvents.Event.DEVICE_SHUTDOWN,
+            UsageEvents.Event.DEVICE_STARTUP -> into.clear()
+        }
+    }
+
     /** As of the last [current] call; see [ResumedActivities.isResumed]. */
     fun isResumed(packageName: String): Boolean = state.isResumed(packageName)
+
+    /** As of the last [current] call; see [ResumedActivities.isResumed]. */
+    fun isResumed(packageName: String, className: String): Boolean =
+        state.isResumed(packageName, className)
+
+    /** For when nothing can be resumed, such as the screen being off. */
+    fun forgetResumed() = state.clear()
+
+    /** As of the last [current] call; see [ResumedActivities.packages]. */
+    fun resumedPackages(): Set<String> = state.packages()
 
     private companion object {
         /** `UsageEvents.Event.ACTIVITY_DESTROYED` is a hidden constant (API 29+). */

@@ -15,9 +15,9 @@ import android.util.Log
  * Watches MediaStore for new screenshots (rows whose RELATIVE_PATH contains
  * "Screenshots") and hands each one to [onScreenshot] once.
  *
- * Needs READ_MEDIA_IMAGES, which only the debug (sideloaded, device-owner)
- * build declares — Play's photo-permission policy would not accept it for this.
- * Without the grant [start] does nothing.
+ * Needs READ_MEDIA_IMAGES, which only the debug (sideloaded) build declares, and
+ * the user grants it from Settings — Play's photo-permission policy would not accept it for this.
+ * Without the grant it sees and sends nothing.
  */
 class ClipScreenshots(
     private val context: Context,
@@ -26,13 +26,17 @@ class ClipScreenshots(
     private var observer: ContentObserver? = null
     private val handled = LinkedHashSet<Long>()
     private var startedAtSeconds = 0L
+    private var wasGranted = false
 
     fun granted(): Boolean =
         context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
 
     fun start() {
-        if (observer != null || !granted()) return
+        // Watches with or without the grant: scan() asks each time, so a grant
+        // made in Android Settings needs no restart to take effect.
+        if (observer != null) return
         startedAtSeconds = System.currentTimeMillis() / 1000
+        wasGranted = granted()
         val o = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean, uri: Uri?) = scan()
         }
@@ -51,7 +55,17 @@ class ClipScreenshots(
 
     /** Pending rows are invisible to a plain query, so a screenshot shows up once it is finished. */
     private fun scan() {
-        if (!granted()) return
+        if (!granted()) {
+            wasGranted = false
+            return
+        }
+        // Screenshots taken before access was given were never promised to anyone.
+        // Slack, because this scan may be the first new screenshot's own, and its
+        // row is dated a moment before.
+        if (!wasGranted) {
+            wasGranted = true
+            startedAtSeconds = System.currentTimeMillis() / 1000 - GRANT_SLACK_SECONDS
+        }
         val since = maxOf(startedAtSeconds, System.currentTimeMillis() / 1000 - RECENT_SECONDS)
         runCatching {
             context.contentResolver.query(
@@ -75,5 +89,6 @@ class ClipScreenshots(
     private companion object {
         const val TAG = "ClipScreenshots"
         const val RECENT_SECONDS = 60L
+        const val GRANT_SLACK_SECONDS = 5L
     }
 }

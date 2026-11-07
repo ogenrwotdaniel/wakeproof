@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -101,12 +102,12 @@ fun PushupVerifyScreen(
         if (state.verified) onVerified()
     }
     LaunchedEffect(cameraPermission.status.isGranted) {
-        if (!cameraPermission.status.isGranted) viewModel.onCameraUnavailable()
+        viewModel.onCameraPermission(cameraPermission.status.isGranted)
     }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxSize()) {
-            if (cameraPermission.status.isGranted) {
+            if (cameraPermission.status.isGranted && !state.cameraUnavailable) {
                 CameraWithPoseOverlay(viewModel)
             } else {
                 Column(
@@ -120,6 +121,8 @@ fun PushupVerifyScreen(
                         text = if (strict) {
                             "The camera can't be used, so this alarm wants " +
                                 "${StrictAlarm.MATH_FALLBACK_PROBLEMS} sums in a row instead."
+                        } else if (cameraPermission.status.isGranted) {
+                            "The camera can't be used. Use the emergency dismiss below."
                         } else {
                             "Camera permission is required to count pushups. " +
                                 "Grant it, or use the emergency dismiss below."
@@ -129,19 +132,33 @@ fun PushupVerifyScreen(
                     )
                     if (strict) {
                         androidx.compose.material3.Button(
-                            onClick = onCameraFallback,
+                            onClick = {
+                                // The sums have no reps to duck for, and the screen
+                                // that would raise it again is leaving.
+                                com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService.setVolume(context, 1f)
+                                onCameraFallback()
+                            },
                             modifier = Modifier.padding(top = 16.dp)
                         ) { Text("Solve the sums") }
+                    }
+                    if (cameraPermission.status.isGranted) {
+                        // A lens can be busy for a moment; pushups stay the real way out.
+                        OutlinedButton(
+                            onClick = viewModel::onCameraAvailable,
+                            modifier = Modifier.padding(top = 16.dp)
+                        ) { Text("Try the camera again") }
                     }
                 }
             }
 
-            CounterOverlay(
-                reps = state.reps,
-                target = state.target,
-                status = state.status,
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
+            if (!state.cameraUnavailable) {
+                CounterOverlay(
+                    reps = state.reps,
+                    target = state.target,
+                    status = state.status,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
+            }
 
             Column(
                 modifier = Modifier
@@ -188,36 +205,44 @@ private fun CameraWithPoseOverlay(viewModel: PushupVerifyViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    // Every failure here must reach onCameraUnavailable rather than crash: a crash
+    // would bring a locked alarm straight back to the same crash.
     val analyzer = remember {
-        com.ogenrwotdaniel.wakeproof.verify.MlKitInit.ensure(context)
-        PoseAnalyzer(viewModel::onPoseFrame)
+        runCatching {
+            com.ogenrwotdaniel.wakeproof.verify.MlKitInit.ensure(context)
+            PoseAnalyzer(viewModel::onPoseFrame)
+        }.getOrNull()
     }
     var useFrontCamera by remember { mutableStateOf(true) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            analyzer.shutdown()
-            analysisExecutor.shutdown()
-            ProcessCameraProvider.getInstance(context).get().unbindAll()
-        }
+    LaunchedEffect(analyzer) {
+        if (analyzer == null) viewModel.onCameraUnavailable()
+    }
+
+    ReleaseCameraOnDispose {
+        analyzer?.shutdown()
+        analysisExecutor.shutdown()
+    }
+
+    LifecycleResumeEffect(useFrontCamera) {
+        viewModel.watchCamera(true)
+        onPauseOrDispose { viewModel.watchCamera(false) }
     }
 
     LaunchedEffect(previewView, useFrontCamera) {
         val view = previewView ?: return@LaunchedEffect
-        val providerFuture = ProcessCameraProvider.getInstance(context)
-        providerFuture.addListener({
-            val provider = providerFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.surfaceProvider = view.surfaceProvider
-            }
-            val analysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also { it.setAnalyzer(analysisExecutor, analyzer) }
-            provider.unbindAll()
-            provider.bindCamera(lifecycleOwner, useFrontCamera, preview, analysis)
-        }, ContextCompat.getMainExecutor(context))
+        val imageAnalyzer = analyzer ?: return@LaunchedEffect
+        val bound = bindForScreen(context, lifecycleOwner, useFrontCamera) {
+            listOf(
+                Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider },
+                ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { it.setAnalyzer(analysisExecutor, imageAnalyzer) }
+            )
+        }
+        if (!bound) viewModel.onCameraUnavailable()
     }
 
     // Read outside the Canvas: a draw lambda is not a composable scope.

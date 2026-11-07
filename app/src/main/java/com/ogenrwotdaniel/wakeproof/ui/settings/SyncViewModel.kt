@@ -109,9 +109,14 @@ class SyncViewModel @Inject constructor(
             message.value = "Not during a focus session. $what keeps this device walled by your other devices' sessions."
             return false
         }
+        // Before the week is started or read: a hand-set clock could stamp the
+        // request a week in the past, or be moved a week past it.
+        if (!com.ogenrwotdaniel.wakeproof.distraction.clockProven(context)) {
+            message.value = com.ogenrwotdaniel.wakeproof.distraction.CLOCK_REFUSAL_MESSAGE
+            return false
+        }
         val now = System.currentTimeMillis()
-        val requestedAt = SyncLeave.requestedAt(context)
-        if (syncLeaveReady(requestedAt, now)) return true
+        if (syncLeaveReady(SyncLeave.requestedAt(context), now)) return true
         SyncLeave.request(context, now)
         val readyAt = (SyncLeave.requestedAt(context) ?: now) + SyncLeave.MILLIS
         val date = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(readyAt))

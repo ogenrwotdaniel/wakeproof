@@ -6,6 +6,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.util.Log
 import com.google.firebase.firestore.ListenerRegistration
+import com.ogenrwotdaniel.wakeproof.BuildConfig
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncAccount
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -80,7 +81,8 @@ object ClipRuntime {
                     launch { presence(context, hub) }
                     launch { listen(hub) }
                 }
-                if (screenshots) launch { screenshots(context, hub) }
+                // Only the debug manifest declares the permission it needs.
+                if (screenshots && BuildConfig.DEBUG) launch { screenshots(context, hub) }
             }
         }
     }

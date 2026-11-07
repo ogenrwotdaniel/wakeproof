@@ -45,6 +45,14 @@ class AlarmScheduler @Inject constructor(
             cancelById(alarm.id)
             return
         }
+        // A reinstall locks a new pair before sign-in brings the old rows back,
+        // and another ringing device's locked pair syncs here too: ordinary
+        // alarms on a locked minute, with snooze and emergency dismiss. They are
+        // not rung rather than deleted, so two ringing devices never fight.
+        if (strictAlarmDuplicates(listOf(alarm), StrictAlarm.syncIds(context)).isNotEmpty()) {
+            cancelById(alarm.id)
+            return
+        }
         alarmManager.setAlarmClock(
             AlarmManager.AlarmClockInfo(
                 nextTriggerAtMillis(alarm.hour, alarm.minute, alarm.daysMask),

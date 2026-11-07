@@ -1,5 +1,8 @@
 package com.ogenrwotdaniel.wakeproof.ui.usage
 
+import android.widget.Toast
+import com.ogenrwotdaniel.wakeproof.distraction.CLOCK_REFUSAL_MESSAGE
+import com.ogenrwotdaniel.wakeproof.distraction.ChangeRequest
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.CachedReport
@@ -31,7 +34,6 @@ import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
-import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
 import com.ogenrwotdaniel.wakeproof.distraction.gatedAppsInOtherProfiles
 import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -108,7 +110,13 @@ class UsageViewModel @Inject constructor(
 
     /** Stricter applies now; looser waits the week, like a limit. */
     fun requestRule(rule: WallRule, value: Int) {
-        viewModelScope.launch { wallRulesRepository.request(rule, value) }
+        viewModelScope.launch { sayIfRefused(wallRulesRepository.request(rule, value)) }
+    }
+
+    private fun sayIfRefused(request: ChangeRequest) {
+        if (request == ChangeRequest.REFUSED_CLOCK) {
+            Toast.makeText(context, CLOCK_REFUSAL_MESSAGE, Toast.LENGTH_LONG).show()
+        }
     }
 
     fun cancelRulePending(rule: WallRule) {
@@ -219,7 +227,7 @@ class UsageViewModel @Inject constructor(
     /** Stricter changes apply now; looser ones wait out the cooling-off. */
     fun setLimit(packageName: String, minutes: Int?, mode: LimitMode = LimitMode.NUDGE) {
         viewModelScope.launch {
-            limitRepository.requestLimit(packageName, minutes, mode)
+            sayIfRefused(limitRepository.requestLimit(packageName, minutes, mode))
             // Picking up (or dropping) the last blocked app starts/stops the guard.
             AppBlockService.sync(context)
         }
@@ -247,11 +255,7 @@ class UsageViewModel @Inject constructor(
     private suspend fun measureWallWeek(): List<WallDay> {
         val gateBrowsers = wallRulesRepository.current().gateBrowsers
         val gated = withContext(Dispatchers.IO) {
-            val essentials = essentialPackages(context)
-            val browsers = AppGate.browserPackages(context)
-            usageStatsRepository.installedApps().map { it.packageName }.filter {
-                AppGate.isGated(context, it, essentials, browsers, gateBrowsers)
-            }.toSet()
+            AppGate.gatedPackages(context, usageStatsRepository.installedApps().map { it.packageName }, gateBrowsers)
         }
         val minutes = usageStatsRepository.weekMinutesFor(gated).associate { it.epochDay to it.minutes }
         val today = LocalDate.now().toEpochDay()

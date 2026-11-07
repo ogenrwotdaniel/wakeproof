@@ -127,30 +127,35 @@ class WallRulesRepository @Inject constructor(@ApplicationContext private val co
 
     /**
      * Sets [rule] to [value]: at once when that is no looser, otherwise queued
-     * for a week. Asking again for the same loosening keeps its clock. Returns
-     * the queued change, or null when it applied.
+     * for a week. Asking again for the same loosening keeps its clock. A
+     * loosening is refused outright on a clock [clockProven] does not vouch for.
      */
     suspend fun request(
         rule: WallRule,
         value: Int,
         nowMillis: Long = System.currentTimeMillis()
-    ): PendingRule? {
-        var queued: PendingRule? = null
+    ): ChangeRequest {
+        var outcome = ChangeRequest.APPLIED
+        val proven = clockProven(context)
         dataStore.edit { prefs ->
             val current = prefs[keyOf(rule)] ?: rule.default
             val pending = parsePendingRules(prefs[PENDING] ?: emptySet())
             if (isLoosening(rule, current, value)) {
+                if (!proven) {
+                    outcome = ChangeRequest.REFUSED_CLOCK
+                    return@edit
+                }
                 val existing = pending[rule]
                 val change = if (existing != null && existing.value == value) existing
                 else PendingRule(value, nowMillis + WEEK_MILLIS)
                 prefs[PENDING] = encodePendingRules(pending + (rule to change))
-                queued = change
+                outcome = ChangeRequest.QUEUED
             } else {
                 prefs[keyOf(rule)] = value
                 prefs[PENDING] = encodePendingRules(pending - rule)
             }
         }
-        return queued
+        return outcome
     }
 
     /** Drops a queued loosening; the stricter value stays. */
@@ -163,7 +168,7 @@ class WallRulesRepository @Inject constructor(@ApplicationContext private val co
     /** Lands every queued loosening whose week is over. True when anything changed. */
     suspend fun promoteDue(nowMillis: Long = System.currentTimeMillis()): Boolean {
         // A clock set by hand could be set forward a week (2026-11-04).
-        if (!com.ogenrwotdaniel.wakeproof.admin.DeviceLock.networkTime(context)) return false
+        if (!clockProven(context)) return false
         var changed = false
         dataStore.edit { prefs ->
             val pending = parsePendingRules(prefs[PENDING] ?: emptySet())

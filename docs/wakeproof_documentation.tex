@@ -142,7 +142,7 @@
   {\sffamily\Huge\bfseries\textcolor{white}{WakeProof}}\\[4pt]
   {\sffamily\large\textcolor{white!92}{The alarm you cannot talk your way out of --- and the study \& focus system that guards the rest of your day.}}\\[10pt]
   {\sffamily\small\textcolor{white!80}{%
-    \textbf{Version:} 1.7.0 (November 2026) \quad|\quad
+    \textbf{Version:} 1.8.0 (November 2026) \quad|\quad
     \textbf{Author:} Ogenrwot Daniel \quad|\quad
     \textbf{License:} GPL-3.0\\[3pt]
     \textbf{Web:} \href{https://ogenrwotdaniel.github.io/wakeproof/}{\textcolor{white}{\underline{ogenrwotdaniel.github.io/wakeproof}}} \quad|\quad
@@ -363,13 +363,16 @@ Standard timers fail because quitting takes a single tap the moment boredom hits
 \textbf{\sffamily Priority} & \textbf{\sffamily Verdict} & \textbf{\sffamily Rule \& Condition} \\
 \midrule
 \textbf{1} & \texttt{ALLOW} & \textbf{Essential packages:} Phone dialer, in-call UI, system permission controller, home screen, and WakeProof itself (\texttt{Settings} is excluded during active focus sessions). \\
-\textbf{2} & \texttt{SLEEP\_WALL} & \textbf{Night Sleep Wall (19:45--03:00):} Every non-essential app (except Clock, Calendar, and active focus-list study apps) is shut to protect 7 hours of sleep before the 03:00 alarm. \\
-\textbf{3} & \texttt{FOCUS\_WALL} & \textbf{Active Focus Session:} Any app not on your \emph{Study Apps} focus list is walled across phone and tablet for the entire session, breaks included. \\
-\textbf{4} & \texttt{CAP\_WALL} & \textbf{Per-App Daily Cap (\texttt{BLOCK} mode):} Installed app has exhausted its configured daily minute allowance. \\
-\textbf{5} & \texttt{WINDOW\_WALL} & \textbf{Schedule Wall (Gated Apps):} Shut \textbf{all day Friday--Sunday} (\texttt{00:00} Fri to \texttt{24:00} Sun) and outside \textbf{08:10--08:50 Monday--Thursday}. \\
-\textbf{6} & \texttt{BEDTIME\_WALL} & \textbf{Evening Backstop:} Gated apps shut from configured bedtime (default \texttt{17:00}) until a morning alarm is verified (or \texttt{07:00}). \\
-\textbf{7} & \texttt{EARN\_WALL} & \textbf{Earn-the-Feed:} When no morning window is set, gated apps stay shut until today's first verified focus block completes. \\
-\textbf{8} & \texttt{ALLOW} & \textbf{Open Access:} Non-gated apps, or gated apps inside the Monday--Thursday \textbf{08:10--08:50} window (full 40 minutes, direct launch with zero artificial countdown wait). \\
+\textbf{2} & \texttt{CLOCK\_WALL} & \textbf{Untrusted Clock:} Outside a focus session, every app but Clock, Calendar and the default SMS app (gated and capped apps only on the Play build) is shut while automatic date, time or time zone is off, or while the clock sits more than 5 minutes from network time. Every wall below reads that clock. \\
+\textbf{3} & \texttt{SLEEP\_WALL} & \textbf{Night Sleep Wall (19:45--03:00):} Every non-essential app (except Clock, Calendar, and active focus-list study apps) is shut to protect 7 hours of sleep before the 03:00 alarm. \\
+\textbf{4} & \texttt{FOCUS\_WALL} & \textbf{Active Focus Session:} Any app not on your \emph{Study Apps} focus list is walled across phone and tablet for the entire session, breaks included. \\
+\textbf{5} & \texttt{QUARANTINE\_WALL} & \textbf{New App (Sideloaded Build):} An app in its first 7 days on the device. \\
+\textbf{6} & \texttt{HISTORY\_WALL} & \textbf{Notification History On:} Outside a focus session, gated and capped apps stay shut, because Android would keep the text of the notifications the walls strip. \\
+\textbf{7} & \texttt{CAP\_WALL} & \textbf{Per-App Daily Cap (\texttt{BLOCK} mode):} Installed app has exhausted its configured daily minute allowance. \\
+\textbf{8} & \texttt{WINDOW\_WALL} & \textbf{Schedule Wall (Gated Apps):} Shut \textbf{all day Friday--Sunday} (\texttt{00:00} Fri to \texttt{24:00} Sun) and outside \textbf{08:10--08:50 Monday--Thursday}. \\
+\textbf{9} & \texttt{BEDTIME\_WALL} & \textbf{Evening Backstop:} Gated apps shut from configured bedtime (default \texttt{17:00}) until a morning alarm is verified (or \texttt{07:00}). \\
+\textbf{10} & \texttt{EARN\_WALL} & \textbf{Earn-the-Feed:} When no morning window is set, gated apps stay shut until today's first verified focus block completes. \\
+\textbf{11} & \texttt{ALLOW} & \textbf{Open Access:} Non-gated apps, or gated apps inside the Monday--Thursday \textbf{08:10--08:50} window (full 40 minutes, direct launch with zero artificial countdown wait). \\
 \bottomrule
 \end{tabularx}
 \caption{Priority order of \texttt{gateVerdict} in \texttt{AppGate.kt}.}
@@ -380,15 +383,17 @@ Standard timers fail because quitting takes a single tap the moment boredom hits
   \item \textbf{Social, Video, Feeds \& Portals:} Instagram, Threads, Facebook, X/Twitter, TikTok, Snapchat, Reddit, LinkedIn, Pinterest, YouTube, YouTube Music/Kids, NewPipe, ReVanced, Netflix, Twitch, Bluesky, Mastodon, Samsung Free/TV Plus, Naver, Daum, and Google Play Store.
   \item \textbf{All Messengers Included (Default SMS Exempt):} WhatsApp, WhatsApp Business, Telegram, KakaoTalk, Messenger, Signal, Discord, LINE, WeChat, and Viber follow the exact same Monday--Thursday \texttt{08:10--08:50} schedule and Friday--Sunday shutdown. The system default SMS app remains exempt outside focus sessions so banking and 2FA OTP codes are never delayed.
   \item \textbf{Installed Web Browsers (\texttt{GATE\_BROWSERS}):} Chrome, Samsung Internet, Firefox, Brave, Edge, Opera, DuckDuckGo, Whale, and any app resolving \texttt{https://example.com} are gated identically so \texttt{youtube.com} or \texttt{x.com} in a browser tab cannot bypass app walls.
-  \item \textbf{Smart Google App vs.\ Gemini Separation:} The Google app (\texttt{googlequicksearchbox}) embeds the Discover feed and an internal browser (\texttt{SilkPaneActivity}) that could otherwise tunnel into social feeds, yet on Android~16 standalone Google Gemini (\texttt{BardShell}) launches \texttt{.voice.robin.*} activities hosted inside that same package. WakeProof resolves this cleanly at the activity class level (\texttt{AppGate.effectivePackage} + \texttt{NEVER\_SUSPEND}): Gemini works 24/7 from the home screen, while Google Discover, Search, and \texttt{SilkPaneActivity} stay strictly behind the schedule wall.
+  \item \textbf{Smart Google App vs.\ Gemini Separation:} The Google app (\texttt{googlequicksearchbox}) embeds the Discover feed and an internal browser (\texttt{SilkPaneActivity}) that could otherwise tunnel into social feeds, yet on Android~16 standalone Google Gemini (\texttt{BardShell}) launches \texttt{.voice.robin.*} activities hosted inside that same package. WakeProof resolves this cleanly at the activity class level (\texttt{AppGate.effectivePackage}): Gemini works 24/7 from the home screen, while Google Discover, Search, and \texttt{SilkPaneActivity} stay strictly behind the schedule wall.
 \end{itemize}
 
-\subsection{7-Day Cooling-Off, Notification/Media Guards \& Device Owner Mode}
+\subsection{7-Day Cooling-Off, Notification/Media Guards \& New-App Quarantine}
 \begin{itemize}
-  \item \textbf{Asymmetric 7-Day Cooling-Off (\texttt{168 hours}):} Tightening any daily app limit or wall rule takes effect immediately. Loosening a cap, widening the open window, or disabling weekend shutdown queues for \textbf{7 full days} and promotes \emph{only} while automatic network time (\texttt{AUTO\_TIME}) is active.
+  \item \textbf{Asymmetric 7-Day Cooling-Off (\texttt{168 hours}):} Tightening any daily app limit or wall rule takes effect immediately. Loosening a cap, widening the open window, or disabling weekend shutdown queues for \textbf{7 full days}. A loosening can be asked for, and lands, \emph{only} while automatic date, time and time zone are on and the clock agrees with network time, so moving the clock cannot shorten the week.
   \item \textbf{Shade \& Media Silencing (\texttt{WindowNotificationGuard}):} Automatically cancels notifications posted by walled apps (inspecting only package names, never message text) and pauses active \texttt{MediaSession} playback (blocking Picture-in-Picture or background audio left running when a window closes).
   \item \textbf{Evening Sleep Hygiene (\texttt{NightRules}):} Delivers a wind-down heads-up at \textbf{19:15}, raises the phone-wide sleep wall at \textbf{19:45}, posts a lights-out cue at \textbf{20:00}, and reminds you every $30\,\text{min}$ if battery is below $40\%$ and unplugged so a dead battery cannot defeat the 03:00 alarm.
-  \item \textbf{Optional Sideloaded Device Owner Hardening (\texttt{DeviceLock}):} On personal sideloaded builds provisioned via \texttt{dpm set-device-owner}, WakeProof holds walled apps OS-suspended (\texttt{setPackagesSuspended}, eliminating Samsung pop-up view, split-screen, and Edge-panel workarounds), quarantines newly installed apps for \textbf{7 days} (\texttt{NewAppQuarantine}), enforces a \textbf{90-day cooling-off} before uninstall lock can be released, and blocks Safe Mode, manual clock tampering, secondary user/clone profiles, and default-launcher switching.
+  \item \textbf{New-App Quarantine (\texttt{NewAppQuarantine}, Sideloaded Build Only):} A newly installed app stays walled for its first \textbf{7 days}, so an app the gated lists do not name yet cannot become a way around them. Play Store, the Google app, the keyboard, the dialer, and the named home-screen tools are exempt. A home or SMS app newly made the default keeps its week, and an uninstalled app that comes back starts a new one.
+  \item \textbf{Pop-Up and Split-Screen Cover:} A walled app left running in a pop-up window or split screen is walled again every time you leave its wall, until it is closed.
+  \item \textbf{Lost Permissions:} Revoking Usage Access or draw-over-apps takes every wall down. WakeProof cannot prevent this, so an alert keeps returning (every 15 minutes on the sideloaded build, daily on Play) until access is restored, and walls come back on their own. On a device with locked alarms, a revoked camera permission raises an hourly warning.
 \end{itemize}
 
 % =============================================================================
@@ -487,6 +492,6 @@ Gemini API key & Local encrypted store & Stored in \texttt{EncryptedSharedPrefer
 \vspace{8pt}
 {\color{wpborder}\hrule height 0.6pt}
 \vspace{4pt}
-{\sloppy\sffamily\footnotesize\color{wpmuted}Document generated November 2026 for \textbf{WakeProof v1.7.0}. For source code, issue tracking, and updates visit \href{https://github.com/ogenrwotdaniel/wakeproof}{github.com/ogenrwotdaniel/wakeproof} and \href{https://ogenrwotdaniel.github.io/wakeproof/}{ogenrwotdaniel.github.io/wakeproof}.\par}
+{\sloppy\sffamily\footnotesize\color{wpmuted}Document generated November 2026 for \textbf{WakeProof v1.8.0}. For source code, issue tracking, and updates visit \href{https://github.com/ogenrwotdaniel/wakeproof}{github.com/ogenrwotdaniel/wakeproof} and \href{https://ogenrwotdaniel.github.io/wakeproof/}{ogenrwotdaniel.github.io/wakeproof}.\par}
 
 \end{document}

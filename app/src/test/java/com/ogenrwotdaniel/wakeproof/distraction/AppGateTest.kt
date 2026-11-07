@@ -129,13 +129,47 @@ class AppGateTest {
     }
 
     @Test
-    fun `holdSuspended holds walled or forced apps and spares neverSuspend`() {
-        assertFalse(holdSuspended(neverSuspend = false, verdict = GateVerdict.ALLOW))
-        assertTrue(holdSuspended(neverSuspend = false, verdict = GateVerdict.WINDOW_WALL))
-        assertTrue(holdSuspended(neverSuspend = false, verdict = GateVerdict.ALLOW, forced = true))
-        assertFalse(holdSuspended(neverSuspend = true, verdict = GateVerdict.WINDOW_WALL, forced = true))
-        assertTrue(AppGate.PLAY_STORE in AppGate.NEVER_SUSPEND)
-        assertTrue(AppGate.GOOGLE_APP in AppGate.NEVER_SUSPEND)
+    fun `notification history walls gated and capped apps only, outside a session`() {
+        fun verdict(gated: Boolean = false, capped: Boolean = false, session: Boolean = false) = gateVerdict(
+            essential = false, focusSessionActive = session, onFocusList = session,
+            capSpent = false, gated = gated, historyOn = true, capped = capped
+        )
+        assertEquals(GateVerdict.HISTORY_WALL, verdict(gated = true))
+        assertEquals(GateVerdict.HISTORY_WALL, verdict(capped = true))
+        assertEquals(GateVerdict.ALLOW, verdict())
+        assertEquals(GateVerdict.ALLOW, verdict(gated = true, session = true))
+        assertTrue(AppGate.PLAY_STORE in AppGate.QUARANTINE_EXEMPT)
+        assertTrue(AppGate.GOOGLE_APP in AppGate.QUARANTINE_EXEMPT)
+    }
+
+    @Test
+    fun `an untrusted clock shuts every ordinary app, outside a session`() {
+        fun verdict(essential: Boolean = false, session: Boolean = false, listed: Boolean = false) = gateVerdict(
+            essential = essential, focusSessionActive = session, onFocusList = listed,
+            capSpent = false, gated = false, clockUntrusted = true
+        )
+        assertEquals(GateVerdict.CLOCK_WALL, verdict())
+        assertEquals(GateVerdict.ALLOW, verdict(essential = true))
+        assertEquals(GateVerdict.ALLOW, verdict(session = true, listed = true))
+        assertEquals(GateVerdict.FOCUS_WALL, verdict(session = true))
+    }
+
+    @Test
+    fun `the clock wall comes before the walls that read the clock`() {
+        assertEquals(
+            GateVerdict.CLOCK_WALL,
+            gateVerdict(
+                essential = false, focusSessionActive = false, onFocusList = false, capSpent = false,
+                gated = false, sleeping = true, clockUntrusted = true
+            )
+        )
+    }
+
+    @Test
+    fun `a named messenger made the default sms app stays gated`() {
+        assertTrue(AppGate.isGated("com.whatsapp", ApplicationInfo.CATEGORY_UNDEFINED, "com.whatsapp"))
+        assertEquals(null, AppGate.sparedSms("com.whatsapp"))
+        assertEquals("sms.app", AppGate.sparedSms("sms.app"))
     }
 
     @Test

@@ -30,10 +30,14 @@ import android.util.Size
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -42,8 +46,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -79,6 +87,9 @@ fun WaterVerifyScreen(
 
     LaunchedEffect(Unit) {
         if (!cameraPermission.status.isGranted) cameraPermission.launchPermissionRequest()
+    }
+    LaunchedEffect(cameraPermission.status.isGranted) {
+        viewModel.onCameraPermission(cameraPermission.status.isGranted)
     }
     // Duck the ringtone while the wizard runs; quietest while drinking/proving.
     // As with pushups: the alarm stops the moment the target is met.
@@ -151,7 +162,12 @@ fun WaterVerifyScreen(
                 when (state.step) {
                     WaterVerifyViewModel.Step.CAPTURE_BEFORE ->
                         if (cameraPermission.status.isGranted) {
-                            PhotoCaptureView(onCaptured = viewModel::onBeforeCaptured)
+                            PhotoCaptureView(
+                                onCaptured = viewModel::onBeforeCaptured,
+                                onCameraFailed = viewModel::onCameraUnavailable,
+                                cameraFailed = state.cameraFailed,
+                                onRetry = viewModel::retryCamera
+                            )
                         } else {
                             CameraDeniedHint()
                         }
@@ -183,7 +199,12 @@ fun WaterVerifyScreen(
 
                     WaterVerifyViewModel.Step.CAPTURE_AFTER ->
                         if (cameraPermission.status.isGranted) {
-                            PhotoCaptureView(onCaptured = viewModel::onAfterCaptured)
+                            PhotoCaptureView(
+                                onCaptured = viewModel::onAfterCaptured,
+                                onCameraFailed = viewModel::onCameraUnavailable,
+                                cameraFailed = state.cameraFailed,
+                                onRetry = viewModel::retryCamera
+                            )
                         } else {
                             CameraDeniedHint()
                         }
@@ -284,7 +305,13 @@ private fun CameraDeniedHint(modifier: Modifier = Modifier) {
 
 /** Camera preview (rear by default, flippable) with a capture button; emits JPEG bytes. */
 @Composable
-private fun PhotoCaptureView(onCaptured: (ByteArray) -> Unit, modifier: Modifier = Modifier) {
+private fun PhotoCaptureView(
+    onCaptured: (ByteArray) -> Unit,
+    onCameraFailed: () -> Unit,
+    cameraFailed: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     // Neither reader needs a 12 MP frame: the on-device detector resamples to a
@@ -308,18 +335,27 @@ private fun PhotoCaptureView(onCaptured: (ByteArray) -> Unit, modifier: Modifier
     }
     var useFrontCamera by remember { mutableStateOf(false) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    // Read only in callbacks, never in composition.
+    val session = remember { CaptureSession() }
+    val scope = rememberCoroutineScope()
+    var attempt by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(previewView, useFrontCamera) {
+    ReleaseCameraOnDispose { session.dispose() }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) session.leftForeground()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(previewView, useFrontCamera, attempt) {
         val view = previewView ?: return@LaunchedEffect
-        val providerFuture = ProcessCameraProvider.getInstance(context)
-        providerFuture.addListener({
-            val provider = providerFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.surfaceProvider = view.surfaceProvider
-            }
-            provider.unbindAll()
-            provider.bindCamera(lifecycleOwner, useFrontCamera, preview, imageCapture)
-        }, ContextCompat.getMainExecutor(context))
+        session.bound()
+        val bound = bindForScreen(context, lifecycleOwner, useFrontCamera) {
+            listOf(Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }, imageCapture)
+        }
+        if (!bound) onCameraFailed()
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -333,12 +369,47 @@ private fun PhotoCaptureView(onCaptured: (ByteArray) -> Unit, modifier: Modifier
                 .align(Alignment.TopEnd)
                 .padding(16.dp)
         )
+        if (cameraFailed) {
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "The camera isn't working. Try it again, or use the emergency dismiss below.",
+                    textAlign = TextAlign.Center,
+                    color = Color.White
+                )
+                OutlinedButton(
+                    onClick = {
+                        session.reset()
+                        onRetry()
+                        attempt++
+                    },
+                    modifier = Modifier.padding(top = 12.dp)
+                ) { Text("Try the camera again") }
+            }
+        }
         Button(
             onClick = {
+                // One photo at a time: a double tap's second frame would be judged
+                // against the first once the verdict came back, and cost a strike.
+                val thisShot = session.begin() ?: return@Button
+                // A queued photo on a stalled camera neither arrives nor errors;
+                // without this the button would stay locked with no retry offered.
+                session.arm(
+                    scope.launch {
+                        delay(CaptureSession.CAPTURE_TIMEOUT_MS)
+                        if (session.timedOut(thisShot)) onCameraFailed()
+                    }
+                )
                 imageCapture.takePicture(
                     ContextCompat.getMainExecutor(context),
                     object : ImageCapture.OnImageCapturedCallback() {
                         override fun onCaptureSuccess(image: ImageProxy) {
+                            if (!session.succeeded(thisShot)) {
+                                image.close()
+                                return
+                            }
                             val buffer = image.planes[0].buffer
                             val bytes = ByteArray(buffer.remaining())
                             buffer.get(bytes)
@@ -347,7 +418,15 @@ private fun PhotoCaptureView(onCaptured: (ByteArray) -> Unit, modifier: Modifier
                         }
 
                         override fun onError(exception: ImageCaptureException) {
-                            // Keep the preview up; the user just taps again.
+                            // Keep the preview up; the user just taps again. Twice
+                            // running is a camera that can't take the photo.
+                            val fault = when (exception.imageCaptureError) {
+                                ImageCapture.ERROR_CAPTURE_FAILED -> CaptureFault.FAILED
+                                ImageCapture.ERROR_UNKNOWN -> CaptureFault.UNKNOWN
+                                ImageCapture.ERROR_CAMERA_CLOSED -> CaptureFault.CLOSED
+                                else -> CaptureFault.OTHER
+                            }
+                            if (session.failed(thisShot, fault)) onCameraFailed()
                         }
                     }
                 )

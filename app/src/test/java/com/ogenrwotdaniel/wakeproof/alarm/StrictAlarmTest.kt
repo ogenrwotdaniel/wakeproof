@@ -70,6 +70,17 @@ class StrictAlarmTest {
     }
 
     @Test
+    fun `an unlocked pushup alarm on a locked slot is a duplicate, nothing else is`() {
+        val rows = listOf(
+            alarm(1, hour = 3, minute = 0), alarm(2, hour = 3, minute = 0), alarm(3, hour = 5, minute = 30),
+            alarm(4, hour = 3, minute = 0, type = AlarmType.MATH), alarm(5, hour = 6),
+            alarm(6, hour = 3, minute = 0, deleted = true)
+        )
+        assertEquals(listOf(2L, 3L), strictAlarmDuplicates(rows, setOf("s1")).map { it.id })
+        assertEquals(emptyList<Long>(), strictAlarmDuplicates(rows, emptySet()).map { it.id })
+    }
+
+    @Test
     fun `the two morning alarms are 03 00 and 05 30, at 10 pushups`() {
         assertEquals(listOf(StrictAlarm.Slot(3, 0), StrictAlarm.Slot(5, 30)), StrictAlarm.SLOTS)
         assertEquals(10, StrictAlarm.REPS)

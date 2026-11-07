@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.ogenrwotdaniel.wakeproof.distraction.ChangeRequest
+import com.ogenrwotdaniel.wakeproof.distraction.clockProven
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -79,16 +81,18 @@ class DistractionLimitRepository @Inject constructor(
      * week, so it is now a week and not a setting: a choice of wait is itself
      * something to loosen.
      *
-     * Returns the queued change, or null when it applied immediately.
+     * A loosening is refused outright on a clock [clockProven] does not vouch
+     * for: stamped from a clock set back a week, it would land at once.
      */
     suspend fun requestLimit(
         packageName: String,
         minutes: Int?,
         mode: LimitMode = LimitMode.NUDGE,
         nowMillis: Long = System.currentTimeMillis()
-    ): PendingLimitChange? {
+    ): ChangeRequest {
         val proposed = minutes?.takeIf { it > 0 }?.let { AppLimit(it, mode) }
-        var queued: PendingLimitChange? = null
+        var outcome = ChangeRequest.APPLIED
+        val proven = clockProven(context)
         dataStore.edit { prefs ->
             // Before queueing anything new, or the one-off below would mistake a
             // change queued under the week for one queued under the old wait.
@@ -97,6 +101,10 @@ class DistractionLimitRepository @Inject constructor(
             val pending = parsePending(prefs[PENDING] ?: emptySet())
             val otherPending = pending - packageName
             if (isLoosening(current, proposed)) {
+                if (!proven) {
+                    outcome = ChangeRequest.REFUSED_CLOCK
+                    return@edit
+                }
                 // Asking again for the same loosening keeps its clock; asking for
                 // a different one restarts it, or a small queued change could be
                 // swapped for "remove" on the eve of landing.
@@ -104,13 +112,13 @@ class DistractionLimitRepository @Inject constructor(
                 val change = if (existing != null && existing.limit == proposed) existing
                 else PendingLimitChange(proposed, nowMillis + COOLING_OFF_HOURS * HOUR_MILLIS)
                 prefs[PENDING] = encodePending(otherPending + (packageName to change))
-                queued = change
+                outcome = ChangeRequest.QUEUED
             } else {
                 prefs[LIMITS] = withLimit(prefs[LIMITS] ?: emptySet(), packageName, proposed)
                 prefs[PENDING] = encodePending(otherPending)
             }
         }
-        return queued
+        return outcome
     }
 
     /** Drops a queued loosening; the current cap simply stays. */
@@ -128,7 +136,7 @@ class DistractionLimitRepository @Inject constructor(
      */
     suspend fun promoteDuePending(nowMillis: Long = System.currentTimeMillis()): Boolean {
         // A clock set by hand could be set forward a week (2026-11-04).
-        if (!com.ogenrwotdaniel.wakeproof.admin.DeviceLock.networkTime(context)) return false
+        if (!clockProven(context)) return false
         var changed = false
         dataStore.edit { prefs ->
             moveOntoWeek(prefs)

@@ -41,6 +41,31 @@ fun lightsOutDue(minuteOfDay: Int, sentOnDay: Long, today: Long): Boolean =
     minuteOfDay in BEDTIME_MINUTES until BEDTIME_MINUTES + 30 && sentOnDay != today
 
 /**
+ * Pure: warn that a locked alarm's pushups have lost the camera, hourly while it
+ * lasts. Without it the ring falls back to sums, which can be done lying down.
+ */
+fun cameraNagDue(strictHeld: Boolean, cameraGranted: Boolean, lastNagAt: Long, now: Long): Boolean =
+    strictHeld && !cameraGranted && nagDue(lastNagAt, now, CAMERA_NAG_EVERY_MILLIS)
+
+const val CAMERA_NAG_EVERY_MILLIS = 60 * 60_000L
+
+/**
+ * Pure: the camera warning lands silently from the sleep wall until the last
+ * locked alarm ([lastSlotMinutes]): an hourly heads-up would only wake the user
+ * it is meant to get up in the morning. It is still in the shade when they do.
+ */
+fun cameraNagSilent(minuteOfDay: Int, lastSlotMinutes: Int): Boolean =
+    sleepWallActive(minuteOfDay) || minuteOfDay < lastSlotMinutes
+
+/** Pure: how often the lost-grant alert returns, on the sideloaded build and on Play. */
+fun wallsDownAlertEvery(sideloaded: Boolean): Long =
+    if (sideloaded) 15 * 60_000L else 24 * 60 * 60_000L
+
+/** Pure: a stamp in the future (a clock wound back) never silences a repeating warning. */
+fun nagDue(lastAt: Long, now: Long, everyMillis: Long): Boolean =
+    lastAt > now || now - lastAt >= everyMillis
+
+/**
  * Pure: nag to charge — night hours up to the alarm, low and not charging,
  * and not nagged in the last [CHARGE_NAG_EVERY_MILLIS]. An unreadable level
  * (negative) never nags.

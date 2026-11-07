@@ -94,7 +94,7 @@ fun AlarmRingingScreen(
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "No dismiss button. Verification is the way out; a snooze only delays it.",
+                text = "No dismiss button. Verification is the way out.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

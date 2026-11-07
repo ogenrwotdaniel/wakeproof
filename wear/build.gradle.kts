@@ -63,8 +63,8 @@ android {
         // every versionCode there must be unique forever, so picking 4 would collide
         // with the phone's second-next upload. The offset keeps the two sequences
         // from ever meeting: phone N, watch 1000 + N.
-        versionCode = 1009
-        versionName = "1.7.0"
+        versionCode = 1010
+        versionName = "1.8.0"
 
         for (key in listOf("FIREBASE_PROJECT_ID", "FIREBASE_APP_ID", "FIREBASE_API_KEY", "WEB_CLIENT_ID")) {
             buildConfigField("String", key, "\"${firebaseValues[key].orEmpty()}\"")

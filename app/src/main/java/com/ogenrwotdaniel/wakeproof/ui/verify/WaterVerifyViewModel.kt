@@ -1,5 +1,8 @@
 package com.ogenrwotdaniel.wakeproof.ui.verify
 
+import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
@@ -61,7 +64,9 @@ class WaterVerifyViewModel @Inject constructor(
         /** Encouragement after a partial gulp; not an error. */
         val progressNote: String? = null,
         val motivation: String? = null,
-        val fallbackReason: String? = null
+        val fallbackReason: String? = null,
+        /** The camera failed to start or to take a photo; offered a retry. */
+        val cameraFailed: Boolean = false
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -80,7 +85,43 @@ class WaterVerifyViewModel @Inject constructor(
         }
     }
 
+    private val permission = CameraPermissionLatch()
+    private var timedOut = false
+
+    init {
+        // The promised exit for a camera that fails without saying so: a photo
+        // queued on it neither arrives nor errors, so nothing else would open this.
+        viewModelScope.launch {
+            delay(EMERGENCY_AFTER_MS)
+            timedOut = true
+            _uiState.update { it.withEmergency() }
+        }
+    }
+
+    /** No photo can be taken, so waiting for rejections would leave no way out. */
+    fun onCameraUnavailable() {
+        _uiState.update { it.copy(cameraFailed = true).withEmergency() }
+    }
+
+    /** The user asked to try again; the hatch closes unless something else opened it. */
+    fun retryCamera() = onCameraWorking()
+
+    fun onCameraPermission(granted: Boolean) =
+        permission.report(granted, onLost = ::onCameraUnavailable, onBack = ::onCameraWorking)
+
+    /** The one place the hatch is decided. */
+    private fun UiState.withEmergency() =
+        copy(emergencyAvailable = rejections >= MAX_REJECTIONS || cameraFailed || timedOut)
+
+    /** A brief fault must not leave the alarm dismissible without any attempt. */
+    private fun onCameraWorking() {
+        if (!_uiState.value.cameraFailed) return
+        _uiState.update { it.copy(cameraFailed = false).withEmergency() }
+    }
+
     fun onBeforeCaptured(bytes: ByteArray) {
+        if (_uiState.value.step != Step.CAPTURE_BEFORE) return
+        onCameraWorking()
         _uiState.update { it.copy(step = Step.CONFIRM_BEFORE, beforePhoto = bytes) }
     }
 
@@ -111,13 +152,33 @@ class WaterVerifyViewModel @Inject constructor(
     }
 
     fun onAfterCaptured(bytes: ByteArray) {
+        // A double tap queues two photos; the second must not credit the sip again.
+        if (_uiState.value.step != Step.CAPTURE_AFTER) return
+        onCameraWorking()
         val before = _uiState.value.beforePhoto ?: run {
             _uiState.update { it.copy(step = Step.CAPTURE_BEFORE) }
             return
         }
         _uiState.update { it.copy(step = Step.UPLOADING, rejectionReason = null, progressNote = null) }
         viewModelScope.launch {
-            val result = waterObserver.observe(before, bytes, _uiState.value.bottleCapacityMl)
+            // Thrown from here it would kill the process with the alarm ringing,
+            // and everything earned so far with it.
+            val result = try {
+                waterObserver.observe(before, bytes, _uiState.value.bottleCapacityMl)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "water check failed", e)
+                // A strike like any rejection, not the honour-mode exit: one bad
+                // photo must not be the easy way out.
+                onPhotoUnreadable()
+                return@launch
+            } catch (e: OutOfMemoryError) {
+                // Two full photos decoded at once on a low-memory phone.
+                Log.w(TAG, "water check ran out of memory", e)
+                onPhotoUnreadable()
+                return@launch
+            }
             when (result) {
                 is KimiResult.Success -> {
                     val verdict = result.value
@@ -210,9 +271,21 @@ class WaterVerifyViewModel @Inject constructor(
                 beforePhoto = if (restart) null else it.beforePhoto,
                 rejectionReason = reason,
                 progressNote = null,
-                rejections = rejections,
-                emergencyAvailable = rejections >= MAX_REJECTIONS
-            )
+                rejections = rejections
+            ).withEmergency()
+        }
+    }
+
+    private fun onPhotoUnreadable() {
+        val rejections = _uiState.value.rejections + 1
+        _uiState.update {
+            it.copy(
+                step = Step.CAPTURE_BEFORE,
+                beforePhoto = null,
+                rejectionReason = "That photo couldn't be read. Take both photos again.",
+                progressNote = null,
+                rejections = rejections
+            ).withEmergency()
         }
     }
 
@@ -221,7 +294,9 @@ class WaterVerifyViewModel @Inject constructor(
     }
 
     private companion object {
+        const val TAG = "WaterVerify"
         const val MAX_REJECTIONS = 3
+        const val EMERGENCY_AFTER_MS = 5 * 60_000L
 
         /**
          * Estimating a level off a photo is coarse, so land within this of the

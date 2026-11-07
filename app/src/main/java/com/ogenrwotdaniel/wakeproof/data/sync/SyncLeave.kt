@@ -8,8 +8,8 @@ import android.content.Context
  * of the user's focus sessions on their other devices, so the tablet could be
  * freed from a session running on the phone with two taps. Refused outright
  * while a session runs anywhere; otherwise the first ask starts the week and
- * an ask after it goes through. Device-protected storage, like the uninstall
- * lock, so a reboot neither loses nor resets the request.
+ * an ask after it goes through. Device-protected storage, so a reboot neither
+ * loses nor resets the request.
  */
 object SyncLeave {
     const val DAYS = 7

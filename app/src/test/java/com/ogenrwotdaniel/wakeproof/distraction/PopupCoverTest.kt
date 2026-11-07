@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.distraction
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,6 +39,19 @@ class PopupCoverTest {
     }
 
     @Test
+    fun `everything beside the front app is known, and a phantom can be cleared`() {
+        val state = ResumedActivities()
+        state.onResumed("popup.app", "A", 1L)
+        state.onResumed("front.app", "B", 2L)
+        assertTrue(state.isResumed("front.app", "B"))
+        assertFalse(state.isResumed("front.app", "A"))
+        assertEquals(setOf("popup.app", "front.app"), state.packages())
+        state.clear()
+        assertTrue(state.packages().isEmpty())
+        assertEquals(null, state.foreground())
+    }
+
+    @Test
     fun `a pinned app that would be walled is covered, whatever the wall`() {
         GateVerdict.entries.filter { it != GateVerdict.ALLOW }.forEach {
             assertTrue(it.name, pinCoverWanted(userPinned = true, verdict = it))
@@ -49,21 +63,6 @@ class PopupCoverTest {
         assertFalse(pinCoverWanted(userPinned = true, verdict = GateVerdict.ALLOW))
         GateVerdict.entries.forEach {
             assertFalse(it.name, pinCoverWanted(userPinned = false, verdict = it))
-        }
-    }
-
-    @Test
-    fun `a waiting or walled app is held suspended, an allowed one is not`() {
-        GateVerdict.entries.filter { it != GateVerdict.ALLOW }.forEach {
-            assertTrue(it.name, holdSuspended(neverSuspend = false, verdict = it))
-        }
-        assertFalse(holdSuspended(neverSuspend = false, verdict = GateVerdict.ALLOW))
-    }
-
-    @Test
-    fun `the keyboard, SMS and essentials are never suspended`() {
-        GateVerdict.entries.forEach {
-            assertFalse(it.name, holdSuspended(neverSuspend = true, verdict = it))
         }
     }
 }

@@ -17,9 +17,9 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
  * reconcile, stamped newer so the correction syncs back out too.
  *
  * While one rings there is no snooze and no emergency dismiss: [REPS] pushups
- * is the only way to silence it. Should the camera itself be unusable (camera
- * permission is held granted by device owner, so that means broken hardware),
- * the way out is [MATH_FALLBACK_PROBLEMS] sums in a row, never a free dismiss.
+ * is the only way to silence it. Should the camera be unusable (broken hardware
+ * or a revoked permission), the way out is [MATH_FALLBACK_PROBLEMS] sums in a row,
+ * never a free dismiss.
  * It rings with [toneUri] when a tone is bundled.
  *
  * A ring that has not been verified is recorded ([markRinging]) in
@@ -147,6 +147,13 @@ fun strictAlarmFixed(alarm: Alarm, slot: StrictAlarm.Slot, now: Long): Alarm? {
 fun strictAlarmCandidate(alarms: List<Alarm>, taken: Set<String> = emptySet()): Alarm? =
     alarms.filter { it.enabled && !it.deleted && it.type == StrictAlarm.TYPE && it.syncId !in taken }
         .minWithOrNull(compareBy<Alarm>({ it.hour }, { it.minute }))
+
+/** Pure: unlocked pushup alarms standing on a locked slot's minute. None before a slot is locked. */
+fun strictAlarmDuplicates(alarms: List<Alarm>, locked: Set<String>): List<Alarm> =
+    if (locked.isEmpty()) emptyList() else alarms.filter { alarm ->
+        !alarm.deleted && alarm.type == StrictAlarm.TYPE && alarm.syncId !in locked &&
+            StrictAlarm.SLOTS.any { it.hour == alarm.hour && it.minute == alarm.minute }
+    }
 
 /** The share of the alarm stream's maximum a locked alarm rings at; see [strictStreamIndex]. */
 const val STRICT_STREAM_FRACTION = 0.7f

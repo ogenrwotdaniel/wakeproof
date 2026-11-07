@@ -56,6 +56,7 @@ class PushupVerifyViewModel @Inject constructor(
 
     private val startedAt = SystemClock.elapsedRealtime()
     private var lastPoseAt = startedAt
+    private var lastRealPoseAt = startedAt
     private var resetAppliedForThisGap = false
 
     /** Ringing the [StrictAlarm]: exactly its reps, and no emergency dismiss. */
@@ -84,26 +85,41 @@ class PushupVerifyViewModel @Inject constructor(
             while (!_uiState.value.verified) {
                 delay(1_000)
                 val now = SystemClock.elapsedRealtime()
-                if (now - lastPoseAt > NO_POSE_RESET_MS && !resetAppliedForThisGap) {
+                // A camera held by something else binds without complaint and
+                // simply stops delivering, which would leave a locked alarm no way out.
+                if (cameraStalled(now, watchingCameraSince, lastFrameAt)) onCameraUnavailable()
+                // Black frames still count as frames, and a locked alarm has no
+                // timed exit of its own. Long enough to be no shortcut to the sums.
+                if (strict && watchingCameraSince != null && strictCameraBlind(now, lastRealPoseAt) &&
+                    !_uiState.value.cameraUnavailable
+                ) {
+                    onCameraUnavailable()
+                }
+                // Only with a camera that could have seen one: a fault must not
+                // cost the reps already earned, or count as a reset.
+                if (watchingCameraSince != null && now - lastPoseAt > NO_POSE_RESET_MS &&
+                    !resetAppliedForThisGap
+                ) {
                     resetAppliedForThisGap = true
                     counter.reset()
                     _uiState.update { it.copy(reps = 0, resets = it.resets + 1) }
                 }
-                val emergency = !strict && (
-                    _uiState.value.resets >= MAX_RESETS ||
-                        now - startedAt > EMERGENCY_AFTER_MS
-                    )
-                if (emergency != _uiState.value.emergencyAvailable) {
-                    _uiState.update { it.copy(emergencyAvailable = emergency) }
-                }
+                refreshEmergency()
             }
         }
     }
 
+    @Volatile private var lastFrameAt = 0L
+    @Volatile private var watchingCameraSince: Long? = null
+    private val permission = CameraPermissionLatch()
+    private var pausedAt: Long? = null
+
     fun onPoseFrame(frame: PoseFrame) {
         if (_uiState.value.verified) return
+        lastFrameAt = SystemClock.elapsedRealtime()
         if (frame.pose != null) {
             lastPoseAt = SystemClock.elapsedRealtime()
+            lastRealPoseAt = lastPoseAt
             resetAppliedForThisGap = false
         }
         val result = counter.process(frame.pose)
@@ -121,9 +137,57 @@ class PushupVerifyViewModel @Inject constructor(
         }
     }
 
-    /** Camera permission denied ⇒ verification is impossible; open the escape hatch. */
+    /** The one place the hatch is decided, so a screen's promise cannot be taken back. */
+    private fun refreshEmergency() {
+        val state = _uiState.value
+        val open = !strict && (
+            state.cameraUnavailable || state.resets >= MAX_RESETS ||
+                SystemClock.elapsedRealtime() - startedAt > EMERGENCY_AFTER_MS
+            )
+        if (open != state.emergencyAvailable) _uiState.update { it.copy(emergencyAvailable = open) }
+    }
+
+    /** No permission, or no lens or frames ⇒ verification is impossible; open the escape hatch. */
     fun onCameraUnavailable() {
-        _uiState.update { it.copy(emergencyAvailable = !strict, cameraUnavailable = true) }
+        watchingCameraSince = null
+        _uiState.update { it.copy(cameraUnavailable = true) }
+        refreshEmergency()
+    }
+
+    /** The user asked to try again, or the permission came back, so the hatch closes. */
+    fun onCameraAvailable() {
+        // A fresh start: the time spent without a camera is already written off.
+        pausedAt = null
+        lastPoseAt = SystemClock.elapsedRealtime()
+        lastRealPoseAt = lastPoseAt
+        resetAppliedForThisGap = false
+        _uiState.update { it.copy(cameraUnavailable = false) }
+        refreshEmergency()
+    }
+
+    /**
+     * Only a change back to granted reopens the camera. This also runs on every
+     * rotation, which must not take back a fallback a dead camera has earned.
+     */
+    fun onCameraPermission(granted: Boolean) =
+        permission.report(granted, onLost = ::onCameraUnavailable, onBack = ::onCameraAvailable)
+
+    /**
+     * The preview is on screen and frames should be coming, from a fresh bind on.
+     * Off while stopped, when CameraX closes the camera on purpose.
+     */
+    fun watchCamera(watching: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        watchingCameraSince = if (watching) now else null
+        if (!watching) {
+            pausedAt = now
+        } else {
+            // Time away is not time the camera failed to see anyone: neither
+            // wait counts it, so returning costs no reps and earns no sums. A
+            // flip pauses for a moment only, so it cannot hold the wait off.
+            pausedAt?.let { val away = now - it; lastPoseAt += away; lastRealPoseAt += away }
+            pausedAt = null
+        }
     }
 
     fun logSkipped(onDone: () -> Unit) {
@@ -157,3 +221,20 @@ class PushupVerifyViewModel @Inject constructor(
         const val MAX_RESETS = 3
     }
 }
+
+/** How long a locked alarm's camera may go without seeing anyone at all. */
+const val STRICT_NO_POSE_MS = 10 * 60_000L
+
+/** Pure: see [STRICT_NO_POSE_MS]. */
+fun strictCameraBlind(now: Long, lastRealPoseAt: Long): Boolean =
+    now - lastRealPoseAt > STRICT_NO_POSE_MS
+
+/** How long a watched camera may go without a frame. */
+const val NO_FRAME_MS = 15_000L
+
+/**
+ * Pure: no frame for [NO_FRAME_MS] of a camera being watched, however good the
+ * ones before it were. Null [watchingSince] = not watched.
+ */
+fun cameraStalled(now: Long, watchingSince: Long?, lastFrameAt: Long): Boolean =
+    watchingSince != null && now - maxOf(watchingSince, lastFrameAt) > NO_FRAME_MS

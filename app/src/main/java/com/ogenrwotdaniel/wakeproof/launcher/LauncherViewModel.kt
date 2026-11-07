@@ -17,7 +17,6 @@ import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
-import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
 import com.ogenrwotdaniel.wakeproof.agenda.EventReminders
 import com.ogenrwotdaniel.wakeproof.agenda.startEventFocus
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
@@ -96,14 +95,9 @@ class LauncherViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             val apps = usageStatsRepository.installedApps()
-            val essentials = withContext(Dispatchers.IO) { essentialPackages(context) }
             val gateBrowsers = wallRulesRepository.current().gateBrowsers
             _gated.value = withContext(Dispatchers.IO) {
-                val browsers = AppGate.browserPackages(context)
-                apps.filter {
-                    AppGate.isGated(context, it.packageName, essentials, browsers, gateBrowsers)
-                }
-                    .map { it.packageName }.toSet()
+                AppGate.gatedPackages(context, apps.map { it.packageName }, gateBrowsers)
             }
             _pinned.value = pinnedApps(context, apps)
             _apps.value = apps

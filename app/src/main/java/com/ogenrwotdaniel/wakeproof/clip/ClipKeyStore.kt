@@ -96,7 +96,7 @@ class ClipKeyStore @Inject constructor(@ApplicationContext private val context: 
         key = prefs.getString(KEY_K, null)?.let { runCatching { ClipCodec.fromB64url(it) }.getOrNull() }
             ?.takeIf { it.size == ClipCodec.KEY_BYTES },
         enabled = prefs.getBoolean(KEY_ENABLED, true),
-        sendScreenshots = prefs.getBoolean(KEY_SCREENSHOTS, true),
+        sendScreenshots = prefs.getBoolean(KEY_SCREENSHOTS, false),
         computerName = prefs.getString(KEY_COMPUTER_NAME, null),
         computerInstallId = prefs.getString(KEY_COMPUTER_ID, null),
         computerAddrs = prefs.getString(KEY_COMPUTER_ADDRS, null).orEmpty()

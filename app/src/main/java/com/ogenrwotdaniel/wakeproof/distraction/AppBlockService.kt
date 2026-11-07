@@ -263,6 +263,12 @@ class AppBlockService : Service() {
     private val screenOn = Channel<Unit>(Channel.CONFLATED)
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            // From the broadcast, not only the tick: a sleep that begins and ends
+            // inside one tick's delay is never seen there.
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                retireHistoryReads()
+                return
+            }
             // The clock may have been changed while the screen was off, when the
             // 2 s loop leaves it alone; the first tick after waking must not act
             // on the old verdict and open a gated app inside a faked window.
@@ -445,6 +451,7 @@ class AppBlockService : Service() {
             screenReceiver,
             IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_PRESENT)
             },
             RECEIVER_NOT_EXPORTED
@@ -527,15 +534,7 @@ class AppBlockService : Service() {
                 tracker.forgetResumed()
                 besideRepeats.clear()
                 historyBackoff.clear()
-                // A read or a confirmation from before the screen went off says nothing
-                // about after it. A read still running finishes unheard ([screenOnRun]),
-                // so its slot is freed: holding it would keep its app from a fresh check
-                // after waking. Not counted against the stuck cap, as nothing says it is
-                // stuck; a long sleep in between does not make it so.
-                screenOnRun++
-                historyReads.clear()
-                historyAnswers.clear()
-                besideConfirmedAt.clear()
+                retireHistoryReads()
                 // Force a fresh measurement on wake rather than extrapolating
                 // across the whole time the phone was down.
                 baselineFor = null
@@ -1229,8 +1228,9 @@ class AppBlockService : Service() {
     private class HistoryRead(val job: Job, val startedAt: Long)
 
     /**
-     * Reads given up on as stuck, still blocking an IO thread. Capped, so a binder
-     * hung for good cannot use up the pool; see [historyReadAbandoned].
+     * Reads given up on as stuck, or retired at screen-off, and still running on
+     * [historyIo]. Capped ([historyReadAbandoned]) so a binder hung for good cannot
+     * queue reads without end; [historyIo] bounds the threads they hold.
      */
     private val abandonedReads = mutableListOf<Job>()
 
@@ -1258,6 +1258,29 @@ class AppBlockService : Service() {
         return false
     }
 
+    /**
+     * A read or a confirmation from before the screen went off says nothing about
+     * after it. A read still running finishes unheard ([screenOnRun]) and its slot
+     * is freed, or it would keep its app from a fresh check after waking. It counts
+     * against the cap until it finishes, which a healthy one soon does, so a binder
+     * hung for good cannot slip past the cap one screen-off at a time. Main thread.
+     */
+    private fun retireHistoryReads() {
+        screenOnRun++
+        historyReads.values.mapTo(abandonedReads) { it.job }
+        abandonedReads.removeAll { !it.isActive }
+        historyReads.clear()
+        historyAnswers.clear()
+        besideConfirmedAt.clear()
+    }
+
+    /**
+     * Whole-history reads run here and nowhere else: a few threads at most, so
+     * however slots are freed, a hung binder cannot use up the IO pool that Room,
+     * sync and preferences share.
+     */
+    private val historyIo = Dispatchers.IO.limitedParallelism(MAX_ABANDONED_READS + 1)
+
     /** Counts screen-offs, so a read begun before one is not heard after it. */
     private var screenOnRun = 0
     private val historyAnswers = mutableMapOf<String, HistoryAnswer>()
@@ -1275,7 +1298,6 @@ class AppBlockService : Service() {
         val now = SystemClock.elapsedRealtime()
         // An old answer says nothing about now: the app may have closed since.
         historyAnswers.entries.removeAll { now - it.value.at > HISTORY_ANSWER_MILLIS }
-        historyReads.entries.removeAll { !it.value.job.isActive }
         val answer = historyAnswers[pkg]
         if (answer != null) {
             historyAnswers.remove(pkg)
@@ -1289,7 +1311,7 @@ class AppBlockService : Service() {
         val lastResumedAt = tracker.lastResumedAt(pkg)
         val run = screenOnRun
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
+            val read = withContext(historyIo) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
             val at = SystemClock.elapsedRealtime()
             val stillTicketed = historyReads[pkg]?.job === coroutineContext[Job]
             if (run != screenOnRun || !stillTicketed) {

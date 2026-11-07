@@ -526,6 +526,10 @@ class AppBlockService : Service() {
                 tracker.forgetResumed()
                 besideRepeats.clear()
                 historyBackoff.clear()
+                // A read begun before the screen went off says nothing about after it.
+                historyReads.values.forEach { it.cancel() }
+                historyReads.clear()
+                historyAnswers.clear()
                 // Force a fresh measurement on wake rather than extrapolating
                 // across the whole time the phone was down.
                 baselineFor = null
@@ -1206,7 +1210,7 @@ class AppBlockService : Service() {
         wallMayLandOver(front, walled, packageName, alarmHoldsScreen(), untouchable, homeApps)
 
     /** A finished whole-history read, waiting for the tick to act on it. */
-    private class HistoryAnswer(val pkg: String, val open: Boolean, val at: Long, val lastResumedAt: Long)
+    private class HistoryAnswer(val open: Boolean, val at: Long, val lastResumedAt: Long)
 
     /**
      * Per app: the grace check and the beside check can each be waiting on a
@@ -1247,7 +1251,7 @@ class AppBlockService : Service() {
             if (read == null) {
                 historyBackoff[pkg] = at + BESIDE_CONFIRM_MILLIS
             } else {
-                historyAnswers[pkg] = HistoryAnswer(pkg, read, at, lastResumedAt)
+                historyAnswers[pkg] = HistoryAnswer(read, at, lastResumedAt)
             }
         }
         return OpenCheck.UNKNOWN
@@ -1339,12 +1343,15 @@ class AppBlockService : Service() {
             besideLastTick = emptySet()
             return
         }
-        val walled = resumed.filter { it != packageName && mayLandOver(current, it) }
+        val now = SystemClock.elapsedRealtime()
+        // The app just walled is the cover's until its limit: walling it again over
+        // its own wall would only push the cover back and spend its repeat gap.
+        val coverOwns = coverFor?.takeIf { now - coverWallAt <= COVER_MAX_MILLIS }
+        val walled = resumed.filter { it != packageName && it != coverOwns && mayLandOver(current, it) }
             .associateWith(::standingVerdict)
             .filterValues { it != GateVerdict.ALLOW }
         // Consecutive ticks: a tick that came another way must not count as the last.
         val previous = if (besideTick + 1 == ticks) besideLastTick else emptySet()
-        val now = SystemClock.elapsedRealtime()
         // On WakeProof's own screens the cover holds a real pop-up between walls.
         val ownFront = current == packageName
         // Picked past these, as one app waiting must not leave another beside it alone.
@@ -1357,7 +1364,9 @@ class AppBlockService : Service() {
             val repeat = besideRepeats[app]
             return (ownFront && repeat != null && now - repeat.lastAt < besideRepeatGap(repeat.walls - 1)) ||
                 now - (besideConfirmedAt[app] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS ||
-                historyHeldOff(app, now)
+                historyHeldOff(app, now) ||
+                // Its read is running: a second app beside it must not wait on that.
+                historyReads[app]?.isActive == true
         }
         val settled = walled.keys.firstOrNull { it in previous && !waiting(it) }
         besideLastTick = walled.keys

@@ -26,8 +26,11 @@ import kotlin.math.roundToInt
  * cover must not flash over every ordinary wall. Never past [COVER_MAX_MILLIS]
  * after the wall: the resumed set is folded from events, and a PAUSED that was
  * never recorded would otherwise hold a screen-sized, touch-eating window over
- * the phone for good. Re-entering the app raises a fresh wall, so the limit
- * costs nothing against a genuine pop-up. Not during the "let me close it"
+ * the phone for good. A pop-up still there at the limit gets a fresh wall from
+ * the check beside the front app, so the limit costs nothing against a genuine
+ * one; a PAUSED missing from the store too can repeat that, but only until the
+ * screen next goes off, and over WakeProof's own screens no oftener than
+ * [besideRepeatGap]. Not during the "let me close it"
  * grace either ([inGrace]), which is how the user reaches the pop-up's X.
  */
 fun popupCoverWanted(
@@ -39,6 +42,68 @@ fun popupCoverWanted(
     wallAgeMillis != null &&
         wallAgeMillis in COVER_SETTLE_MILLIS..COVER_MAX_MILLIS &&
         ownWallInFront && walledStillResumed && !inGrace
+
+/**
+ * Pure: whether a wall for [walled] may land while [front] is in front. Never over
+ * a call or an alarm: only over an ordinary app, the home screen, or a WakeProof
+ * screen other than the alarm's.
+ */
+fun wallMayLandOver(
+    front: String,
+    walled: String,
+    ownPackage: String,
+    alarmOnScreen: Boolean,
+    essentials: Set<String>,
+    homes: Set<String>
+): Boolean = when (front) {
+    walled -> false
+    ownPackage -> !alarmOnScreen
+    else -> front !in essentials || front in homes
+}
+
+/**
+ * Pure: an alarm's screen is up or coming up, so nothing may land on it. Only with
+ * the screen in front, because leaving it for another app is what the walls are
+ * for. For the whole alarm flow, whether or not the sound still plays: it ends
+ * early on a success screen, or on a phone with no tone to play, mid-mission. In
+ * the first [ALARM_SCREEN_SETTLE_MILLIS] of a ring the ring holds on its own, as
+ * the screen has been started but has not resumed yet.
+ */
+fun alarmHoldsWalls(ringing: Boolean, screenInFront: Boolean, ringAgeMillis: Long): Boolean =
+    screenInFront || (ringing && ringAgeMillis < ALARM_SCREEN_SETTLE_MILLIS)
+
+/**
+ * Pure: how long after the last of [walls] walls an app beside WakeProof's own
+ * screens may be walled again. Using a pop-up records nothing, so nothing tells a
+ * real one from an app whose PAUSED never reached the store. Never past
+ * [COVER_MAX_MILLIS]: the cover holds a real one in between, and only that long.
+ * A phantom interrupts WakeProof's screens that often at the most.
+ */
+fun besideRepeatGap(walls: Int): Long =
+    (BESIDE_CONFIRM_MILLIS shl walls.coerceIn(0, 2)).coerceAtMost(COVER_MAX_MILLIS)
+
+/**
+ * Pure: how long until a cap beside the front app must be read again. Use can
+ * grow no faster than the clock, so a cap with time left cannot be spent before
+ * that time has passed; never sooner than [BESIDE_CONFIRM_MILLIS].
+ */
+fun nextBesideCapReadIn(usedMillis: Long, limitMillis: Long): Long =
+    (limitMillis - usedMillis).coerceAtLeast(BESIDE_CONFIRM_MILLIS)
+
+/**
+ * Pure: a verdict took long enough, from [startedAt] to [endedAt], that the front
+ * app may have changed under it, so it must be looked at again before a wall lands.
+ */
+fun frontMayHaveChanged(startedAt: Long, endedAt: Long): Boolean = endedAt - startedAt >= SLOW_VERDICT_MILLIS
+
+/** One tick: a verdict faster than this risks no more than the tick itself. */
+const val SLOW_VERDICT_MILLIS = 500L
+
+/** At most this often per app: the whole-history check, and the read of a cap beside the front app. */
+const val BESIDE_CONFIRM_MILLIS = 30_000L
+
+/** How long a new ring holds the walls back for its screen to come up. */
+const val ALARM_SCREEN_SETTLE_MILLIS = 3_000L
 
 /** How long after a wall a still-resumed app counts as sitting beside it. */
 const val COVER_SETTLE_MILLIS = 1_500L

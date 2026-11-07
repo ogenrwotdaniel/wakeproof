@@ -16,6 +16,7 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.UserManager
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -109,6 +110,8 @@ class AlarmRingingService : Service() {
         // previous playback down first or its looping MediaPlayer leaks and
         // keeps ringing forever after the service stops.
         stopRinging()
+        // Start time first: a reader seeing the ring must see this ring's age.
+        ringStartedAt = SystemClock.elapsedRealtime()
         ringing = true
         strictRing = StrictAlarm.isStrictId(this, alarmId)
         // Every alarm rings the bundled song (user's choice, 2026-11-04), not
@@ -286,6 +289,10 @@ class AlarmRingingService : Service() {
 
         /** A ring is playing in this process; see [StrictAlarm.resumeIfPending]. */
         @Volatile var ringing = false
+            private set
+
+        /** When the latest ring began, on the monotonic clock; see [alarmHoldsWalls]. */
+        @Volatile var ringStartedAt = 0L
             private set
 
         fun start(context: Context, alarmId: Long, mission: String? = null) {

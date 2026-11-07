@@ -38,10 +38,18 @@ class NightRulesCameraTest {
     @Test
     fun `the camera warning is quiet from the sleep wall until the last locked alarm`() {
         val lastSlot = 5 * 60 + 30
-        assertTrue(cameraNagSilent(minuteOfDay = 20 * 60, lastSlotMinutes = lastSlot))
-        assertTrue(cameraNagSilent(minuteOfDay = 2 * 60, lastSlotMinutes = lastSlot))
-        assertTrue(cameraNagSilent(minuteOfDay = 4 * 60, lastSlotMinutes = lastSlot))
-        assertFalse(cameraNagSilent(minuteOfDay = lastSlot, lastSlotMinutes = lastSlot))
-        assertFalse(cameraNagSilent(minuteOfDay = 12 * 60, lastSlotMinutes = lastSlot))
+        assertTrue(nightQuiet(minuteOfDay = 20 * 60, lastSlotMinutes = lastSlot))
+        assertTrue(nightQuiet(minuteOfDay = 2 * 60, lastSlotMinutes = lastSlot))
+        assertTrue(nightQuiet(minuteOfDay = 4 * 60, lastSlotMinutes = lastSlot))
+        assertFalse(nightQuiet(minuteOfDay = lastSlot, lastSlotMinutes = lastSlot))
+        assertFalse(nightQuiet(minuteOfDay = 12 * 60, lastSlotMinutes = lastSlot))
+    }
+
+    @Test
+    fun `only a repeat of the walls-down alert waits out the night`() {
+        assertTrue(wallsDownRepeatHeld(treeLost = false, lastAlertAt = 5L, quiet = true))
+        assertFalse(wallsDownRepeatHeld(treeLost = false, lastAlertAt = 0L, quiet = true))
+        assertFalse(wallsDownRepeatHeld(treeLost = true, lastAlertAt = 5L, quiet = true))
+        assertFalse(wallsDownRepeatHeld(treeLost = false, lastAlertAt = 5L, quiet = false))
     }
 }

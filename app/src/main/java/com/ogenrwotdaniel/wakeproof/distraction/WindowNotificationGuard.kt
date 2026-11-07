@@ -2,6 +2,8 @@ package com.ogenrwotdaniel.wakeproof.distraction
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -16,6 +18,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -108,11 +112,26 @@ class WindowNotificationGuard : NotificationListenerService() {
     }
 
     /** Defaults can change, and with them what is essential or gated. Lookups off the main thread. */
-    private suspend fun refreshDefaults() {
+    private suspend fun refreshDefaults() = defaultsLock.withLock { applyLatestDefaults() }
+
+    private suspend fun applyLatestDefaults() {
         // The block service's reading when it runs, so the two never disagree;
         // this own reading is only the fallback for when it does not.
-        val apps = AppBlockService.defaultApps()
-            ?: withContext(Dispatchers.Default) { readDefaultApps(this@WindowNotificationGuard) }
+        val shared = AppBlockService.defaultApps()
+        val apps = shared
+            ?: withContext(Dispatchers.Default) { readDefaultApps(this@WindowNotificationGuard, lastApps) }
+            ?: return // keep the last good reading
+        lastApps = apps
+        // A blank at boot is a system not ready yet, and an SMS app read as nothing
+        // could lose a sign-in code for good. A lasting gap is believed after a while.
+        val now = SystemClock.elapsedRealtime()
+        val since = firstReadAt ?: now.also { firstReadAt = it }
+        // An SMS app is waited for as long as the block service waits for it after boot.
+        if (shared == null && !defaultsLoaded && !firstReadingReady(apps, telephony) &&
+            (now - since < MAX_HOLD_MILLIS || (telephony && apps.sms == null && bootSettling(now)))
+        ) {
+            return
+        }
         if (apps.essential != essentials || apps.sms != defaultSms) windowedCache.clear()
         essentials = apps.essential
         defaultSms = apps.sms
@@ -121,6 +140,12 @@ class WindowNotificationGuard : NotificationListenerService() {
     }
 
     private var defaultsLoaded = false
+    private var lastApps: DefaultApps? = null
+    private var firstReadAt: Long? = null
+    private val telephony by lazy { packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY) }
+
+    /** One read at a time: an older one finishing last would put a retired app back. */
+    private val defaultsLock = Mutex()
 
     private fun shouldRemove(sbn: StatusBarNotification): Boolean {
         if (sbn.isOngoing || !sbn.isClearable || !defaultsLoaded) return false

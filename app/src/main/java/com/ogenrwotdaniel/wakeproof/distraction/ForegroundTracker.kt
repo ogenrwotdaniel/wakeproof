@@ -58,6 +58,9 @@ class ResumedActivities {
     fun isResumed(packageName: String, className: String): Boolean =
         resumed[packageName]?.contains(className) == true
 
+    /** When [packageName] last resumed; 0 when never seen. */
+    fun lastResumedAt(packageName: String): Long = lastResumedAt[packageName] ?: 0L
+
     /**
      * When [packageName]'s current run of resumed activities began; 0 when never
      * seen. Earlier than its last resume when it has two windows up.
@@ -134,6 +137,9 @@ class ForegroundTracker(private val usm: UsageStatsManager) {
         }
         return fresh.isResumed(packageName)
     }
+
+    /** As of the last [current] call; see [ResumedActivities.lastResumedAt]. */
+    fun lastResumedAt(packageName: String): Long = state.lastResumedAt(packageName)
 
     /** Applies a [resumedIn] answer: a closed app is forgotten. */
     fun settle(packageName: String, stillResumed: Boolean): Boolean {

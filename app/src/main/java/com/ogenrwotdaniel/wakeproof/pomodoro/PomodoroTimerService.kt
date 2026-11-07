@@ -28,7 +28,9 @@ import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveFocusSession
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
+import com.ogenrwotdaniel.wakeproof.distraction.DefaultApps
 import com.ogenrwotdaniel.wakeproof.distraction.essentialPackages
+import com.ogenrwotdaniel.wakeproof.distraction.readDefaultApps
 import com.ogenrwotdaniel.wakeproof.wear.WearStatsSync
 import com.ogenrwotdaniel.wakeproof.wear.WearTimerSync
 import dagger.hilt.android.AndroidEntryPoint
@@ -49,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Pomodoro cycle phases. */
 enum class PomodoroPhase(val label: String) {
@@ -420,7 +423,9 @@ class PomodoroTimerService : Service() {
      */
     private suspend fun guardTree() {
         val power = getSystemService(PowerManager::class.java)
-        val essentials = essentialPackages(this)
+        var ownReading: DefaultApps? = null
+        var ownReadAt = 0L
+        var ownFallback: Set<String>? = null
         var awaySince: Long? = null
         // foregroundPackage() answers null while the user stays put in one app,
         // so the last real answer is what is on screen — exactly as in
@@ -435,6 +440,34 @@ class PomodoroTimerService : Service() {
             }
             usageStatsRepository.foregroundPackage()?.let { foreground = it }
             val current = foreground
+            // Read each time, so a default changed mid-block counts. Unknown while the
+            // walls take their first readings: a blank one has no home screen in it,
+            // and the home screen would count as away.
+            val essentials = if (AppBlockService.defaultsPending()) {
+                null
+            } else {
+                AppBlockService.defaultApps()?.essential ?: run {
+                    // The service is down. Off the main thread, holding the last answer
+                    // over a hiccup that would leave the home screen out.
+                    val previous = ownReading
+                    val readAt = SystemClock.elapsedRealtime()
+                    // Throttled whether or not the read worked: a failing PackageManager
+                    // must not be asked again on every 2 s poll.
+                    if (ownReadAt == 0L || readAt - ownReadAt >= TREE_DEFAULTS_READ_MS) {
+                        ownReadAt = readAt
+                        ownReading = withContext(Dispatchers.Default) {
+                            readDefaultApps(this@PomodoroTimerService, previous)
+                        } ?: previous
+                        // Never read at all: the plain lookup, as before, so the tree is still judged.
+                        if (ownReading == null) {
+                            ownFallback = withContext(Dispatchers.Default) { essentialPackages(this@PomodoroTimerService) }
+                        }
+                    }
+                    ownReading?.essential ?: ownFallback
+                }
+            }
+            // Unknown decides nothing, so a running away timer is not reset by it either.
+            if (essentials == null) continue
             val allowed = current == null || current in essentials ||
                 current in latestSettings.studyApps
             if (allowed) {
@@ -883,6 +916,7 @@ class PomodoroTimerService : Service() {
         private const val SESSION_DONE_NOTIFICATION_ID = 3
         private const val TREE_NOTIFICATION_ID = 5
         private const val TREE_POLL_MS = 2_000L
+        private const val TREE_DEFAULTS_READ_MS = 15_000L
         /**
          * How long a non-study app may hold the screen before the tree withers.
          * Long enough to dismiss a notification you tapped by accident, short

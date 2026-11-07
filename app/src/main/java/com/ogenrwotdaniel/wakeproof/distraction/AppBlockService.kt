@@ -12,6 +12,7 @@ import android.content.Context
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -23,7 +24,8 @@ import android.provider.Settings
 import android.util.Log
 import com.ogenrwotdaniel.wakeproof.MainActivity
 import com.ogenrwotdaniel.wakeproof.R
-import com.ogenrwotdaniel.wakeproof.launcher.LauncherActivity
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingActivity
+import com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService
 import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
@@ -51,6 +53,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -262,7 +265,7 @@ class AppBlockService : Service() {
             // The clock may have been changed while the screen was off, when the
             // 2 s loop leaves it alone; the first tick after waking must not act
             // on the old verdict and open a gated app inside a faked window.
-            clockDoubted = runCatching { clockUntrusted(context) }.getOrDefault(clockDoubted)
+            recheckClock()
             screenOn.trySend(Unit)
         }
     }
@@ -404,7 +407,7 @@ class AppBlockService : Service() {
                 }.getOrDefault(false)
                 // Read by the tick and the notification guard; neither acts on a
                 // sleeping phone's clock, so it is left alone until the screen is on.
-                if (powerManager.isInteractive) clockDoubted = clockUntrusted(this@AppBlockService)
+                if (powerManager.isInteractive) recheckClock()
                 // Screen off too: audio is exactly what plays with the screen off.
                 pauseWalledMedia()
                 delay(MEDIA_CHECK_MILLIS)
@@ -449,11 +452,7 @@ class AppBlockService : Service() {
         // they are in: with an empty essential set the dialer or the home screen
         // could be judged an ordinary app.
         scope.launch {
-            // A failed read must not leave the walls unstarted for good.
-            while (!defaultsLoaded.isCompleted) {
-                runCatching { refreshDefaults() }.onFailure { Log.w(TAG, "default apps unreadable", it) }
-                if (!defaultsLoaded.isCompleted) delay(DEFAULTS_RETRY_MILLIS)
-            }
+            applyFirstDefaults()
             awaitReady()
             watch()
         }
@@ -462,6 +461,9 @@ class AppBlockService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    /** A device with no SMS app to wait for; see [walledNow]. */
+    private val telephony by lazy { packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY) }
 
     private val powerManager by lazy { getSystemService(PowerManager::class.java) }
     private val keyguardManager by lazy { getSystemService(KeyguardManager::class.java) }
@@ -484,6 +486,12 @@ class AppBlockService : Service() {
         WatchSessionNotifier.update(applicationContext, null)
         scope.cancel()
         super.onDestroy()
+    }
+
+    private fun recheckClock() {
+        // A failed lookup keeps the last verdict: from the screen-on receiver or the
+        // tick, a throw would crash the process or end the walls.
+        clockDoubted = runCatching { clockUntrusted(this) }.getOrDefault(clockDoubted)
     }
 
     /** The front app at the last tick, so the clock is re-read when it changes. */
@@ -516,6 +524,8 @@ class AppBlockService : Service() {
                 // Nothing stays resumed with the screen off, and whatever really
                 // is on screen resumes again on waking.
                 tracker.forgetResumed()
+                besideRepeats.clear()
+                historyBackoff.clear()
                 // Force a fresh measurement on wake rather than extrapolating
                 // across the whole time the phone was down.
                 baselineFor = null
@@ -543,18 +553,22 @@ class AppBlockService : Service() {
             // not slip in on the 2 s loop's old verdict.
             if (current != lastFront) {
                 lastFront = current
-                clockDoubted = runCatching { clockUntrusted(this) }.getOrDefault(clockDoubted)
+                recheckClock()
             }
-            followWalledApp(current)
+            measureBesideCaps(tracker.resumedPackages() - current - packageName)
+            // A wall just went up beside the front app: the next tick sees what it left.
+            if (followWalledApp(current)) {
+                delay(POLL_MILLIS)
+                continue
+            }
             if (current == packageName) {
                 // Looking at our own wall (or WakeProof itself). Not a re-entry.
                 pinCover.hide()
-                // WakeProof is the home screen too, the likeliest thing to be
-                // beside a pop-up. Its other screens, an alarm's above all, are
-                // never interrupted.
-                if (tracker.isResumed(packageName, LauncherActivity::class.java.name)) {
-                    wallBeside(current)
-                }
+                // Pop-ups float above WakeProof too, and using one records nothing, so
+                // this is all that walls them here: over the home screen, the wall (a
+                // second app's wall must not forget the first's pop-up) and the rest of
+                // the app. Never over the alarm.
+                wallBeside(current)
                 delay(POLL_MILLIS)
                 continue
             }
@@ -563,12 +577,23 @@ class AppBlockService : Service() {
             if (current != lastBlockedPackage) lastBlockedPackage = null
 
             val limit = blockedLimit(current)
+            val judgedFrom = SystemClock.elapsedRealtime()
             val verdict = verdictFor(
                 current = current,
                 gated = isGated(current),
                 capSpent = limit != null && capSpent(current, limit)
             )
             logVerdict(current, verdict)
+            // capSpent may have waited on a slow read from midnight: neither a wall nor
+            // a cover may land on a call or an alarm that came up during it. A read
+            // inside a tick risks no more than the tick itself, and is not checked
+            // again, as every entry into a capped app reads.
+            if (frontMayHaveChanged(judgedFrom, SystemClock.elapsedRealtime()) &&
+                runCatching { tracker.current() }.getOrNull() != current
+            ) {
+                delay(POLL_MILLIS)
+                continue
+            }
             // A pinned task refuses every activity from outside it, wall
             // included, so a pinned app is covered by an overlay instead.
             val pinned = userPinned()
@@ -640,7 +665,8 @@ class AppBlockService : Service() {
                 alarmVerifiedToday = alarmVerifiedToday
             ),
             feedEarned = feedEarned(rules.earnTheFeed, focusDoneToday, rules.openWindowStartMinutes),
-            sleeping = sleepWallActive(minuteOfDay) && current !in sleepExempt,
+            sleeping = sleepWallActive(minuteOfDay) && current !in sleepExempt &&
+                !(clockDoubted && current in CAPTIVE_PORTAL_PACKAGES),
             quarantined = held(current),
             clockUntrusted = clockDoubted && current !in sleepExempt && current != smsApp &&
                 current !in CAPTIVE_PORTAL_PACKAGES &&
@@ -741,8 +767,19 @@ class AppBlockService : Service() {
      * the app has shown anything.
      */
     private suspend fun wallBefore(packageName: String): Intent? {
+        // Seen in a reading already, so nothing is gained by holding the dialer back
+        // for the blanks in the others.
+        // Not Settings mid-session, though: a session walls it, essential or not.
+        if (!defaultsLoaded.isCompleted && packageName in untouchable &&
+            !(packageName in FOCUS_WALLED_ESSENTIALS && anySessionActive())
+        ) {
+            return null
+        }
         // A tap is never held for long: without the default apps nothing can be
-        // judged safely, so it opens, and the tick walls it once they are in.
+        // judged safely, so it opens, and the tick walls it once they are in. The
+        // first readings can take 10 s after boot, so only a session, which walls
+        // nearly everything, is worth waiting for; any other tap opens at once.
+        if (!defaultsLoaded.isCompleted && !anySessionActive()) return null
         withTimeoutOrNull(READY_TIMEOUT_MILLIS) { awaitReady() }
         if (!defaultsLoaded.isCompleted) return null
         val limit = blockedLimit(packageName)
@@ -775,9 +812,18 @@ class AppBlockService : Service() {
         ) {
             return false
         }
+        // Believed for the walls by now, but a blank SMS app so soon after boot may be
+        // a system still starting, and the code it would cost cannot be got back. The
+        // minute's sweep takes anything walled once it reads. Only for an app that
+        // could be the SMS app: a named messenger is walled even as the default.
+        if (defaultSms == null && telephony && pkg !in AppGate.KNOWN_GATED_PACKAGES &&
+            bootSettling(SystemClock.elapsedRealtime())
+        ) {
+            return false
+        }
         // The 2 s loop leaves the clock alone with the screen off, but notifications
         // still arrive then, and must be judged on the clock as it is now.
-        if (!powerManager.isInteractive) clockDoubted = runCatching { clockUntrusted(this) }.getOrDefault(clockDoubted)
+        if (!powerManager.isInteractive) recheckClock()
         // Where the clock does not count, the verdict falls through to whatever
         // wall stands beneath it; doubting the clock must not lift that one.
         if (standingVerdict(pkg, forNotification = true) == GateVerdict.ALLOW) return false
@@ -852,8 +898,41 @@ class AppBlockService : Service() {
      */
     private suspend fun refreshDefaults() = defaultsLock.withLock {
         // One read at a time: an older one finishing last would put a retired
-        // home or SMS app back.
-        applyDefaults(withContext(Dispatchers.Default) { readDefaults() })
+        // home or SMS app back. A failed read keeps the last good one.
+        withContext(Dispatchers.Default) { readDefaults() }?.let(::applyDefaults)
+    }
+
+    /**
+     * The first readings. A system still starting answers with blanks, so nothing
+     * acts on them ([defaultsLoaded], [defaultApps]) until the blanks fill: a blank
+     * SMS app would cost a sign-in code for good. After [firstReadAttempts] what can
+     * be read is believed: a phone with a real gap, or a lasting failure, must still
+     * get its walls.
+     */
+    private suspend fun applyFirstDefaults() {
+        val attempts = firstReadAttempts(SystemClock.elapsedRealtime())
+        for (attempt in 1..attempts) {
+            // A failed read must not leave the walls unstarted for good.
+            runCatching { refreshDefaults() }.onFailure { Log.w(TAG, "default apps unreadable", it) }
+            if (lastDefaults?.let { firstReadingReady(it, telephony) } == true) break
+            if (attempt < attempts) delay(DEFAULTS_RETRY_MILLIS)
+        }
+        if (lastDefaults != null) {
+            defaultsLoaded.complete(Unit)
+            return
+        }
+        val bare = withContext(Dispatchers.Default) {
+            val dialer = defaultDialer(this@AppBlockService)
+            // One last try at the home: without it a sleep wall lands on the home screen.
+            val homes = homePackages(this@AppBlockService)
+            val apps = DefaultApps(
+                essentialPackages(this@AppBlockService, homes, dialer),
+                homes, dialer, defaultSms(this@AppBlockService)
+            )
+            defaultsFrom(apps)
+        }
+        defaultsLock.withLock { if (lastDefaults == null) applyDefaults(bare) }
+        defaultsLoaded.complete(Unit)
     }
 
     private val defaultsLock = Mutex()
@@ -861,8 +940,9 @@ class AppBlockService : Service() {
     private class Defaults(val apps: DefaultApps, val exempt: Set<String>)
 
     /** PackageManager, Telecom and Settings lookups: any thread. */
-    private fun readDefaults(): Defaults {
-        val apps = readDefaultApps(this)
+    private fun readDefaults(): Defaults? = readDefaultApps(this, lastDefaults)?.let(::defaultsFrom)
+
+    private fun defaultsFrom(apps: DefaultApps): Defaults {
         val exempt = (apps.essential - apps.homes) + AppGate.QUARANTINE_EXEMPT +
             com.ogenrwotdaniel.wakeproof.launcher.NAMED_TOOLS + listOfNotNull(
             // The keyboard: every text field on the phone.
@@ -878,7 +958,7 @@ class AppBlockService : Service() {
         return Defaults(apps, exempt - setOfNotNull(apps.sms?.takeUnless { it == apps.dialer }))
     }
 
-    /** The last reading, for [WindowNotificationGuard] while this service runs. */
+    /** The last reading, which may still be partial until [defaultsLoaded]; see [applyFirstDefaults]. */
     @Volatile private var lastDefaults: DefaultApps? = null
 
     /** Main thread: [gatedCache] and the sets are read by the tick. */
@@ -891,7 +971,6 @@ class AppBlockService : Service() {
         defaultSms = d.apps.sms
         smsApp = d.apps.sparedSms
         quarantineExempt = d.exempt
-        defaultsLoaded.complete(Unit)
     }
 
     /** When [pkg] was installed (not updated); null when unreadable. */
@@ -991,7 +1070,6 @@ class AppBlockService : Service() {
         }
         if (cameraNagDue(strictHeld, cameraGranted, prefs.getLong(KEY_CAMERA_NAG_AT, 0L), now)) {
             prefs.edit().putLong(KEY_CAMERA_NAG_AT, now).apply()
-            val lastSlot = StrictAlarm.SLOTS.maxOf { it.hour * 60 + it.minute }
             nightNotice(
                 CAMERA_NOTIFICATION_ID,
                 "Camera access is off",
@@ -1002,7 +1080,7 @@ class AppBlockService : Service() {
                         .setData(android.net.Uri.fromParts("package", packageName, null)),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 ),
-                silent = cameraNagSilent(minuteOfDay, lastSlot)
+                silent = quietNow()
             )
         }
         val battery = getSystemService(android.os.BatteryManager::class.java)
@@ -1025,8 +1103,7 @@ class AppBlockService : Service() {
         // A quiet one goes on a low-importance channel: still in the shade on
         // waking, with no heads-up or sound at night.
         val channel = if (silent) {
-            NotificationChannel(NIGHT_QUIET_CHANNEL_ID, "Bedtime (quiet)", NotificationManager.IMPORTANCE_LOW)
-                .apply { description = "Warnings held back from sounding while you sleep" }
+            quietChannel()
         } else {
             NotificationChannel(NIGHT_CHANNEL_ID, "Bedtime", NotificationManager.IMPORTANCE_HIGH)
                 .apply { description = "Wind-down and charging reminders before the morning alarm" }
@@ -1077,14 +1154,17 @@ class AppBlockService : Service() {
     /**
      * Throws [intent] in front of [packageName], once: the wall pauses the app,
      * so the next tick sees WakeProof in front and leaves it alone. The debounce
-     * only covers the tick or two before the wall's own resume lands.
+     * only covers the tick or two before the wall's own resume lands. True when
+     * the wall went up.
      */
-    private fun wall(packageName: String, intent: () -> Intent) {
+    private fun wall(packageName: String, intent: () -> Intent): Boolean {
+        // The one place every wall passes: nothing may hide a ringing alarm's screen.
+        if (alarmHoldsScreen()) return false
         val now = SystemClock.elapsedRealtime()
-        if (packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS) return
+        if (packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS) return false
         lastBlockedPackage = packageName
         lastBlockedAt = now
-        runCatching { startActivity(intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        return runCatching { startActivity(intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             .onSuccess {
                 coverFor = packageName
                 coverWallAt = now
@@ -1094,7 +1174,150 @@ class AppBlockService : Service() {
                 killPending = packageName !in untouchable
             }
             .onFailure { Log.w(TAG, "could not raise the wall over $packageName", it) }
+            .isSuccess
     }
+
+    private enum class OpenCheck { OPEN, CLOSED, UNKNOWN }
+
+    /**
+     * Until when each app's history is left alone after a failed read or a refused
+     * wall: the tick must not retry every 500 ms. Per app, as one app's trouble says
+     * nothing about a pop-up beside it. A key per app ever refused, so it stays small.
+     */
+    private val historyBackoff = mutableMapOf<String, Long>()
+
+    private fun historyHeldOff(pkg: String, now: Long): Boolean {
+        val until = historyBackoff[pkg] ?: return false
+        if (now < until) return true
+        historyBackoff.remove(pkg)
+        return false
+    }
+
+    /** See [alarmHoldsWalls]. */
+    private fun alarmHoldsScreen(): Boolean = alarmHoldsWalls(
+        ringing = AlarmRingingService.ringing,
+        // First hand from the activity: usage events land too late to vouch for it.
+        screenInFront = AlarmRingingActivity.resumed,
+        ringAgeMillis = SystemClock.elapsedRealtime() - AlarmRingingService.ringStartedAt
+    )
+
+    /** Whether a wall for [walled] may land while [front] is in front, as things stand. */
+    private fun mayLandOver(front: String, walled: String): Boolean =
+        wallMayLandOver(front, walled, packageName, alarmHoldsScreen(), untouchable, homeApps)
+
+    /** A finished whole-history read, waiting for the tick to act on it. */
+    private class HistoryAnswer(val pkg: String, val open: Boolean, val at: Long, val lastResumedAt: Long)
+
+    /**
+     * Per app: the grace check and the beside check can each be waiting on a
+     * different app, and one slot shared between them would have each throw the
+     * other's read away.
+     */
+    private val historyReads = mutableMapOf<String, Job>()
+    private val historyAnswers = mutableMapOf<String, HistoryAnswer>()
+
+    /**
+     * Whether [pkg] is really still open, from its whole history, and may be walled
+     * over [front]. The read can walk as far back as the screen has been on, so it
+     * runs on its own coroutine and the tick never waits: enforcement of the front
+     * app must not stall behind it. The first call starts the read and answers
+     * [OpenCheck.UNKNOWN], as it does while the read runs, when the history was
+     * unreadable, or when [front] may no longer take a wall; a later tick acts on
+     * the answer, against the front app as it is then.
+     */
+    private fun confirmedOpen(pkg: String, front: String): OpenCheck {
+        val now = SystemClock.elapsedRealtime()
+        // An old answer says nothing about now: the app may have closed since.
+        historyAnswers.entries.removeAll { now - it.value.at > HISTORY_ANSWER_MILLIS }
+        historyReads.entries.removeAll { !it.value.isActive }
+        val answer = historyAnswers[pkg]
+        if (answer != null) {
+            historyAnswers.remove(pkg)
+            // The tick kept reading events meanwhile. A resume it saw says the app is
+            // open again; forgetting it now would lose it, with the event already read.
+            if (!answer.open && tracker.lastResumedAt(pkg) != answer.lastResumedAt) return OpenCheck.UNKNOWN
+            return judgeOpen(pkg, front, answer.open, now)
+        }
+        if (pkg in historyReads) return OpenCheck.UNKNOWN
+        val from = tracker.confirmFrom(pkg) ?: return OpenCheck.CLOSED
+        val lastResumedAt = tracker.lastResumedAt(pkg)
+        historyReads[pkg] = scope.launch {
+            val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() }
+            val at = SystemClock.elapsedRealtime()
+            if (read == null) {
+                historyBackoff[pkg] = at + BESIDE_CONFIRM_MILLIS
+            } else {
+                historyAnswers[pkg] = HistoryAnswer(pkg, read, at, lastResumedAt)
+            }
+        }
+        return OpenCheck.UNKNOWN
+    }
+
+    /** Acts on a whole-history answer on the thread that owns the tracker's state. */
+    private fun judgeOpen(pkg: String, front: String, stillOpen: Boolean, now: Long): OpenCheck {
+        // Only entries inside the window matter, so the map stays small however
+        // long the service runs.
+        besideConfirmedAt.entries.removeAll { now - it.value > BESIDE_CONFIRM_MILLIS }
+        if (!tracker.settle(pkg, stillOpen)) {
+            // Forgotten by the tracker, so only a real reopen brings it back, and
+            // that one must be checked at once, not after the 30 s wait.
+            besideConfirmedAt.remove(pkg)
+            return OpenCheck.CLOSED
+        }
+        if (!mayLandOver(front, pkg)) {
+            // Not now, and the read is not to be repeated on every tick until it can.
+            historyBackoff[pkg] = now + BESIDE_CONFIRM_MILLIS
+            return OpenCheck.UNKNOWN
+        }
+        besideConfirmedAt[pkg] = now
+        return OpenCheck.OPEN
+    }
+
+    /**
+     * Measures the BLOCK caps of [beside], the apps open beside the front app.
+     * [capSpent] only ever runs for the front app, so a capped app kept in a pop-up
+     * would never be found spent. A read from midnight per app, on its own coroutine
+     * so the tick never waits, and not again before the cap could be spent
+     * ([nextBesideCapReadIn]): an app whose PAUSED was lost sits in the resumed set
+     * until the screen goes off, and must not cost a whole day's fold every 30 s.
+     */
+    private fun measureBesideCaps(beside: Collection<String>) {
+        if (beside.isEmpty()) return
+        val now = SystemClock.elapsedRealtime()
+        besideCapReads.entries.removeAll { now >= it.value.at }
+        for (pkg in beside) {
+            val limit = blockedLimit(pkg) ?: continue
+            // A changed cap voids the old bound: a tighter one may already be spent.
+            if (besideCapReads[pkg]?.limitMinutes == limit.minutes) continue
+            if ((spentToday[pkg] ?: -1) >= limit.minutes) continue
+            // Held while the read runs, and as the retry gap if it fails.
+            besideCapReads[pkg] = BesideCapRead(now + BESIDE_CONFIRM_MILLIS, limit.minutes)
+            val day = spentDay
+            scope.launch {
+                val used = runCatching { usageRepository.todayForegroundMillisFor(setOf(pkg))[pkg] }.getOrNull()
+                    ?: return@launch
+                val limitMillis = limit.minutes * 60_000L
+                // A read straddling midnight must not spend the new day's cap.
+                if (day == spentDay && used >= limitMillis) spentToday[pkg] = limit.minutes
+                if (besideCapReads[pkg]?.limitMinutes == limit.minutes) {
+                    besideCapReads[pkg] = BesideCapRead(
+                        SystemClock.elapsedRealtime() + nextBesideCapReadIn(used, limitMillis),
+                        limit.minutes
+                    )
+                }
+            }
+        }
+    }
+
+    /** When a beside app's cap is next read, and the cap that bound was worked out for. */
+    private class BesideCapRead(val at: Long, val limitMinutes: Int)
+
+    private val besideCapReads = mutableMapOf<String, BesideCapRead>()
+
+    /** Beside walls over WakeProof's own screens so far this screen-on; see [besideRepeatGap]. */
+    private class BesideRepeat(val walls: Int, val lastAt: Long)
+
+    private val besideRepeats = mutableMapOf<String, BesideRepeat>()
 
     /**
      * Walls an app still running beside [current], which is itself allowed. A
@@ -1105,60 +1328,59 @@ class AppBlockService : Service() {
      * events, so a lost PAUSED could leave a phantom here; [watch] empties the
      * set at every screen-off, which is the most a phantom can cost.
      */
-    private suspend fun wallBeside(current: String) {
+    private fun wallBeside(current: String) {
         val resumed = tracker.resumedPackages()
-        // Only the home screen among essentials: nothing lands on a call, and
-        // Settings stays reachable.
-        // WakeProof's own home screen counts as a home even when no default is
-        // chosen and [homeApps] holds only the system one; the tick only calls this
-        // for WakeProof while its LauncherActivity is resumed.
-        if (resumed.size < 2 || (current in untouchable && current !in homeApps && current != packageName) ||
+        // Closed for real, so a reopen is checked at once. A phantom stays in the set.
+        besideRepeats.keys.retainAll(resumed)
+        if (resumed.size < 2 ||
             // Covered already, or given its moment to be closed.
             popupCover.isShowing || SystemClock.elapsedRealtime() < coverGraceUntil
         ) {
             besideLastTick = emptySet()
             return
         }
-        val walled = resumed.filter { it != current && it != packageName }
+        val walled = resumed.filter { it != packageName && mayLandOver(current, it) }
             .associateWith(::standingVerdict)
             .filterValues { it != GateVerdict.ALLOW }
         // Consecutive ticks: a tick that came another way must not count as the last.
         val previous = if (besideTick + 1 == ticks) besideLastTick else emptySet()
-        val settled = walled.keys.firstOrNull { it in previous }
+        val now = SystemClock.elapsedRealtime()
+        // On WakeProof's own screens the cover holds a real pop-up between walls.
+        val ownFront = current == packageName
+        // Picked past these, as one app waiting must not leave another beside it alone.
+        // The repeat gap keeps a phantom from returning every 30 s. Every beside wall
+        // needs its own whole-history read, the thing that stops a closed app whose
+        // PAUSED landed late from walling the phone. One read must not vouch for later
+        // walls: the app may close in between and its PAUSED be lost. The read is
+        // costly, so at most twice a minute per app.
+        fun waiting(app: String): Boolean {
+            val repeat = besideRepeats[app]
+            return (ownFront && repeat != null && now - repeat.lastAt < besideRepeatGap(repeat.walls - 1)) ||
+                now - (besideConfirmedAt[app] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS ||
+                historyHeldOff(app, now)
+        }
+        val settled = walled.keys.firstOrNull { it in previous && !waiting(it) }
         besideLastTick = walled.keys
         besideTick = ticks
         val pkg = settled ?: return
-        val now = SystemClock.elapsedRealtime()
         if (now - lastBesideWallAt < COVER_SETTLE_MILLIS) return
-        // Every beside wall needs its own whole-history read, the thing that stops a
-        // closed app whose PAUSED landed late from walling the phone. One read must
-        // not vouch for later walls: the app may close in between and its PAUSED be
-        // lost. The read is costly, so at most twice a minute per app; between reads
-        // nothing is walled beside, and a real app reopened there is still covered
-        // by [followWalledApp].
-        if (now - (besideConfirmedAt[pkg] ?: Long.MIN_VALUE / 2) <= BESIDE_CONFIRM_MILLIS) return
-        // Unreadable history proves nothing either way: no wall this tick, and ask
-        // again next tick.
-        // The read can walk as far back as the screen has been on, so it runs off
-        // the main thread; the tracker's state is only touched here, on it.
-        val from = tracker.confirmFrom(pkg) ?: return
-        val read = withContext(Dispatchers.IO) { runCatching { tracker.resumedIn(pkg, from) }.getOrNull() } ?: return
-        val still = tracker.settle(pkg, read)
-        // Only entries inside the window matter, so the map stays small however
-        // long the service runs.
-        besideConfirmedAt.entries.removeAll { now - it.value > BESIDE_CONFIRM_MILLIS }
-        besideConfirmedAt[pkg] = now
-        if (!still) {
-            Log.i(TAG, "$pkg was not really running beside $current")
-            // Forgotten by the tracker, so only a real reopen brings it back, and
-            // that one must be checked at once, not after the 30 s wait.
-            besideConfirmedAt.remove(pkg)
-            besideLastTick = emptySet()
-            return
+        when (confirmedOpen(pkg, current)) {
+            OpenCheck.UNKNOWN -> return
+            OpenCheck.CLOSED -> {
+                Log.i(TAG, "$pkg was not really running beside $current")
+                besideLastTick = emptySet()
+                return
+            }
+            OpenCheck.OPEN -> Unit
         }
+        // Judged again: a session may have ended or the window opened during the read.
+        val verdict = standingVerdict(pkg)
+        if (verdict == GateVerdict.ALLOW) return
         lastBesideWallAt = now
-        Log.i(TAG, "$pkg is still running beside $current -> ${walled.getValue(pkg)}")
-        wall(pkg) { wallIntent(pkg, walled.getValue(pkg), blockedLimit(pkg)) }
+        Log.i(TAG, "$pkg is still running beside $current -> $verdict")
+        if (wall(pkg) { wallIntent(pkg, verdict, blockedLimit(pkg)) } && ownFront) {
+            besideRepeats[pkg] = BesideRepeat((besideRepeats[pkg]?.walls ?: 0) + 1, now)
+        }
     }
 
     /**
@@ -1167,37 +1389,56 @@ class AppBlockService : Service() {
      * left the screen, kills its background process (2026-11-01). Recents
      * shows a thumbnail no ordinary app can blank, but a tap on a killed app
      * cold-starts it, which gives the wall the second it needs to land first.
+     *
+     * True when it just raised a wall.
      */
-    private fun followWalledApp(current: String) {
-        val pkg = coverFor ?: return popupCover.hide()
+    private fun followWalledApp(current: String): Boolean {
+        val pkg = coverFor ?: run {
+            popupCover.hide()
+            return false
+        }
         val now = SystemClock.elapsedRealtime()
         val age = now - coverWallAt
-        val resumed = tracker.isResumed(pkg)
-        // "Let me close it" ran out with the pop-up still open: the wall comes
-        // back, or the app would stay usable until the next beside check. Never
-        // over a call or an alarm: only over an ordinary app, the home screen, or
-        // WakeProof's own wall and home screen.
-        if (coverGraceUntil != 0L && now >= coverGraceUntil) {
+        var resumed = tracker.isResumed(pkg)
+        val graceOver = coverGraceUntil != 0L && now >= coverGraceUntil
+        // A pop-up left open past its grace is walled again, once its whole history
+        // says it really is open: a lost PAUSED must not hold a cover asking to close
+        // a window that is gone.
+        if (graceOver && resumed && mayLandOver(current, pkg) && !historyHeldOff(pkg, now)) {
+            val check = confirmedOpen(pkg, current)
+            // Still reading: nothing is decided yet, and the cover, the kill and the
+            // expiry below carry on as usual meanwhile.
+            if (check != OpenCheck.UNKNOWN) resumed = check == OpenCheck.OPEN
+            val verdict = if (check == OpenCheck.OPEN) standingVerdict(pkg) else GateVerdict.ALLOW
+            if (verdict != GateVerdict.ALLOW) {
+                Log.i(TAG, "$pkg still open after its grace -> $verdict")
+                lastBlockedPackage = null // not a re-entry to debounce
+                // A wall that would not rise leaves the grace pending, and the history
+                // must not be read again on every tick because of it.
+                val raised = wall(pkg) { wallIntent(pkg, verdict, blockedLimit(pkg)) }
+                if (!raised) historyBackoff[pkg] = now + BESIDE_CONFIRM_MILLIS
+                return raised
+            }
+            if (check == OpenCheck.OPEN) {
+                // Open, but no longer walled (a session ended, the window opened): a
+                // cover asking to close it would eat touches for nothing.
+                coverGraceUntil = 0L
+                coverFor = null
+                killPending = false
+                popupCover.hide()
+                return false
+            }
+            if (check != OpenCheck.UNKNOWN) coverGraceUntil = 0L
+        } else if (graceOver && !resumed) {
+            // Closed. While still open the grace stays pending: a call or an alarm in
+            // front only puts the wall off until one can land.
             coverGraceUntil = 0L
-            val frontMayBeWalledOver = when (current) {
-                pkg -> false
-                packageName -> tracker.isResumed(packageName, BlockedActivity::class.java.name) ||
-                    tracker.isResumed(packageName, LauncherActivity::class.java.name)
-                else -> current !in untouchable || current in homeApps
-            }
-            if (resumed && frontMayBeWalledOver) {
-                val verdict = standingVerdict(pkg)
-                if (verdict != GateVerdict.ALLOW) {
-                    Log.i(TAG, "$pkg still open after its grace -> $verdict")
-                    lastBlockedPackage = null // not a re-entry to debounce
-                    wall(pkg) { wallIntent(pkg, verdict, blockedLimit(pkg)) }
-                    return
-                }
-            }
         }
         val want = popupCoverWanted(
             wallAgeMillis = age,
-            ownWallInFront = current == packageName,
+            // Touch-eating over an alarm's camera or sums, it would keep the user
+            // from turning it off.
+            ownWallInFront = current == packageName && !alarmHoldsScreen(),
             walledStillResumed = resumed,
             inGrace = now < coverGraceUntil
         )
@@ -1223,6 +1464,7 @@ class AppBlockService : Service() {
                 .onFailure { Log.w(TAG, "could not stop $pkg in the background", it) }
         }
         if (age > COVER_MAX_MILLIS && !killPending) coverFor = null
+        return false
     }
 
     /**
@@ -1286,8 +1528,11 @@ class AppBlockService : Service() {
          */
         fun walledNow(packageName: String): Boolean? = instance?.walledNow(packageName)
 
-        /** This service's latest default-app reading; null while it is not running or has none yet. */
-        fun defaultApps(): DefaultApps? = instance?.lastDefaults
+        /** This service's default-app reading; null while it is not running or the first readings are not in. */
+        fun defaultApps(): DefaultApps? = instance?.takeIf { it.defaultsLoaded.isCompleted }?.lastDefaults
+
+        /** The service is running but still taking its first readings; see [applyFirstDefaults]. */
+        fun defaultsPending(): Boolean = instance?.defaultsLoaded?.isCompleted == false
 
         /** A session on another of the user's devices walls this one; false if not running. */
         fun otherSessionActive(): Boolean = instance?.otherDeviceSessionActive() ?: false
@@ -1316,14 +1561,17 @@ class AppBlockService : Service() {
         private const val CAMERA_NOTIFICATION_ID = 73
         private const val READY_TIMEOUT_MILLIS = 5_000L
         private const val DEFAULTS_RETRY_MILLIS = 2_000L
+
+        /** How long a whole-history answer may wait for the tick; a tick is [POLL_MILLIS]. */
+        private const val HISTORY_ANSWER_MILLIS = 2_000L
         private const val WALL_PREFS = "walls"
         private const val KEY_ARMED = "armed"
-        private const val BESIDE_CONFIRM_MILLIS = 30_000L
 
         /**
          * Wi-Fi sign-in pages. The clock wall says to connect to the internet, and
-         * on hotel or campus Wi-Fi that happens here, so walling it would leave no
-         * way to the network time that lifts the wall.
+         * on hotel or campus Wi-Fi that happens here, so walling it, at night too,
+         * would leave no way to the network time that lifts the wall. Only while
+         * the clock is doubted: at any other night it is a browser like the rest.
          */
         private val CAPTIVE_PORTAL_PACKAGES = setOf(
             "com.google.android.captiveportallogin",
@@ -1395,6 +1643,15 @@ class AppBlockService : Service() {
             }
         }
 
+        private fun quietNow(): Boolean = nightQuiet(
+            LocalTime.now().let { it.hour * 60 + it.minute },
+            StrictAlarm.SLOTS.maxOf { it.hour * 60 + it.minute }
+        )
+
+        private fun quietChannel() =
+            NotificationChannel(NIGHT_QUIET_CHANNEL_ID, "Bedtime (quiet)", NotificationManager.IMPORTANCE_LOW)
+                .apply { description = "Warnings held back from sounding while you sleep" }
+
         private fun wallPrefs(context: Context) = context.createDeviceProtectedStorageContext()
             .getSharedPreferences(WALL_PREFS, Context.MODE_PRIVATE)
 
@@ -1410,24 +1667,34 @@ class AppBlockService : Service() {
             val every = wallsDownAlertEvery(SIDELOADED_BUILD)
             val lastAt = prefs.getLong(KEY_ALERT_AT, 0L)
             if (!treeLost && !nagDue(lastAt, now, every)) return
+            val manager = context.getSystemService(NotificationManager::class.java)
+            // Only on a clock that can be believed: a hand-set 21:00 must not silence it.
+            val held = wallsDownRepeatHeld(treeLost, lastAt, quietNow() && runCatching { !clockUntrusted(context) }.getOrDefault(false))
+            // Overnight a repeat only makes sure the alert is there, as it may have
+            // been swiped away or lost to a reboot, and stays unstamped so that the
+            // morning's sync rings it.
+            // A lookup that throws must not cost the alert, or crash the tick that posts it.
+            if (held && runCatching { manager.activeNotifications.any { it.id == ALERT_NOTIFICATION_ID } }.getOrDefault(false)) return
             // sync posts the alert, then stopping the service may add the lost tree
             // moments later: that is an update to the same news, not a second ring.
             val justRang = treeLost && now - lastAt in 0 until ALERT_UPDATE_SILENT_MILLIS
-            prefs.edit().putLong(KEY_ALERT_AT, now).apply()
+            if (!held) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
             val text = "WakeProof lost usage access or draw-over-apps, so nothing is walled. " +
                 "Give it back to raise the walls." +
                 if (treeLost) " This focus block's tree withered." else ""
-            val manager = context.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
+            val channel = if (held) {
+                quietChannel()
+            } else {
                 NotificationChannel(
                     ALERT_CHANNEL_ID, "Walls switched off", NotificationManager.IMPORTANCE_HIGH
                 ).apply { description = "When WakeProof loses the access its walls need" }
-            )
+            }
+            manager.createNotificationChannel(channel)
             // Cancelled first so the alert rings again; [justRang] updates it in place.
             if (!justRang) manager.cancel(ALERT_NOTIFICATION_ID)
             manager.notify(
                 ALERT_NOTIFICATION_ID,
-                Notification.Builder(context, ALERT_CHANNEL_ID)
+                Notification.Builder(context, channel.id)
                     .setSmallIcon(R.drawable.ic_launcher_foreground)
                     .setContentTitle("Your walls are down")
                     .setContentText(text)

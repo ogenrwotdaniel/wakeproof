@@ -65,4 +65,82 @@ class PopupCoverTest {
             assertFalse(it.name, pinCoverWanted(userPinned = false, verdict = it))
         }
     }
+
+    private fun mayLand(front: String, alarm: Boolean = false) = wallMayLandOver(
+        front = front,
+        walled = "walled",
+        ownPackage = "own",
+        alarmOnScreen = alarm,
+        essentials = setOf("own", "dialer", "home"),
+        homes = setOf("home")
+    )
+
+    @Test
+    fun `a wall lands over ordinary apps and the home screen`() {
+        assertTrue(mayLand("ordinary"))
+        assertTrue(mayLand("home"))
+    }
+
+    @Test
+    fun `a wall never lands on a call, or on itself`() {
+        assertFalse(mayLand("dialer"))
+        assertFalse(mayLand("walled"))
+    }
+
+    @Test
+    fun `a ring holds the walls while its screen comes up`() {
+        assertTrue(alarmHoldsWalls(ringing = true, screenInFront = false, ringAgeMillis = 0L))
+        assertTrue(alarmHoldsWalls(true, false, ALARM_SCREEN_SETTLE_MILLIS - 1))
+    }
+
+    @Test
+    fun `leaving a ringing alarm's screen is still walled`() {
+        assertFalse(alarmHoldsWalls(true, false, ALARM_SCREEN_SETTLE_MILLIS))
+    }
+
+    @Test
+    fun `the alarm's screen holds them with or without the sound`() {
+        assertTrue(alarmHoldsWalls(true, true, ALARM_SCREEN_SETTLE_MILLIS))
+        assertTrue(alarmHoldsWalls(false, true, ALARM_SCREEN_SETTLE_MILLIS))
+    }
+
+    @Test
+    fun `a repeat over WakeProof's screens waits longer each time, up to a limit`() {
+        val gaps = (0..8).map(::besideRepeatGap)
+        assertEquals(BESIDE_CONFIRM_MILLIS, gaps.first())
+        assertEquals(gaps.sorted(), gaps)
+        assertEquals(COVER_MAX_MILLIS, gaps.last())
+    }
+
+    @Test
+    fun `a new resume of an app already resumed shows in its last resume`() {
+        val state = ResumedActivities()
+        state.onResumed("popup.app", "A", 1L)
+        state.onResumed("popup.app", "A", 9L)
+        assertEquals(9L, state.lastResumedAt("popup.app"))
+        assertEquals(1L, state.resumedSince("popup.app"))
+    }
+
+    @Test
+    fun `over WakeProof anything but the alarm`() {
+        assertTrue(mayLand("own"))
+        assertFalse(mayLand("own", alarm = true))
+    }
+
+    @Test
+    fun `a cap beside the front app is not read again before it could be spent`() {
+        assertEquals(20 * 60_000L, nextBesideCapReadIn(usedMillis = 10 * 60_000L, limitMillis = 30 * 60_000L))
+    }
+
+    @Test
+    fun `a cap nearly spent is still read at most twice a minute`() {
+        assertEquals(BESIDE_CONFIRM_MILLIS, nextBesideCapReadIn(usedMillis = 29 * 60_000L + 59_000L, limitMillis = 30 * 60_000L))
+        assertEquals(BESIDE_CONFIRM_MILLIS, nextBesideCapReadIn(usedMillis = 40 * 60_000L, limitMillis = 30 * 60_000L))
+    }
+
+    @Test
+    fun `only a slow verdict looks at the front app again`() {
+        assertFalse(frontMayHaveChanged(startedAt = 1_000L, endedAt = 1_000L + SLOW_VERDICT_MILLIS - 1))
+        assertTrue(frontMayHaveChanged(startedAt = 1_000L, endedAt = 1_000L + SLOW_VERDICT_MILLIS))
+    }
 }

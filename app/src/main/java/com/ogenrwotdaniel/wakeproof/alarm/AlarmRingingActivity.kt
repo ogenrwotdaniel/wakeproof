@@ -64,6 +64,18 @@ class AlarmRingingActivity : ComponentActivity() {
         }
     }
 
+    // The focused activity, not merely a resumed one: an app in a pop-up or split
+    // screen beside this one leaves it resumed, and must still be walled.
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        resumed = isTopResumedActivity
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
     // singleInstance: a second alarm's full-screen intent lands here, not in a
     // new instance — without this the stale alarm stays on screen and gets
     // marked complete instead of the one actually ringing.
@@ -72,5 +84,11 @@ class AlarmRingingActivity : ComponentActivity() {
         viewModel.setAlarmId(
             intent.getLongExtra(EXTRA_ALARM_ID, -1L), intent.getStringExtra(EXTRA_MISSION)
         )
+    }
+
+    companion object {
+        /** This screen is the focused one, known first hand; see [com.ogenrwotdaniel.wakeproof.distraction.alarmHoldsWalls]. */
+        @Volatile var resumed = false
+            private set
     }
 }

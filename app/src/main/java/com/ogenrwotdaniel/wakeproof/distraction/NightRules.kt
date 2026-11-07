@@ -50,12 +50,19 @@ fun cameraNagDue(strictHeld: Boolean, cameraGranted: Boolean, lastNagAt: Long, n
 const val CAMERA_NAG_EVERY_MILLIS = 60 * 60_000L
 
 /**
- * Pure: the camera warning lands silently from the sleep wall until the last
- * locked alarm ([lastSlotMinutes]): an hourly heads-up would only wake the user
- * it is meant to get up in the morning. It is still in the shade when they do.
+ * Pure: repeating warnings land silently from the sleep wall until the last
+ * locked alarm ([lastSlotMinutes]): a heads-up would only wake the user it is
+ * meant to get up in the morning. They are still in the shade when they do.
  */
-fun cameraNagSilent(minuteOfDay: Int, lastSlotMinutes: Int): Boolean =
+fun nightQuiet(minuteOfDay: Int, lastSlotMinutes: Int): Boolean =
     sleepWallActive(minuteOfDay) || minuteOfDay < lastSlotMinutes
+
+/**
+ * Pure: a walls-down repeat holds off ringing until morning. The first alert
+ * always rings, whatever the hour, and a lost tree is always news.
+ */
+fun wallsDownRepeatHeld(treeLost: Boolean, lastAlertAt: Long, quiet: Boolean): Boolean =
+    !treeLost && lastAlertAt != 0L && quiet
 
 /** Pure: how often the lost-grant alert returns, on the sideloaded build and on Play. */
 fun wallsDownAlertEvery(sideloaded: Boolean): Long =

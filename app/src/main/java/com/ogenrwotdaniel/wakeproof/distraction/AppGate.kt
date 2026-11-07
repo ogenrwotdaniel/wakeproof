@@ -157,9 +157,13 @@ object AppGate {
      * usage card's. Reads the defaults once for the whole list. Any thread but main.
      */
     fun gatedPackages(context: Context, packages: Collection<String>, gateBrowsers: Boolean): Set<String> {
-        val apps = readDefaultApps(context)
+        val apps = AppBlockService.defaultApps() ?: readDefaultApps(context)
+        // Unreadable: still judged, with what can be read. An empty answer here
+        // would let the launcher pin Instagram, and show a week of no gated time.
+        val essentials = apps?.essential ?: essentialPackages(context)
+        val sms = if (apps != null) apps.sms else defaultSms(context)
         val browsers = browserPackages(context)
-        return packages.filter { isGated(context, it, apps.essential, browsers, gateBrowsers, apps.sms) }.toSet()
+        return packages.filter { isGated(context, it, essentials, browsers, gateBrowsers, sms) }.toSet()
     }
 
     /** Whether [packageName] is gated, never true for an essential app. */

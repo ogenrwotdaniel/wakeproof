@@ -153,12 +153,15 @@ class WindowNotificationGuard : NotificationListenerService() {
         AppBlockService.walledNow(sbn.packageName)?.let { return it }
         val now = LocalDateTime.now()
         val minuteOfDay = now.hour * 60 + now.minute
+        // The bedtime wall (until 08:40) takes the window's start, so the real
+        // opening, not the raw window, decides what is removed.
+        val open = gatedOpenWindow(rules)
         if (!windowShutActive(
                 dayOfWeek = now.dayOfWeek,
                 minuteOfDay = minuteOfDay,
                 weekendShut = rules.weekendShut,
-                startMinutes = rules.openWindowStartMinutes,
-                endMinutes = rules.openWindowEndMinutes
+                startMinutes = open?.first ?: RULE_OFF_MINUTES,
+                endMinutes = open?.second ?: RULE_OFF_MINUTES
             )
         ) {
             return false

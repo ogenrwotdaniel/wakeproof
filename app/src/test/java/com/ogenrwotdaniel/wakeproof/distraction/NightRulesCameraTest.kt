@@ -37,8 +37,8 @@ class NightRulesCameraTest {
 
     @Test
     fun `the camera warning is quiet from the sleep wall until the last locked alarm`() {
-        val lastSlot = 5 * 60 + 30
-        assertTrue(nightQuiet(minuteOfDay = 20 * 60, lastSlotMinutes = lastSlot))
+        val lastSlot = 6 * 60 + 5
+        assertTrue(nightQuiet(minuteOfDay = 21 * 60, lastSlotMinutes = lastSlot))
         assertTrue(nightQuiet(minuteOfDay = 2 * 60, lastSlotMinutes = lastSlot))
         assertTrue(nightQuiet(minuteOfDay = 4 * 60, lastSlotMinutes = lastSlot))
         assertFalse(nightQuiet(minuteOfDay = lastSlot, lastSlotMinutes = lastSlot))

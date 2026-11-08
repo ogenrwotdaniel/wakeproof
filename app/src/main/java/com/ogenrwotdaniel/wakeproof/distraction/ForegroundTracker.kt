@@ -28,12 +28,15 @@ class ResumedActivities {
     private val lastResumedAt = mutableMapOf<String, Long>()
     /** When each package last went from nothing resumed to something. */
     private val resumedSince = mutableMapOf<String, Long>()
+    /** When each resumed activity last resumed, so a stale one cannot pass for the newest. */
+    private val classResumedAt = mutableMapOf<Pair<String, String>, Long>()
 
     fun onResumed(packageName: String, className: String, at: Long) {
         val pkg = AppGate.effectivePackage(packageName, className)
         if (pkg !in resumed) resumedSince[pkg] = at
         resumed.getOrPut(pkg) { mutableSetOf() } += className
         lastResumedAt[pkg] = at
+        classResumedAt[pkg to className] = at
     }
 
     /** PAUSED, STOPPED and DESTROYED all mean the same here: no longer in front. */
@@ -41,6 +44,7 @@ class ResumedActivities {
         val pkg = AppGate.effectivePackage(packageName, className)
         val set = resumed[pkg] ?: return
         set -= className
+        classResumedAt -= pkg to className
         if (set.isEmpty()) resumed -= pkg
     }
 
@@ -58,6 +62,14 @@ class ResumedActivities {
     fun isResumed(packageName: String, className: String): Boolean =
         resumed[packageName]?.contains(className) == true
 
+    /**
+     * The activity of [packageName] that resumed last, of those still resumed.
+     * An activity whose PAUSED was lost stays in the set, but stops being the
+     * newest as soon as the app shows another screen.
+     */
+    fun newestClass(packageName: String): String? =
+        resumed[packageName]?.maxByOrNull { classResumedAt[packageName to it] ?: 0L }
+
     /** When [packageName] last resumed; 0 when never seen. */
     fun lastResumedAt(packageName: String): Long = lastResumedAt[packageName] ?: 0L
 
@@ -70,6 +82,7 @@ class ResumedActivities {
     /** Drops [packageName] as no longer resumed. */
     fun forget(packageName: String) {
         resumed -= packageName
+        classResumedAt.keys.removeAll { it.first == packageName }
     }
 
     /** Everything resumed now, the app in front included. */
@@ -81,6 +94,7 @@ class ResumedActivities {
      */
     fun clear() {
         resumed.clear()
+        classResumedAt.clear()
         lastResumedAt.clear()
         resumedSince.clear()
     }
@@ -165,6 +179,9 @@ class ForegroundTracker(private val usm: UsageStatsManager) {
     /** As of the last [current] call; see [ResumedActivities.isResumed]. */
     fun isResumed(packageName: String, className: String): Boolean =
         state.isResumed(packageName, className)
+
+    /** As of the last [current] call; see [ResumedActivities.newestClass]. */
+    fun newestClass(packageName: String): String? = state.newestClass(packageName)
 
     /** For when nothing can be resumed, such as the screen being off. */
     fun forgetResumed() = state.clear()

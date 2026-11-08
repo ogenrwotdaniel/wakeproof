@@ -24,7 +24,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,16 +46,15 @@ import com.ogenrwotdaniel.wakeproof.data.DayUsage
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
-import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
 import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
 import com.ogenrwotdaniel.wakeproof.data.WallDay
-import com.ogenrwotdaniel.wakeproof.distraction.PendingRule
-import com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF
-import com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.RULE_ON
+import com.ogenrwotdaniel.wakeproof.distraction.BEDTIME_END_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_START_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
+import com.ogenrwotdaniel.wakeproof.distraction.gatedOpenWindow
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
 import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
@@ -81,7 +79,6 @@ fun UsageScreen(
     val subjectMinutes by viewModel.subjectMinutes.collectAsStateWithLifecycle()
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
-    val pendingChanges by viewModel.pendingChanges.collectAsStateWithLifecycle()
     val studyTime by viewModel.studyTime.collectAsStateWithLifecycle()
     val studyPackages by viewModel.studyPackages.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
@@ -90,12 +87,10 @@ fun UsageScreen(
     var limitDialogFor by remember { mutableStateOf<InstalledApp?>(null) }
     var showAppPicker by remember { mutableStateOf(false) }
     val wallRules by viewModel.wallRules.collectAsStateWithLifecycle()
-    val wallPending by viewModel.wallPending.collectAsStateWithLifecycle()
     val wallWeek by viewModel.wallWeek.collectAsStateWithLifecycle()
     val otherProfileApps by viewModel.otherProfileApps.collectAsStateWithLifecycle()
     val dndAccess by viewModel.dndAccess.collectAsStateWithLifecycle()
     val notificationAccess by viewModel.notificationAccess.collectAsStateWithLifecycle()
-    var editingRule by remember { mutableStateOf<WallRule?>(null) }
     val context = LocalContext.current
 
     LifecycleResumeEffect(Unit) {
@@ -279,24 +274,12 @@ fun UsageScreen(
                                         MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                pendingChanges[capped.packageName]?.let { change ->
-                                    Text(
-                                        text = pendingLabel(context, change),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.tertiary
-                                    )
-                                }
-                            }
-                            if (capped.packageName in pendingChanges) {
-                                TextButton(
-                                    onClick = { viewModel.cancelPendingLimit(capped.packageName) }
-                                ) { Text("Keep") }
                             }
                             TextButton(
                                 onClick = {
                                     limitDialogFor = InstalledApp(capped.packageName, capped.label)
                                 }
-                            ) { Text("Edit") }
+                            ) { Text("Tighten") }
                         }
                     }
                     if (limitedApps.isEmpty()) {
@@ -314,8 +297,8 @@ fun UsageScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Limit another app…") }
                     Text(
-                        text = "Loosening or removing a limit waits a week. Tightening one " +
-                            "applies at once.",
+                        text = "🔒 Limits are fixed once set: they can be tightened at once " +
+                            "but never raised, softened or removed.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -325,12 +308,8 @@ fun UsageScreen(
                     }
                     WallRulesSection(
                         rules = wallRules,
-                        pending = wallPending,
                         dndAccess = dndAccess,
                         notificationAccess = notificationAccess,
-                        onToggle = { rule, on -> viewModel.requestRule(rule, if (on) RULE_ON else RULE_OFF) },
-                        onEdit = { editingRule = it },
-                        onKeep = viewModel::cancelRulePending,
                         onGrantDnd = {
                             context.startActivity(
                                 Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
@@ -398,25 +377,12 @@ fun UsageScreen(
         LimitDialog(
             app = app,
             currentLimit = limits[app.packageName],
-            pending = pendingChanges[app.packageName],
             canEnforceBlocks = viewModel.canEnforceBlocks(),
             onSet = { minutes, mode ->
                 viewModel.setLimit(app.packageName, minutes, mode)
                 limitDialogFor = null
             },
             onDismiss = { limitDialogFor = null }
-        )
-    }
-
-    editingRule?.let { rule ->
-        RuleValueDialog(
-            rule = rule,
-            current = wallRules.value(rule),
-            onSet = { value ->
-                viewModel.requestRule(rule, value)
-                editingRule = null
-            },
-            onDismiss = { editingRule = null }
         )
     }
 
@@ -438,58 +404,44 @@ fun UsageScreen(
 }
 
 /**
- * "Becomes 60 min · Nudge on Thu 5 Nov 09:12" — when a queued loosening lands, in the
- * phone's own clock format.
- */
-private fun pendingLabel(context: android.content.Context, change: PendingLimitChange): String {
-    val what = change.limit?.let {
-        "becomes ${it.minutes} min · ${it.mode.name.lowercase().replaceFirstChar(Char::uppercase)}"
-    } ?: "limit removed"
-    return "⌛ ${what.replaceFirstChar(Char::uppercase)} on ${landsAt(context, change.effectiveAtMillis)}"
-}
-
-/**
- * "Thu 5 Nov 09:12" for [millis], in the phone's own clock format. Carries the
- * date because a week-long wait makes a bare weekday ambiguous.
- */
-private fun landsAt(context: android.content.Context, millis: Long): String {
-    val at = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
-    val day = at.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.getDefault()))
-    return "$day ${formatAlarmTime(context, at.hour, at.minute)}"
-}
-
-/**
- * Slider dialog for one app's daily cap. Tightening applies now; loosening or
- * removing it is queued for a week — see [DistractionLimitRepository.requestLimit].
+ * Slider dialog for one app's daily cap. Only stricter caps can be picked: the
+ * slider stops at the current minutes, Nudge is shut once the cap blocks, and
+ * there is no Remove — see [DistractionLimitRepository.requestLimit].
  */
 @Composable
 private fun LimitDialog(
     app: InstalledApp,
     currentLimit: AppLimit?,
-    pending: PendingLimitChange?,
     canEnforceBlocks: Boolean,
-    onSet: (Int?, LimitMode) -> Unit,
+    onSet: (Int, LimitMode) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
-    var minutes by remember { mutableFloatStateOf((currentLimit?.minutes ?: 30).toFloat()) }
+    val maxMinutes = (currentLimit?.minutes ?: MAX_LIMIT_MINUTES).coerceIn(MIN_LIMIT_MINUTES, MAX_LIMIT_MINUTES)
+    var minutes by remember { mutableFloatStateOf(minOf(currentLimit?.minutes ?: 30, maxMinutes).toFloat()) }
     var mode by remember { mutableStateOf(currentLimit?.mode ?: LimitMode.NUDGE) }
+    val loosening = DistractionLimitRepository.isLoosening(currentLimit, AppLimit(minutes.toInt(), mode))
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Daily limit — ${app.label}") },
         text = {
             Column {
                 Text("${minutes.toInt()} min per day.")
-                Slider(
-                    value = minutes,
-                    onValueChange = { minutes = it },
-                    valueRange = 10f..240f
-                )
+                // A cap already at the floor has nothing left to slide to (and an
+                // empty range would throw).
+                if (maxMinutes > MIN_LIMIT_MINUTES) {
+                    Slider(
+                        value = minutes,
+                        onValueChange = { minutes = it },
+                        valueRange = MIN_LIMIT_MINUTES.toFloat()..maxMinutes.toFloat()
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = mode == LimitMode.NUDGE,
                         onClick = { mode = LimitMode.NUDGE },
-                        label = { Text("Nudge") }
+                        label = { Text("Nudge") },
+                        // Block → Nudge is a loosening.
+                        enabled = currentLimit?.mode != LimitMode.BLOCK
                     )
                     FilterChip(
                         selected = mode == LimitMode.BLOCK,
@@ -512,28 +464,13 @@ private fun LimitDialog(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
                 )
-                val loosening = DistractionLimitRepository.isLoosening(
-                    currentLimit, AppLimit(minutes.toInt(), mode)
+                Text(
+                    text = "🔒 Permanent: once set, this limit can only be tightened. It can " +
+                        "never be raised, switched back to Nudge or removed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
-                if (loosening || pending != null) {
-                    Text(
-                        text = buildString {
-                            if (loosening) {
-                                append("This loosens the limit, so it waits a week before it ")
-                                append("takes effect. Until then the current ")
-                                append("${currentLimit?.minutes} min cap keeps applying. ")
-                                append("Tightening a limit always applies at once.")
-                            }
-                            if (pending != null) {
-                                if (loosening) append("\n\n")
-                                append("Already queued: ${pendingLabel(context, pending)}.")
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
                 if (!canEnforceBlocks) {
                     Text(
                         text = "Blocking needs both usage access and “display over other " +
@@ -546,23 +483,14 @@ private fun LimitDialog(
             }
         },
         confirmButton = {
-            val loosening = DistractionLimitRepository.isLoosening(
-                currentLimit, AppLimit(minutes.toInt(), mode)
-            )
-            TextButton(onClick = { onSet(minutes.toInt(), mode) }) {
-                Text(if (loosening) "Set in 7 days" else "Set")
-            }
+            TextButton(onClick = { onSet(minutes.toInt(), mode) }, enabled = !loosening) { Text("Set") }
         },
-        dismissButton = {
-            Row {
-                if (currentLimit != null) {
-                    TextButton(onClick = { onSet(null, mode) }) { Text("Remove in 7 days") }
-                }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+private const val MIN_LIMIT_MINUTES = 10
+private const val MAX_LIMIT_MINUTES = 240
 
 private fun formatMinutes(minutes: Long): String =
     if (minutes >= 60) "%dh %02dm".format(minutes / 60, minutes % 60) else "${minutes}m"
@@ -664,19 +592,15 @@ private fun UsageWeekChart(week: List<DayUsage>, modifier: Modifier = Modifier) 
 }
 
 /**
- * The rules in front of the waiting apps. Same contract as a limit: switching
- * one on, or making it stricter, is immediate; anything looser waits a week,
- * and the row says when it lands.
+ * The walls over gated apps, read-only: every one is fixed in code
+ * ([com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository]), so the rows
+ * carry no switch and no Edit, only the grants a wall needs to work.
  */
 @Composable
 private fun WallRulesSection(
     rules: WallRules,
-    pending: Map<WallRule, PendingRule>,
     dndAccess: Boolean,
     notificationAccess: Boolean,
-    onToggle: (WallRule, Boolean) -> Unit,
-    onEdit: (WallRule) -> Unit,
-    onKeep: (WallRule) -> Unit,
     onGrantDnd: () -> Unit,
     onGrantNotifications: () -> Unit
 ) {
@@ -686,53 +610,63 @@ private fun WallRulesSection(
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    WallRule.entries.forEach { rule ->
+    // Earn-the-feed only acts with no open window, and the window is fixed on.
+    WallRule.entries.filter { it != WallRule.EARN_THE_FEED }.forEach { rule ->
         val value = rules.value(rule)
-        val switchable = rule !in NUMBER_RULES
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(text = ruleTitle(rule, value, context), style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    text = ruleSubtitle(rule),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (rule == WallRule.SESSION_DND && value != RULE_OFF && !dndAccess) {
-                    TextButton(onClick = onGrantDnd) { Text("Allow Do Not Disturb access") }
-                }
-                if (rule == WallRule.OPEN_WINDOW_START_MINUTES && value != RULE_OFF_MINUTES &&
-                    !notificationAccess
-                ) {
-                    TextButton(onClick = onGrantNotifications) {
-                        Text("Allow notification access to hide walled apps' notifications")
-                    }
-                }
-                pending[rule]?.let { change ->
-                    Text(
-                        text = "⌛ ${pendingRuleText(rule, change.value, context)} on " +
-                            landsAt(context, change.effectiveAtMillis),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
+        Column(Modifier.fillMaxWidth()) {
+            Text(text = "🔒 " + ruleTitle(rule, value, context), style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = ruleSubtitle(rule, context),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (rule == WallRule.OPEN_WINDOW_END_MINUTES) {
+                gatedOpenText(rules, context)?.let {
+                    Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
             }
-            if (rule in pending) TextButton(onClick = { onKeep(rule) }) { Text("Keep") }
-            if (switchable) {
-                Switch(checked = value != RULE_OFF, onCheckedChange = { onToggle(rule, it) })
-            } else {
-                TextButton(onClick = { onEdit(rule) }) { Text("Edit") }
+            if (rule == WallRule.SESSION_DND && !dndAccess) {
+                TextButton(onClick = onGrantDnd) { Text("Allow Do Not Disturb access") }
+            }
+            if (rule == WallRule.OPEN_WINDOW_START_MINUTES && !notificationAccess) {
+                TextButton(onClick = onGrantNotifications) {
+                    Text("Allow notification access to hide walled apps' notifications")
+                }
             }
         }
     }
+    // Fixed in code (NightRules) like the rest.
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = "🔒 Night wall ${formatAlarmTime(context, SLEEP_START_MINUTES / 60, SLEEP_START_MINUTES % 60)}" +
+                "–${formatAlarmTime(context, SLEEP_END_MINUTES / 60, SLEEP_END_MINUTES % 60)}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Every app but calls, the home screen, Settings, Clock, Calendar, WakeProof and " +
+                "a running focus session's apps is shut.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
     Text(
-        text = "Turning a wall off or loosening it waits a week. Tightening applies at once.",
+        text = "Every wall is fixed: none can be moved, loosened or turned off from the phone.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+}
+
+/**
+ * What the open window really leaves once the bedtime wall (until 08:40) takes
+ * its share, or null when the window is off. Without it a window ending before
+ * 08:40 looks open and never is.
+ */
+private fun gatedOpenText(rules: WallRules, context: android.content.Context): String? {
+    val (opens, closes) = gatedOpenWindow(rules) ?: return null
+    val days = if (rules.weekendShut) "Monday to Thursday" else "every day"
+    fun clock(m: Int) = formatAlarmTime(context, m / 60, m % 60)
+    return if (opens >= closes) "Gated apps never open: the bedtime wall covers the whole window."
+    else "Gated apps are open ${clock(opens)}–${clock(closes)}, $days."
 }
 
 private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Context): String = when (rule) {
@@ -750,120 +684,20 @@ private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Conte
         "Open window ends ${formatAlarmTime(context, value / 60, value % 60)}"
 }
 
-/** Rules that are a number, edited with a slider rather than switched. */
-private val NUMBER_RULES = setOf(
-    WallRule.BEDTIME_START_MINUTES,
-    WallRule.OPEN_WINDOW_START_MINUTES,
-    WallRule.OPEN_WINDOW_END_MINUTES
-)
-
-private fun ruleSubtitle(rule: WallRule): String = when (rule) {
+private fun ruleSubtitle(rule: WallRule, context: android.content.Context): String = when (rule) {
     WallRule.GATE_BROWSERS ->
         "Chrome, Samsung Internet and other browsers follow the same schedule as social apps."
     WallRule.WEEKEND_SHUT ->
         "Gated apps stay completely shut from Friday through Sunday, reopening Monday."
     WallRule.EARN_THE_FEED ->
         "When no open window is set, gated apps stay shut until today's first focus block."
-    WallRule.BEDTIME_START_MINUTES -> "Gated apps shut until your morning alarm is verified."
+    WallRule.BEDTIME_START_MINUTES ->
+        "Gated apps shut until ${formatAlarmTime(context, BEDTIME_END_MINUTES / 60, BEDTIME_END_MINUTES % 60)} the next morning."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
     WallRule.OPEN_WINDOW_START_MINUTES ->
         "Monday to Thursday gated apps open at this time; outside the window their notifications are removed."
     WallRule.OPEN_WINDOW_END_MINUTES ->
         "Inside the Monday–Thursday window gated apps open directly with no countdown wait."
-}
-
-private fun pendingRuleText(rule: WallRule, value: Int, context: android.content.Context): String =
-    when (rule) {
-        WallRule.BEDTIME_START_MINUTES ->
-            if (value < 0) "Bedtime wall off"
-            else "Moves to ${formatAlarmTime(context, value / 60, value % 60)}"
-        WallRule.OPEN_WINDOW_START_MINUTES ->
-            if (value < 0) "Window off"
-            else "Opens at ${formatAlarmTime(context, value / 60, value % 60)}"
-        WallRule.OPEN_WINDOW_END_MINUTES ->
-            "Closes at ${formatAlarmTime(context, value / 60, value % 60)}"
-        else -> if (value == RULE_OFF) "Turns off" else "Turns on"
-    }
-
-/** Slider for the rules that are a number rather than a switch. */
-@Composable
-private fun RuleValueDialog(
-    rule: WallRule,
-    current: Int,
-    onSet: (Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    fun clock(minutes: Int) = formatAlarmTime(context, minutes / 60, minutes % 60)
-    val range = when (rule) {
-        WallRule.BEDTIME_START_MINUTES -> (12 * 60f)..(23 * 60f + 45)
-        WallRule.OPEN_WINDOW_START_MINUTES -> 0f..(23 * 60f + 30)
-        else -> 15f..(23 * 60f + 45)
-    }
-    // The window is set to the minute the user asked for (08:10), so it moves in 5s:
-    // a quarter-hour slider would round 08:10 down to 08:00 on Set, a loosening.
-    val step = when (rule) {
-        WallRule.OPEN_WINDOW_START_MINUTES,
-        WallRule.OPEN_WINDOW_END_MINUTES -> 5
-        else -> 15
-    }
-    val fallback = when (rule) {
-        WallRule.BEDTIME_START_MINUTES -> 17 * 60
-        else -> rule.default
-    }
-    val turnedOff = current < 0
-    var picked by remember {
-        mutableFloatStateOf((if (turnedOff) fallback else current).toFloat().coerceIn(range))
-    }
-    val value = (picked / step).toInt() * step
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                when (rule) {
-                    WallRule.BEDTIME_START_MINUTES -> "Bedtime wall"
-                    WallRule.OPEN_WINDOW_START_MINUTES -> "Open window starts"
-                    else -> "Open window ends"
-                }
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    when (rule) {
-                        WallRule.BEDTIME_START_MINUTES ->
-                            "From ${clock(value)} until your morning alarm is verified."
-                        WallRule.OPEN_WINDOW_START_MINUTES ->
-                            "Monday to Thursday gated apps open at ${clock(value)}."
-                        else -> "Gated apps shut again at ${clock(value)}."
-                    }
-                )
-                Slider(
-                    value = picked,
-                    onValueChange = { picked = it },
-                    valueRange = range,
-                    steps = ((range.endInclusive - range.start) / step).toInt() - 1
-                )
-                Text(
-                    text = "Anything that leaves more time open waits a week. Less applies now.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSet(value) }) { Text("Set") } },
-        dismissButton = {
-            Row {
-                // The window's end has no "off": switching the window off is its start's job.
-                if (rule != WallRule.OPEN_WINDOW_END_MINUTES) {
-                    TextButton(onClick = { onSet(RULE_OFF_MINUTES) }) {
-                        Text("Turn off in 7 days")
-                    }
-                }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
-        }
-    )
 }
 
 /** Gated apps WakeProof cannot see, because they live in another profile. */

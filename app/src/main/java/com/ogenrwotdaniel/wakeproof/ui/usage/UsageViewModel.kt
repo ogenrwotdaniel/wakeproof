@@ -1,8 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.usage
 
 import android.widget.Toast
-import com.ogenrwotdaniel.wakeproof.distraction.CLOCK_REFUSAL_MESSAGE
-import com.ogenrwotdaniel.wakeproof.distraction.ChangeRequest
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.CachedReport
@@ -11,7 +9,6 @@ import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import android.content.Context
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
-import com.ogenrwotdaniel.wakeproof.data.PendingLimitChange
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.StatsRepository
 import com.ogenrwotdaniel.wakeproof.data.TodayStatus
@@ -29,8 +26,6 @@ import com.ogenrwotdaniel.wakeproof.data.sync.StudyUsageSync
 import com.ogenrwotdaniel.wakeproof.data.WallDay
 import com.ogenrwotdaniel.wakeproof.distraction.AppBlockService
 import com.ogenrwotdaniel.wakeproof.distraction.AppGate
-import com.ogenrwotdaniel.wakeproof.distraction.PendingRule
-import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
@@ -102,26 +97,9 @@ class UsageViewModel @Inject constructor(
         wall = _wallWeek.value
     )
 
-    /** The rules in front of the waiting apps, and the loosenings queued behind them. */
+    /** The walls over gated apps: fixed, shown for reading only. */
     val wallRules: StateFlow<WallRules> = wallRulesRepository.rules
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WallRules())
-    val wallPending: StateFlow<Map<WallRule, PendingRule>> = wallRulesRepository.pending
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
-
-    /** Stricter applies now; looser waits the week, like a limit. */
-    fun requestRule(rule: WallRule, value: Int) {
-        viewModelScope.launch { sayIfRefused(wallRulesRepository.request(rule, value)) }
-    }
-
-    private fun sayIfRefused(request: ChangeRequest) {
-        if (request == ChangeRequest.REFUSED_CLOCK) {
-            Toast.makeText(context, CLOCK_REFUSAL_MESSAGE, Toast.LENGTH_LONG).show()
-        }
-    }
-
-    fun cancelRulePending(rule: WallRule) {
-        viewModelScope.launch { wallRulesRepository.cancelPending(rule) }
-    }
 
     private val _wallWeek = MutableStateFlow<List<WallDay>>(emptyList())
 
@@ -220,21 +198,15 @@ class UsageViewModel @Inject constructor(
     fun canEnforceBlocks(): Boolean =
         usageStatsRepository.hasAccess() && android.provider.Settings.canDrawOverlays(context)
 
-    /** Queued loosenings, so the list can say when each one lands. */
-    val pendingChanges: StateFlow<Map<String, PendingLimitChange>> = limitRepository.pendingChanges
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
-
-    /** Stricter changes apply now; looser ones wait out the cooling-off. */
+    /** Stricter caps apply now; a looser one is refused, and the toast says so. */
     fun setLimit(packageName: String, minutes: Int?, mode: LimitMode = LimitMode.NUDGE) {
         viewModelScope.launch {
-            sayIfRefused(limitRepository.requestLimit(packageName, minutes, mode))
-            // Picking up (or dropping) the last blocked app starts/stops the guard.
+            if (!limitRepository.requestLimit(packageName, minutes, mode)) {
+                Toast.makeText(context, "Limits can only be tightened.", Toast.LENGTH_LONG).show()
+            }
+            // Picking up the first blocked app starts the guard.
             AppBlockService.sync(context)
         }
-    }
-
-    fun cancelPendingLimit(packageName: String) {
-        viewModelScope.launch { limitRepository.cancelPending(packageName) }
     }
 
     /** Focus minutes per subject over the last 7 days. */
@@ -266,10 +238,6 @@ class UsageViewModel @Inject constructor(
 
     /** Called on every resume: the user may have just granted usage access. */
     fun refresh() {
-        viewModelScope.launch {
-            if (limitRepository.promoteDuePending()) AppBlockService.sync(context)
-            wallRulesRepository.promoteDue()
-        }
         _dndAccess.value = SessionDnd.hasAccess(context)
         _notificationAccess.value = WindowNotificationGuard.hasAccess(context)
         viewModelScope.launch {

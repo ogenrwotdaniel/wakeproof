@@ -9,6 +9,7 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
  * The LOCKED alarms (2026-11-04, the user's request: "my first alarm at 3am,
  * no way around, can't be turned off on the phone, surviving restart too like
  * focus timing"; a second at 05:30 the same night, and both at 25 pushups).
+ * Now 04:00 and 06:05 at 10 pushups ([SLOTS], [REPS]; 2026-11-08).
  *
  * Each of [SLOTS] pins one alarm on the ringing device to its time, pushups,
  * every day, enabled. Nothing on the phone can change it — the Settings rows
@@ -28,10 +29,31 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
  */
 object StrictAlarm {
     /** One locked alarm's time. */
-    data class Slot(val hour: Int, val minute: Int)
+    data class Slot(val hour: Int, val minute: Int) {
+        val minuteOfDay: Int get() = hour * 60 + minute
+    }
 
-    /** In order; slot 0 keeps the storage keys from when there was only one. */
-    val SLOTS = listOf(Slot(3, 0), Slot(5, 30))
+    /**
+     * In order; slot 0 keeps the storage keys from when there was only one.
+     * 04:00 and 06:05 since 2026-11-08 (were 03:00 and 05:30), with the night
+     * wall moved to 21:00–04:00 to match. Adopted rows follow by themselves:
+     * [strictAlarmFixed] rewrites their time at the next reconcile.
+     */
+    val SLOTS = listOf(Slot(4, 0), Slot(6, 5))
+
+    /**
+     * Former [SLOTS]. Copies of the old locked pair that sync back (from before
+     * a reinstall) sit on these minutes, and only [strictAlarmDuplicates] kept
+     * them from ringing; without this they would start ringing at 03:00 and
+     * 05:30 with snooze and emergency dismiss the day the slots moved.
+     */
+    val RETIRED_SLOTS = listOf(Slot(3, 0), Slot(5, 30))
+
+    /** Minutes of the day an unlocked pushup alarm is kept silent on: current and retired slots. */
+    val SILENT_MINUTES: Set<Int> = (SLOTS + RETIRED_SLOTS).map { it.minuteOfDay }.toSet()
+
+    /** The last locked alarm's minute of the day: night quiet and the charge nag run until it. */
+    val lastSlotMinute: Int get() = SLOTS.maxOf { it.minuteOfDay }
 
     const val REPS = com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
     const val MATH_FALLBACK_PROBLEMS = 10
@@ -124,11 +146,14 @@ fun shouldResumeRing(alarmId: Long, ringingAt: Long, now: Long): Boolean =
 
 /**
  * Pure: the locked alarm as it must be, or null when [alarm] already is.
- * Label and history are kept; only what decides when and how it rings is
+ * Label and history are kept, except a "Locked H:MM" label, which follows
+ * the slot's time; only what decides when and how it rings is
  * pinned. [now] restamps it so the correction wins the sync merge.
  */
 fun strictAlarmFixed(alarm: Alarm, slot: StrictAlarm.Slot, now: Long): Alarm? {
     val fixed = alarm.copy(
+        // The created label names its time; a moved slot must not keep the old one.
+        label = if (alarm.label in STRICT_LABELS) strictLabel(slot) else alarm.label,
         hour = slot.hour,
         minute = slot.minute,
         type = StrictAlarm.TYPE,
@@ -148,11 +173,36 @@ fun strictAlarmCandidate(alarms: List<Alarm>, taken: Set<String> = emptySet()): 
     alarms.filter { it.enabled && !it.deleted && it.type == StrictAlarm.TYPE && it.syncId !in taken }
         .minWithOrNull(compareBy<Alarm>({ it.hour }, { it.minute }))
 
-/** Pure: unlocked pushup alarms standing on a locked slot's minute. None before a slot is locked. */
+
+/** The label a created locked alarm carries, e.g. "Locked 4:00". */
+// Locale.ROOT: the label is compared with [STRICT_LABELS], so it must not take local digits.
+fun strictLabel(slot: StrictAlarm.Slot): String =
+    String.format(java.util.Locale.ROOT, "Locked %d:%02d", slot.hour, slot.minute)
+
+/**
+ * Labels WakeProof wrote on a locked alarm, for any slot past or present.
+ * Exact strings rather than a pattern, so a "Locked 5:15" the user typed is
+ * kept. An old label written with local digits is not recognised and stays.
+ */
+private val STRICT_LABELS: Set<String> =
+    (StrictAlarm.SLOTS + StrictAlarm.RETIRED_SLOTS).map(::strictLabel).toSet()
+
+/**
+ * Whether [label] is one WakeProof wrote. The locked row shows it as plain
+ * "Locked", because its stored "H:MM" ignores the phone's 12/24-hour setting
+ * and the row already shows the time through formatAlarmTime. Only there: an
+ * old copy synced back as an ordinary row must not claim to be locked.
+ */
+fun isStrictLabel(label: String): Boolean = label in STRICT_LABELS
+
+/**
+ * Pure: unlocked pushup alarms standing on a locked slot's minute, current or
+ * retired ([StrictAlarm.RETIRED_SLOTS]). None before a slot is locked.
+ */
 fun strictAlarmDuplicates(alarms: List<Alarm>, locked: Set<String>): List<Alarm> =
     if (locked.isEmpty()) emptyList() else alarms.filter { alarm ->
         !alarm.deleted && alarm.type == StrictAlarm.TYPE && alarm.syncId !in locked &&
-            StrictAlarm.SLOTS.any { it.hour == alarm.hour && it.minute == alarm.minute }
+            (alarm.hour * 60 + alarm.minute) in StrictAlarm.SILENT_MINUTES
     }
 
 /** The share of the alarm stream's maximum a locked alarm rings at; see [strictStreamIndex]. */

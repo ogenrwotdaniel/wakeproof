@@ -75,3 +75,32 @@ def test_cloud_decision():
     assert cloud_needed(peers, {"phone"}) is False
     assert cloud_needed(peers, set()) is True
     assert cloud_needed(set(), set()) is True  # nobody known: use the cloud
+
+
+def test_one_row_per_device_prefers_the_paired_install():
+    from clipsync.rules import one_per_device
+    peers = [
+        {"installId": "old-comm", "name": "Daniel's Communication", "lastSeenMs": 9_000, "lan": False},
+        {"installId": "new-comm", "name": "Daniel's Communication", "lastSeenMs": 5_000, "lan": True},
+        {"installId": "new-lib", "name": "Daniel's Library ", "lastSeenMs": 4_000, "lan": True},
+        {"installId": "old-lib", "name": "daniel's library", "lastSeenMs": 1_000, "lan": False},
+        {"installId": "x", "name": "", "lastSeenMs": 0},
+        {"installId": "y", "name": "", "lastSeenMs": 0},
+    ]
+    rows = one_per_device(peers, {"new-comm", "new-lib"})
+    assert [(r["installId"], r["name"]) for r in rows] == [
+        ("new-comm", "Daniel's Communication"), ("new-lib", "Daniel's Library"), ("x", ""), ("y", "")]
+
+
+def test_one_row_per_device_without_pairing_keeps_the_freshest():
+    from clipsync.rules import one_per_device
+    peers = [{"installId": "a", "name": "Tab", "lastSeenMs": 1}, {"installId": "b", "name": "Tab", "lastSeenMs": 2}]
+    assert [r["installId"] for r in one_per_device(peers, set())] == ["b"]
+
+
+def test_an_unpaired_reinstall_on_the_lan_shows_beside_its_paired_install():
+    from clipsync.rules import one_per_device
+    peers = [{"installId": "old", "name": "Tab", "lastSeenMs": 1},
+             {"installId": "new", "name": "Tab", "lastSeenMs": 9, "lan": True},
+             {"installId": "p1", "name": "Twin", "lastSeenMs": 5}, {"installId": "p2", "name": "Twin", "lastSeenMs": 4}]
+    assert sorted(r["installId"] for r in one_per_device(peers, {"old", "p1", "p2"})) == ["new", "old", "p1", "p2"]

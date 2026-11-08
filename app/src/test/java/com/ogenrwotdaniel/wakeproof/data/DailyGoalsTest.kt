@@ -18,11 +18,13 @@ class DailyGoalsTest {
         type: AlarmType,
         daysMask: Int = AlarmDays.EVERY_DAY,
         enabled: Boolean = true,
-        deleted: Boolean = false
+        deleted: Boolean = false,
+        hour: Int = 6,
+        minute: Int = 0
     ) = Alarm(
         type = type,
-        hour = 6,
-        minute = 0,
+        hour = hour,
+        minute = minute,
         enabled = enabled,
         daysMask = daysMask,
         deleted = deleted
@@ -48,6 +50,21 @@ class DailyGoalsTest {
         // The bug this replaced: one pushup and two waters scored against a
         // hardcoded three-water target, so the day could never be completed.
         assertEquals(DailyGoals(pushupTarget = 1, waterTarget = 2), goals)
+    }
+
+    @Test
+    fun `old copies of the locked pair ask for no extra pushups`() {
+        val goals = dailyGoalsFrom(
+            listOf(
+                alarm(AlarmType.PUSHUP, hour = 4, minute = 0), alarm(AlarmType.PUSHUP, hour = 6, minute = 5),
+                // Copies synced back from a reinstall, and the pair before the move.
+                alarm(AlarmType.PUSHUP, hour = 4, minute = 0), alarm(AlarmType.PUSHUP, hour = 3, minute = 0),
+                alarm(AlarmType.PUSHUP, hour = 5, minute = 30),
+                alarm(AlarmType.PUSHUP, hour = 7, minute = 0)
+            ),
+            DayOfWeek.MONDAY
+        )
+        assertEquals(3, goals.pushupTarget)
     }
 
     @Test

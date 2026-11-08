@@ -7,4 +7,18 @@
     <!-- Declared so "Select photos" reports what it is, a refusal of full access.
          Undeclared, Android answers "granted", then takes it back in the background. -->
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <application>
+        <!-- Uninstall lock: a plain device admin, never device owner. See admin/UninstallLock.kt. -->
+        <receiver
+            android:name=".admin.WakeProofAdmin"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>

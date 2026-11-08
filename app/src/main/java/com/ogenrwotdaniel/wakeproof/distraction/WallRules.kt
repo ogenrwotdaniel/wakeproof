@@ -3,12 +3,8 @@ package com.ogenrwotdaniel.wakeproof.distraction
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.DayOfWeek
 import javax.inject.Inject
@@ -17,16 +13,16 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
+/** Where the walls were stored while they could be edited; now only read, for stricter values. */
 private val Context.wallRulesDataStore: DataStore<Preferences> by preferencesDataStore("wall_rules")
 
 /**
- * The tightening rules over gated apps, each stored as one integer so a single
- * looseness test covers them all. Booleans are stored as [RULE_ON]/[RULE_OFF].
- *
- * Every rule is on by default — the user asked for all of them — and, like an
- * app limit, a rule can be tightened at once but only loosened a week later
- * ([WallRulesRepository.request]). Settings that can be switched off in the
- * moment overrule nothing.
+ * The walls over gated apps. Every one is fixed in code (2026-11-08, the
+ * user's choice: "totally fixed so I don't change my bedtimes or usage"),
+ * like the night wall and the locked alarms: no switch, no Edit, no queued
+ * loosening, and a reinstall comes back the same. Changing one takes a new
+ * build. Until then they could be loosened after a week, and a week turned out
+ * to be short enough to wait out on a bad one.
  */
 enum class WallRule(val key: String, val default: Int) {
     /** Browsers follow the same walls as social apps; instagram.com otherwise skips every wall. */
@@ -42,20 +38,20 @@ enum class WallRule(val key: String, val default: Int) {
     EARN_THE_FEED("earn_the_feed", RULE_ON),
 
     /**
-     * Minute of the day the bedtime wall starts (12:00–23:45); [RULE_OFF_MINUTES]
-     * = no bedtime wall. It lasts until a morning alarm is verified.
+     * Minute of the day the bedtime wall starts. It lasts until
+     * [BEDTIME_END_MINUTES] (16:00 to 08:40 since 2026-11-08, was 17:00 until
+     * the morning alarm).
      */
-    BEDTIME_START_MINUTES("bedtime_start_minutes", 17 * 60),
+    BEDTIME_START_MINUTES("bedtime_start_minutes", 16 * 60),
 
     /** Do Not Disturb for the whole of a focus session. */
     SESSION_DND("session_dnd", RULE_ON),
 
     /**
-     * Minute of the day the gated apps' open window starts; [RULE_OFF_MINUTES]
-     * = no window, open all day (except Friday–Sunday while [WEEKEND_SHUT] is on).
-     * Covers social, video, messaging, the Google app, Play Store and browsers.
-     * 08:10–08:50 since 2026-11-01 ([WallRulesRepository.seedMorningWindow]):
-     * 40 minutes Monday to Thursday, with no 5-minute wait or 25-minute budget.
+     * Minute of the day the gated apps' open window starts, Monday to Thursday
+     * ([WEEKEND_SHUT] keeps Friday–Sunday shut). Covers social, video,
+     * messaging, the Google app, Play Store and browsers. 08:10–08:50 since
+     * 2026-11-01: 40 minutes, with no 5-minute wait or 25-minute budget.
      */
     OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 8 * 60 + 10),
 
@@ -63,20 +59,18 @@ enum class WallRule(val key: String, val default: Int) {
     OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 8 * 60 + 50);
 
     /**
-     * How loose [value] is for this rule; higher = lets the phone be used
-     * more. Off is the loosest value every rule can take.
+     * Pure: what this rule is in force at, given what a device [stored] while
+     * the walls were editable (null = nothing): [default], or the stored value
+     * when it is stricter. A tightening made back then applied at once and was
+     * the user's own, so the lock must not undo it; anything looser, or off, is
+     * dropped. Switches can be no stricter than on, so they are always on.
      */
-    fun looseness(value: Int): Int = when (this) {
-        // A later start leaves more of the evening open.
-        BEDTIME_START_MINUTES -> if (value < 0) Int.MAX_VALUE else value
-        // The window opening earlier, or closing later, leaves more of the day open.
-        OPEN_WINDOW_START_MINUTES -> if (value < 0) Int.MAX_VALUE else MINUTES_PER_DAY - value
-        OPEN_WINDOW_END_MINUTES -> value
-        else -> if (value == RULE_OFF) 1 else 0
-    }
-
-    companion object {
-        fun fromKey(key: String): WallRule? = entries.firstOrNull { it.key == key }
+    fun fixedOrStricter(stored: Int?): Int = when {
+        stored == null || stored < 0 -> default
+        this == BEDTIME_START_MINUTES -> minOf(default, stored.coerceAtLeast(12 * 60))
+        this == OPEN_WINDOW_START_MINUTES -> maxOf(default, stored)
+        this == OPEN_WINDOW_END_MINUTES -> minOf(default, stored)
+        else -> default
     }
 }
 
@@ -92,10 +86,11 @@ val WEEKEND_SHUT_DAYS: Set<DayOfWeek> = setOf(
     DayOfWeek.SUNDAY
 )
 
-/** A loosening waiting out the week. */
-data class PendingRule(val value: Int, val effectiveAtMillis: Long)
-
-/** The rules in force, read as what they mean. */
+/**
+ * The rules, read as what they mean. [values] exists for tests of the gate's
+ * other branches; the app itself only ever sees the defaults
+ * ([WallRulesRepository]).
+ */
 data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
     fun value(rule: WallRule): Int = values[rule] ?: rule.default
     val gateBrowsers: Boolean get() = value(WallRule.GATE_BROWSERS) != RULE_OFF
@@ -108,142 +103,67 @@ data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
 }
 
 /**
- * Stores [WallRules] and the loosenings queued behind them. Same contract as
- * [DistractionLimitRepository.requestLimit], and the same week — one wait for
- * every way of loosening the phone, so none is the easy one.
+ * Hands out the fixed [WallRules]. What a device stored while the walls were
+ * editable is read only through [WallRule.fixedOrStricter]: a stricter bedtime
+ * or narrower window stays, a later bedtime, a switch turned off or a loosening
+ * queued behind the week never comes back. Nothing writes here any more.
  */
 @Singleton
 class WallRulesRepository @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val dataStore = context.wallRulesDataStore
-
-    val rules: Flow<WallRules> = dataStore.data.map { prefs ->
-        WallRules(WallRule.entries.associateWith { prefs[keyOf(it)] ?: it.default })
-    }
-
-    val pending: Flow<Map<WallRule, PendingRule>> = dataStore.data.map { prefs ->
-        parsePendingRules(prefs[PENDING] ?: emptySet())
-    }
-
-    /**
-     * Sets [rule] to [value]: at once when that is no looser, otherwise queued
-     * for a week. Asking again for the same loosening keeps its clock. A
-     * loosening is refused outright on a clock [clockProven] does not vouch for.
-     */
-    suspend fun request(
-        rule: WallRule,
-        value: Int,
-        nowMillis: Long = System.currentTimeMillis()
-    ): ChangeRequest {
-        var outcome = ChangeRequest.APPLIED
-        val proven = clockProven(context)
-        dataStore.edit { prefs ->
-            val current = prefs[keyOf(rule)] ?: rule.default
-            val pending = parsePendingRules(prefs[PENDING] ?: emptySet())
-            if (isLoosening(rule, current, value)) {
-                if (!proven) {
-                    outcome = ChangeRequest.REFUSED_CLOCK
-                    return@edit
-                }
-                val existing = pending[rule]
-                val change = if (existing != null && existing.value == value) existing
-                else PendingRule(value, nowMillis + WEEK_MILLIS)
-                prefs[PENDING] = encodePendingRules(pending + (rule to change))
-                outcome = ChangeRequest.QUEUED
-            } else {
-                prefs[keyOf(rule)] = value
-                prefs[PENDING] = encodePendingRules(pending - rule)
-            }
-        }
-        return outcome
-    }
-
-    /** Drops a queued loosening; the stricter value stays. */
-    suspend fun cancelPending(rule: WallRule) {
-        dataStore.edit { prefs ->
-            prefs[PENDING] = encodePendingRules(parsePendingRules(prefs[PENDING] ?: emptySet()) - rule)
-        }
-    }
-
-    /** Lands every queued loosening whose week is over. True when anything changed. */
-    suspend fun promoteDue(nowMillis: Long = System.currentTimeMillis()): Boolean {
-        // A clock set by hand could be set forward a week (2026-11-04).
-        if (!clockProven(context)) return false
-        var changed = false
-        dataStore.edit { prefs ->
-            val pending = parsePendingRules(prefs[PENDING] ?: emptySet())
-            val due = pending.filterValues { it.effectiveAtMillis <= nowMillis }
-            if (due.isEmpty()) return@edit
-            due.forEach { (rule, change) -> prefs[keyOf(rule)] = change.value }
-            prefs[PENDING] = encodePendingRules(pending - due.keys)
-            changed = true
-        }
-        return changed
+    val rules: Flow<WallRules> = context.wallRulesDataStore.data.map { prefs ->
+        fixedRules { prefs[intPreferencesKey(it.key)] }
     }
 
     suspend fun current(): WallRules = rules.first()
-
-    /**
-     * One-off: the open window moves to 08:10–08:50 (2026-11-01, the user's
-     * explicit choice). Written straight in rather than through [request] —
-     * an earlier start reads as a loosening there and would wait a week —
-     * and any queued window change is dropped with it. Once per device under
-     * its own flag, so later edits from the Usage screen are never overwritten.
-     */
-    suspend fun seedMorningWindow() {
-        dataStore.edit { prefs ->
-            if (prefs[MORNING_WINDOW_SEEDED] == true) return@edit
-            val window = listOf(WallRule.OPEN_WINDOW_START_MINUTES, WallRule.OPEN_WINDOW_END_MINUTES)
-            window.forEach { prefs[keyOf(it)] = it.default }
-            prefs[PENDING] = encodePendingRules(parsePendingRules(prefs[PENDING] ?: emptySet()) - window.toSet())
-            prefs[MORNING_WINDOW_SEEDED] = true
-        }
-    }
-
-    companion object {
-        private val PENDING = stringSetPreferencesKey("pending")
-        private val MORNING_WINDOW_SEEDED = booleanPreferencesKey("open_window_morning")
-        private fun keyOf(rule: WallRule) = intPreferencesKey(rule.key)
-
-        private const val WEEK_MILLIS =
-            DistractionLimitRepository.COOLING_OFF_HOURS * 60L * 60 * 1000
-
-        fun isLoosening(rule: WallRule, current: Int, proposed: Int): Boolean =
-            rule.looseness(proposed) > rule.looseness(current)
-
-        /** "key|value|effectiveAtMillis". */
-        fun encodePendingRules(pending: Map<WallRule, PendingRule>): Set<String> =
-            pending.map { (rule, change) -> "${rule.key}|${change.value}|${change.effectiveAtMillis}" }
-                .toSet()
-
-        /** Unreadable entries are dropped, which leaves the current, stricter rule. */
-        fun parsePendingRules(entries: Set<String>): Map<WallRule, PendingRule> =
-            entries.mapNotNull { entry ->
-                val parts = entry.split('|')
-                if (parts.size != 3) return@mapNotNull null
-                val rule = WallRule.fromKey(parts[0]) ?: return@mapNotNull null
-                val value = parts[1].toIntOrNull() ?: return@mapNotNull null
-                val at = parts[2].toLongOrNull() ?: return@mapNotNull null
-                rule to PendingRule(value, at)
-            }.toMap()
-    }
 }
 
-/** The bedtime wall lifts at this minute of the day at the latest, alarm or not. */
-const val BEDTIME_FALLBACK_END_MINUTES = 7 * 60
+/**
+ * Pure: the rules in force given what was [stored] per rule. A stored window
+ * that no longer leaves any minute open (one narrowed back when bedtime lifted
+ * at 07:00 now sits under the 08:40 end) falls back to the fixed window: with
+ * nothing left to edit, it would otherwise shut gated apps for good.
+ */
+fun fixedRules(stored: (WallRule) -> Int?): WallRules {
+    val rules = WallRules(WallRule.entries.associateWith { it.fixedOrStricter(stored(it)) })
+    val open = gatedOpenWindow(rules) ?: return rules
+    if (open.first < open.second) return rules
+    return WallRules(
+        rules.values + listOf(WallRule.OPEN_WINDOW_START_MINUTES, WallRule.OPEN_WINDOW_END_MINUTES)
+            .associateWith { it.default }
+    )
+}
+
+/**
+ * Pure: the minutes gated apps are really open on a window day, `[start, end)`:
+ * the open window less what the bedtime wall covers (until 08:40, and from its
+ * start). Null when the window is off; start >= end when nothing is left. Wall
+ * copy uses it, so no screen promises 08:10 for apps that open at 08:40.
+ */
+fun gatedOpenWindow(rules: WallRules): Pair<Int, Int>? {
+    val start = rules.openWindowStartMinutes
+    val end = rules.openWindowEndMinutes
+    if (start < 0) return null
+    val bedtime = rules.bedtimeStartMinutes
+    if (bedtime < 0) return start to end
+    return maxOf(start, BEDTIME_END_MINUTES) to minOf(end, bedtime)
+}
+
+/**
+ * The bedtime wall lifts at this minute of the day, alarm or not (user's choice,
+ * 2026-11-08). It falls inside the 08:10–08:50 open window on purpose, leaving
+ * gated apps 08:40–08:50 Monday to Thursday.
+ */
+const val BEDTIME_END_MINUTES = 8 * 60 + 40
 
 /**
  * Pure: whether the bedtime wall is up at [minuteOfDay]. It starts at
- * [startMinutes] and runs past midnight until a morning alarm is verified, or
- * until [BEDTIME_FALLBACK_END_MINUTES] on a day no alarm is due. The start is
- * kept to the afternoon or evening by the settings, so "before the start" and
- * "the morning after" never overlap.
+ * [startMinutes] and runs past midnight until [BEDTIME_END_MINUTES]; passing a
+ * morning alarm no longer lifts it early. The fixed start is in the afternoon,
+ * so "before the start" and "the morning after" never overlap.
  */
-fun bedtimeActive(minuteOfDay: Int, startMinutes: Int, alarmVerifiedToday: Boolean): Boolean =
-    startMinutes >= 0 && (
-        minuteOfDay >= startMinutes ||
-            (minuteOfDay < BEDTIME_FALLBACK_END_MINUTES && !alarmVerifiedToday)
-        )
+fun bedtimeActive(minuteOfDay: Int, startMinutes: Int): Boolean =
+    startMinutes >= 0 && (minuteOfDay >= startMinutes || minuteOfDay < BEDTIME_END_MINUTES)
 
 /** Pure: whether gated apps are shut all day on [dayOfWeek] under [WallRule.WEEKEND_SHUT]. */
 fun weekendShutActive(dayOfWeek: DayOfWeek, weekendShut: Boolean): Boolean =

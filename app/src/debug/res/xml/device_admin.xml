@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No policies: being an active admin is what blocks the uninstall. See admin/UninstallLock.kt. -->
+<device-admin>
+    <uses-policies />
+</device-admin>

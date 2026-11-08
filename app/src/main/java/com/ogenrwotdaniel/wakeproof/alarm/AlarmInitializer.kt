@@ -45,7 +45,7 @@ class AlarmInitializer @Inject constructor(
      */
     suspend fun enforceStrict() {
         if (!devicePolicy.ringsAlarms) return
-        WearAlarmSync.pushSchedule(context, StrictAlarm.SLOTS.map { it.hour * 60 + it.minute })
+        WearAlarmSync.pushSchedule(context, StrictAlarm.SLOTS.map { it.minuteOfDay })
         StrictAlarm.SLOTS.forEachIndexed { index, slot ->
             val all = repository.getAllAlarmsIncludingDeleted()
             val syncId = StrictAlarm.syncId(context, index)
@@ -53,8 +53,7 @@ class AlarmInitializer @Inject constructor(
             if (row == null) {
                 row = strictAlarmCandidate(all, taken = StrictAlarm.syncIds(context)) ?: run {
                     repository.addAlarm(
-                        StrictAlarm.TYPE, slot.hour, slot.minute,
-                        "Locked %d:%02d".format(slot.hour, slot.minute)
+                        StrictAlarm.TYPE, slot.hour, slot.minute, strictLabel(slot)
                     )
                     repository.getAllAlarmsIncludingDeleted().maxByOrNull { it.id }
                 } ?: return@forEachIndexed

@@ -3,6 +3,7 @@ package com.ogenrwotdaniel.wakeproof.ui.settings
 import com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.data.MIN_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
+import com.ogenrwotdaniel.wakeproof.alarm.isStrictLabel
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -116,8 +117,9 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+            val lockedIds = viewModel.strictAlarmSyncIds
             alarms.forEach { alarm ->
-                if (alarm.syncId in viewModel.strictAlarmSyncIds) {
+                if (alarm.syncId in lockedIds) {
                     LockedAlarmRow(alarm)
                     return@forEach
                 }
@@ -156,6 +158,19 @@ fun SettingsScreen(
                             )
                         }
                     }
+                }
+                if (alarm.enabled && com.ogenrwotdaniel.wakeproof.alarm.strictAlarmDuplicates(
+                        listOf(alarm), lockedIds
+                    ).isNotEmpty()
+                ) {
+                    // AlarmScheduler never arms it; without this it looks on and stays silent.
+                    Text(
+                        text = "Will not ring: a pushup alarm at a locked alarm's time " +
+                            "(now or a former one) is kept silent. Pick another time or type.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 12.dp)
+                    )
                 }
                 DayOfWeekChips(
                     daysMask = alarm.daysMask,
@@ -367,6 +382,7 @@ fun SettingsScreen(
             HorizontalDivider()
 
             LauncherSection()
+            if (com.ogenrwotdaniel.wakeproof.admin.UninstallLock.AVAILABLE) UninstallLockSection()
 
             HorizontalDivider()
 
@@ -624,6 +640,47 @@ private fun LauncherSection(modifier: Modifier = Modifier) {
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Use WakeProof as home screen") }
+        }
+    }
+}
+
+/**
+ * Turns on [com.ogenrwotdaniel.wakeproof.admin.UninstallLock] (sideloaded build
+ * only). There is no off button: switching it off is the one thing the lock
+ * walls, so the row only says how far it reaches.
+ */
+@Composable
+private fun UninstallLockSection(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lock = com.ogenrwotdaniel.wakeproof.admin.UninstallLock
+    var active by remember { mutableStateOf(lock.isActive(context)) }
+    LifecycleResumeEffect(Unit) {
+        active = lock.isActive(context)
+        onPauseOrDispose { }
+    }
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = "Uninstall lock", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Makes WakeProof a device admin (not device owner, so Samsung services " +
+                "keep working). Android then refuses to uninstall it, and the screen that " +
+                "switches the admin off is walled, along with other apps' admin screens. " +
+                "There is no off button. A computer (adb), Safe Mode, taking away WakeProof's " +
+                "usage access or display-over-apps permission, or a factory reset still gets " +
+                "past it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (active) {
+            Text(
+                text = "🔒 On. WakeProof cannot be uninstalled.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        } else {
+            Button(
+                onClick = { context.startActivity(lock.enableIntent(context)) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Turn on uninstall lock") }
         }
     }
 }
@@ -932,7 +989,8 @@ private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
             style = MaterialTheme.typography.headlineSmall
         )
         Text(
-            text = alarm.label.ifBlank { "Locked" } + " · ${StrictAlarm.REPS} pushups · every day",
+            text = (if (isStrictLabel(alarm.label)) "" else alarm.label).ifBlank { "Locked" } +
+                " · ${StrictAlarm.REPS} pushups · every day",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

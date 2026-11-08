@@ -1,6 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.distraction
 
 import android.app.Notification
+import com.ogenrwotdaniel.wakeproof.admin.UninstallLock
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.ActivityManager
@@ -127,9 +128,6 @@ class AppBlockService : Service() {
 
     /** A focus block is logged today: the feed is earned ([WallRules.earnTheFeed]). */
     @Volatile private var focusDoneToday = false
-
-    /** A morning alarm was verified today, which lifts the bedtime wall. */
-    @Volatile private var alarmVerifiedToday = false
 
     /** When a session on another of the user's devices ends; null = none known. */
     @Volatile private var peerSessionEndsAt: Long? = null
@@ -286,6 +284,14 @@ class AppBlockService : Service() {
     private var lastBlockedPackage: String? = null
     private var lastBlockedAt = 0L
 
+    /**
+     * The last wall was the uninstall lock's: once it is seen in front, the
+     * debounce is dropped, so going straight back to the off screen is walled on
+     * the next tick. Dropped only then, so a wall that never lands cannot be
+     * relaunched every tick.
+     */
+    private var rearmOnLanding = false
+
     /** The cover over a walled app left running in a pop-up; see [popupCoverWanted]. */
     private val popupCover by lazy { PopupCover(this) }
     /** The cover over a walled app the user has screen-pinned; see [pinCoverWanted]. */
@@ -359,8 +365,6 @@ class AppBlockService : Service() {
                 .flatMapLatest { statsRepository.observeToday() }
                 .collect { today ->
                     focusDoneToday = today.focusMinutes > 0
-                    alarmVerifiedToday =
-                        today.pushupCount > 0 || today.mathCount > 0 || today.waterCount > 0
                 }
         }
         scope.launch { liveFocusSession.peerSessionEndsAt().collect { peerSessionEndsAt = it } }
@@ -423,20 +427,16 @@ class AppBlockService : Service() {
             }
         }
         scope.launch {
-            // Queued loosenings land here too, not only when a screen opens.
             while (true) {
-                runCatching { wallRulesRepository.promoteDue() }
-                runCatching { limitRepository.promoteDuePending() }
-                // Also ends a new app's quarantine week on time.
+                // Ends a new app's quarantine week on time.
                 refreshQuarantine()
                 // A locked-alarm ring whose service died is started again.
                 runCatching { StrictAlarm.resumeIfPending(this@AppBlockService) }
                 runCatching { nightReminders() }
-                delay(PROMOTE_EVERY_MILLIS)
+                delay(HOUSEKEEPING_EVERY_MILLIS)
             }
         }
         scope.launch {
-            runCatching { wallRulesRepository.seedMorningWindow() }
             // An uninstall and reinstall while this service was down shows only here.
             refreshQuarantine(checkReinstalls = true)
         }
@@ -571,6 +571,13 @@ class AppBlockService : Service() {
             }
             if (current == packageName) {
                 // Looking at our own wall (or WakeProof itself). Not a re-entry.
+                // The wall itself, not any WakeProof screen: with WakeProof in front and
+                // the off screen beside it, clearing before the wall resumes would raise
+                // it again on every tick.
+                if (rearmOnLanding && tracker.newestClass(packageName) == BlockedActivity::class.java.name) {
+                    rearmOnLanding = false
+                    lastBlockedPackage = null
+                }
                 pinCover.hide()
                 // Pop-ups float above WakeProof too, and using one records nothing, so
                 // this is all that walls them here: over the home screen, the wall (a
@@ -615,7 +622,9 @@ class AppBlockService : Service() {
                 if (pinCover.isShowing) Log.i(TAG, "pin cover down ($current, pinned=$pinned)")
                 pinCover.hide()
                 if (verdict != GateVerdict.ALLOW) {
-                    wall(current) { wallIntent(current, verdict, limit) }
+                    wall(current, again = verdict == GateVerdict.ADMIN_LOCK_WALL) {
+                        wallIntent(current, verdict, limit)
+                    }
                 } else {
                     wallBeside(current)
                 }
@@ -645,7 +654,11 @@ class AppBlockService : Service() {
         gated: Boolean,
         capSpent: Boolean,
         // For a notification the clock wall covers gated and capped apps only; see [walledNow].
-        forNotification: Boolean = false
+        forNotification: Boolean = false,
+        // False at launch: Settings is not on screen yet, and a stale admin screen
+        // left in the remembered set would wall every Settings page. The tick
+        // judges the screen once it is really up.
+        judgeAdminScreen: Boolean = true
     ): GateVerdict {
         val now = LocalDateTime.now()
         val minuteOfDay = now.hour * 60 + now.minute
@@ -669,8 +682,7 @@ class AppBlockService : Service() {
             ),
             bedtime = gated && bedtimeActive(
                 minuteOfDay = minuteOfDay,
-                startMinutes = rules.bedtimeStartMinutes,
-                alarmVerifiedToday = alarmVerifiedToday
+                startMinutes = rules.bedtimeStartMinutes
             ),
             feedEarned = feedEarned(rules.earnTheFeed, focusDoneToday, rules.openWindowStartMinutes),
             sleeping = sleepWallActive(minuteOfDay) && current !in sleepExempt &&
@@ -680,8 +692,29 @@ class AppBlockService : Service() {
                 current !in CAPTIVE_PORTAL_PACKAGES &&
                 ((SIDELOADED_BUILD && !forNotification) || gated || blockedLimit(current) != null),
             historyOn = historyOn && current != smsApp,
-            capped = blockedLimit(current) != null
+            capped = blockedLimit(current) != null,
+            // Never for a notification: Settings' own must not go because of a screen.
+            adminOffSwitch = !forNotification && judgeAdminScreen && deactivationShowing(current)
         )
+    }
+
+    /**
+     * [pkg] is Settings with the screen that would switch [UninstallLock] off
+     * resumed, in front or beside. The class test comes first, so the admin check
+     * (a binder call) runs only on that screen.
+     */
+    private fun deactivationShowing(pkg: String): Boolean {
+        if (!UninstallLock.AVAILABLE || pkg != UninstallLock.SETTINGS_PACKAGE) return false
+        // The newest screen only: a lost PAUSED must not wall every Settings page
+        // (the date and time one is the way out of the clock wall).
+        val classes = listOfNotNull(tracker.newestClass(pkg))
+        if (!UninstallLock.coversDeactivation(lockOn = true, pkg, classes)) return false
+        // Not over the activation just made: its screen is still up for a moment.
+        // Only onEnabled starts the grace. Stamping it here when the tick sees the
+        // lock come on was tried and dropped: that can be seen hours late, on the
+        // off screen, and would leave Deactivate unwalled. Worst case now is the
+        // closing activation screen walled once, before onEnabled lands.
+        return UninstallLock.isActive(this) && !UninstallLock.justEnabled(this)
     }
 
     /** In its first week, and not one of the apps that never waits it out. */
@@ -714,13 +747,14 @@ class AppBlockService : Service() {
                 reopensAt = nextOpenFor(current, now.dayOfWeek)
             )
             GateVerdict.WINDOW_WALL -> {
+                val open = openWindow()
                 val (headline, body) = windowWallCopy(
                     label = label,
                     today = now.dayOfWeek,
                     minuteOfDay = minuteOfDay,
                     weekendShut = rules.weekendShut,
-                    startMinutes = rules.openWindowStartMinutes,
-                    endMinutes = rules.openWindowEndMinutes,
+                    startMinutes = open.first,
+                    endMinutes = open.second,
                     formatClock = ::clock
                 )
                 BlockedActivity.ruleIntent(this, headline, body)
@@ -728,8 +762,8 @@ class AppBlockService : Service() {
             GateVerdict.BEDTIME_WALL -> BlockedActivity.ruleIntent(
                 this,
                 "Bedtime",
-                "$label and every other gated app are shut for the night. They open once " +
-                    "your morning alarm is verified, or at 07:00 on a day without one."
+                "$label and every other gated app are behind the bedtime wall until " +
+                    "${clock(BEDTIME_END_MINUTES)}."
             )
             GateVerdict.SLEEP_WALL -> BlockedActivity.ruleIntent(
                 this,
@@ -755,6 +789,11 @@ class AppBlockService : Service() {
                 "Turn on automatic date, time and time zone in Android Settings and connect " +
                     "to the internet before opening $label.",
                 Settings.ACTION_DATE_SETTINGS
+            )
+            GateVerdict.ADMIN_LOCK_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Uninstall lock is on",
+                "WakeProof stays a device admin, so it cannot be uninstalled from the phone."
             )
             GateVerdict.HISTORY_WALL -> BlockedActivity.ruleIntent(
                 this,
@@ -794,7 +833,7 @@ class AppBlockService : Service() {
         val capSpent = limit != null &&
             (usageRepository.todayForegroundMillisFor(setOf(packageName))[packageName] ?: 0L) >=
             limit.minutes * 60_000L
-        val verdict = verdictFor(packageName, isGated(packageName), capSpent)
+        val verdict = verdictFor(packageName, isGated(packageName), capSpent, judgeAdminScreen = false)
         logVerdict(packageName, verdict)
         return if (verdict == GateVerdict.ALLOW) null else wallIntent(packageName, verdict, limit)
     }
@@ -880,15 +919,19 @@ class AppBlockService : Service() {
     /** Next opening phrase after today for [current] if gated (`"tomorrow at 08:10"`, `"Monday at 08:10"`). */
     private fun nextOpenFor(current: String, today: java.time.DayOfWeek): String? {
         val gated = gatedCache[current] ?: false
+        val open = openWindow()
         return nextOpenAfterToday(
             gated = gated,
             today = today,
             weekendShut = rules.weekendShut,
-            startMinutes = rules.openWindowStartMinutes,
-            endMinutes = rules.openWindowEndMinutes,
+            startMinutes = open.first,
+            endMinutes = open.second,
             formatClock = ::clock
         )
     }
+
+    /** When gated apps really open and close, for wall copy; see [gatedOpenWindow]. */
+    private fun openWindow(): Pair<Int, Int> = gatedOpenWindow(rules) ?: (RULE_OFF_MINUTES to RULE_OFF_MINUTES)
 
     /** "08:10" or "8:10 AM", as the phone tells time. */
     private fun clock(minutes: Int): String =
@@ -1042,7 +1085,7 @@ class AppBlockService : Service() {
 
     /**
      * The wind-down reminder and the charging nag ([NightRules]). The nag only
-     * where alarms ring: the tablet going flat costs nothing at 03:00.
+     * where alarms ring: the tablet going flat costs nothing at the alarm.
      */
     private fun nightReminders() {
         val now = System.currentTimeMillis()
@@ -1056,7 +1099,7 @@ class AppBlockService : Service() {
                 WIND_DOWN_NOTIFICATION_ID,
                 "Wind down",
                 "Everything but calls and your alarms shuts at ${clock(SLEEP_START_MINUTES)}, " +
-                    "bed at ${clock(BEDTIME_MINUTES)}. Finish up and get ready."
+                    "and that is bedtime too. Finish up and get ready."
             )
         }
         if (lightsOutDue(minuteOfDay, prefs.getLong(KEY_LIGHTS_OUT_DAY, -1L), today)) {
@@ -1096,12 +1139,16 @@ class AppBlockService : Service() {
             battery.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
         }.getOrDefault(-1)
         val charging = runCatching { battery.isCharging }.getOrDefault(true)
-        if (chargeNagDue(minuteOfDay, level, charging, prefs.getLong(KEY_CHARGE_NAG_AT, 0L), now)) {
+        if (chargeNagDue(
+                minuteOfDay, level, charging, prefs.getLong(KEY_CHARGE_NAG_AT, 0L), now,
+                lastSlotMinutes = StrictAlarm.lastSlotMinute
+            )
+        ) {
             prefs.edit().putLong(KEY_CHARGE_NAG_AT, now).apply()
             nightNotice(
                 CHARGE_NOTIFICATION_ID,
                 "Charge your phone — $level %",
-                "Your ${clock(SLEEP_END_MINUTES)} alarm needs a phone that is still on. Plug it in now."
+                "Your locked alarms need a phone that is still on. Plug it in now."
             )
         }
     }
@@ -1163,17 +1210,24 @@ class AppBlockService : Service() {
      * Throws [intent] in front of [packageName], once: the wall pauses the app,
      * so the next tick sees WakeProof in front and leaves it alone. The debounce
      * only covers the tick or two before the wall's own resume lands. True when
-     * the wall went up.
+     * the wall went up. [again] marks a screen that outlives its wall (Settings,
+     * which is essential and so not killed outside a session): see [rearmOnLanding].
      */
-    private fun wall(packageName: String, intent: () -> Intent): Boolean {
+    private fun wall(packageName: String, again: Boolean = false, intent: () -> Intent): Boolean {
         // The one place every wall passes: nothing may hide a ringing alarm's screen.
         if (alarmHoldsScreen()) return false
         val now = SystemClock.elapsedRealtime()
-        if (packageName == lastBlockedPackage && now - lastBlockedAt < REBLOCK_MILLIS) return false
+        // The off screen gets a debounce of just over one tick: Back off the wall before a
+        // tick saw it would otherwise leave Deactivate unwalled for 1.5 s. BlockedActivity
+        // is singleTask, so raising it again brings the same wall forward, never a stack.
+        val debounce = if (again) ADMIN_REBLOCK_MILLIS else REBLOCK_MILLIS
+        if (packageName == lastBlockedPackage && now - lastBlockedAt < debounce) return false
         lastBlockedPackage = packageName
         lastBlockedAt = now
         return runCatching { startActivity(intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             .onSuccess {
+                // Only for a wall that started: a failed one must not drop a later debounce.
+                rearmOnLanding = again
                 coverFor = packageName
                 coverWallAt = now
                 coverGraceUntil = 0L
@@ -1459,7 +1513,10 @@ class AppBlockService : Service() {
         if (verdict == GateVerdict.ALLOW) return
         lastBesideWallAt = now
         Log.i(TAG, "$pkg is still running beside $current -> $verdict")
-        if (wall(pkg) { wallIntent(pkg, verdict, blockedLimit(pkg)) } && ownFront) {
+        if (wall(pkg, again = verdict == GateVerdict.ADMIN_LOCK_WALL) {
+                wallIntent(pkg, verdict, blockedLimit(pkg))
+            } && ownFront
+        ) {
             besideRepeats[pkg] = BesideRepeat((besideRepeats[pkg]?.walls ?: 0) + 1, now)
         }
     }
@@ -1496,7 +1553,9 @@ class AppBlockService : Service() {
                 lastBlockedPackage = null // not a re-entry to debounce
                 // A wall that would not rise leaves the grace pending, and the history
                 // must not be read again on every tick because of it.
-                val raised = wall(pkg) { wallIntent(pkg, verdict, blockedLimit(pkg)) }
+                val raised = wall(pkg, again = verdict == GateVerdict.ADMIN_LOCK_WALL) {
+                    wallIntent(pkg, verdict, blockedLimit(pkg))
+                }
                 if (!raised) historyBackoff[pkg] = now + BESIDE_CONFIRM_MILLIS
                 return raised
             }
@@ -1627,8 +1686,8 @@ class AppBlockService : Service() {
         /** canDrawOverlays is a binder call, so it is checked every 5 s, not every tick. */
         private const val OVERLAY_CHECK_EVERY = 10L
 
-        /** How often queued loosenings are checked for landing. */
-        private const val PROMOTE_EVERY_MILLIS = 5 * 60_000L
+        /** How often the quarantine, a lost strict ring and the night reminders are checked. */
+        private const val HOUSEKEEPING_EVERY_MILLIS = 5 * 60_000L
         private const val MEDIA_CHECK_MILLIS = 2_000L
         private const val NIGHT_PREFS = "night_reminders"
         private const val KEY_WIND_DOWN_DAY = "wind_down_day"
@@ -1695,6 +1754,7 @@ class AppBlockService : Service() {
          * debounce outright, so this never becomes a usable window.
          */
         private const val REBLOCK_MILLIS = 1_500L
+        private const val ADMIN_REBLOCK_MILLIS = 600L
 
         /**
          * Starts enforcement when the grants are in place, and stops it otherwise.
@@ -1726,7 +1786,7 @@ class AppBlockService : Service() {
 
         private fun quietNow(): Boolean = nightQuiet(
             LocalTime.now().let { it.hour * 60 + it.minute },
-            StrictAlarm.SLOTS.maxOf { it.hour * 60 + it.minute }
+            StrictAlarm.lastSlotMinute
         )
 
         private fun quietChannel() =

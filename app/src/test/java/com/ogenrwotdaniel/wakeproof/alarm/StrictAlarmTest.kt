@@ -13,13 +13,14 @@ class StrictAlarmTest {
     private fun alarm(
         id: Long,
         type: AlarmType = AlarmType.PUSHUP,
-        hour: Int = 5,
-        minute: Int = 30,
+        hour: Int = 6,
+        minute: Int = 5,
         enabled: Boolean = true,
         deleted: Boolean = false,
-        daysMask: Int = 127
+        daysMask: Int = 127,
+        label: String = ""
     ) = Alarm(
-        id = id, type = type, hour = hour, minute = minute, enabled = enabled,
+        id = id, type = type, hour = hour, minute = minute, enabled = enabled, label = label,
         deleted = deleted, daysMask = daysMask, syncId = "s$id", updatedAt = 1L, pending = false
     )
 
@@ -31,8 +32,8 @@ class StrictAlarmTest {
             slot,
             now = 99L
         )!!
-        assertEquals(5, fixed.hour)
-        assertEquals(30, fixed.minute)
+        assertEquals(6, fixed.hour)
+        assertEquals(5, fixed.minute)
         assertEquals(StrictAlarm.TYPE, fixed.type)
         assertTrue(fixed.enabled)
         assertFalse(fixed.deleted)
@@ -43,7 +44,18 @@ class StrictAlarmTest {
 
     @Test
     fun `a locked alarm already as it must be is left alone`() {
-        assertNull(strictAlarmFixed(alarm(1, hour = 3, minute = 0), StrictAlarm.SLOTS[0], now = 99L))
+        assertNull(strictAlarmFixed(alarm(1, hour = 4, minute = 0), StrictAlarm.SLOTS[0], now = 99L))
+    }
+
+    @Test
+    fun `a locked alarm from the old 03 00 slot moves to 04 00 with its label, a custom label stays`() {
+        val moved = strictAlarmFixed(alarm(1, hour = 3, minute = 0, label = "Locked 3:00"), StrictAlarm.SLOTS[0], 99L)!!
+        assertEquals(4, moved.hour)
+        assertEquals(0, moved.minute)
+        assertEquals("Locked 4:00", moved.label)
+        val custom = strictAlarmFixed(alarm(2, hour = 5, minute = 30, label = "Up!"), StrictAlarm.SLOTS[1], 99L)!!
+        assertEquals("Up!", custom.label)
+        assertEquals("Locked 6:05", strictLabel(StrictAlarm.SLOTS[1]))
     }
 
     @Test
@@ -72,17 +84,19 @@ class StrictAlarmTest {
     @Test
     fun `an unlocked pushup alarm on a locked slot is a duplicate, nothing else is`() {
         val rows = listOf(
-            alarm(1, hour = 3, minute = 0), alarm(2, hour = 3, minute = 0), alarm(3, hour = 5, minute = 30),
-            alarm(4, hour = 3, minute = 0, type = AlarmType.MATH), alarm(5, hour = 6),
-            alarm(6, hour = 3, minute = 0, deleted = true)
+            alarm(1, hour = 4, minute = 0), alarm(2, hour = 4, minute = 0), alarm(3, hour = 6, minute = 5),
+            alarm(4, hour = 4, minute = 0, type = AlarmType.MATH), alarm(5, hour = 6, minute = 0),
+            alarm(6, hour = 4, minute = 0, deleted = true),
+            // The old locked pair, synced back from before the move, never rings either.
+            alarm(7, hour = 3, minute = 0), alarm(8, hour = 5, minute = 30)
         )
-        assertEquals(listOf(2L, 3L), strictAlarmDuplicates(rows, setOf("s1")).map { it.id })
+        assertEquals(listOf(2L, 3L, 7L, 8L), strictAlarmDuplicates(rows, setOf("s1")).map { it.id })
         assertEquals(emptyList<Long>(), strictAlarmDuplicates(rows, emptySet()).map { it.id })
     }
 
     @Test
-    fun `the two morning alarms are 03 00 and 05 30, at 10 pushups`() {
-        assertEquals(listOf(StrictAlarm.Slot(3, 0), StrictAlarm.Slot(5, 30)), StrictAlarm.SLOTS)
+    fun `the two morning alarms are 04 00 and 06 05, at 10 pushups`() {
+        assertEquals(listOf(StrictAlarm.Slot(4, 0), StrictAlarm.Slot(6, 5)), StrictAlarm.SLOTS)
         assertEquals(10, StrictAlarm.REPS)
     }
 

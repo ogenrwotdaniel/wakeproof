@@ -53,17 +53,6 @@ fun clockUntrusted(context: Context): Boolean =
 fun clockProven(context: Context): Boolean =
     clockProven(clockAutomatic(context), System.currentTimeMillis(), networkNowMillis())
 
-/** What asking for a change to a limit or a wall rule came to. */
-enum class ChangeRequest {
-    APPLIED,
-
-    /** Loosening: waits out the week. */
-    QUEUED,
-
-    /** Loosening asked for on a clock [clockProven] does not vouch for. */
-    REFUSED_CLOCK
-}
-
-/** Shown when a loosening or leaving sync is turned down for [ChangeRequest.REFUSED_CLOCK]. */
+/** Shown when leaving sync is turned down on a clock [clockProven] does not vouch for. */
 const val CLOCK_REFUSAL_MESSAGE =
     "Turn on automatic date, time and time zone, and connect to the internet, first."

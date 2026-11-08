@@ -14,56 +14,59 @@ class WallRulesTest {
         "%02d:%02d".format(minutes / 60, minutes % 60)
 
     @Test
-    fun `switching a wall off is loosening, switching it on is not`() {
-        assertTrue(WallRulesRepository.isLoosening(WallRule.EARN_THE_FEED, RULE_ON, RULE_OFF))
-        assertFalse(WallRulesRepository.isLoosening(WallRule.EARN_THE_FEED, RULE_OFF, RULE_ON))
-        assertTrue(WallRulesRepository.isLoosening(WallRule.WEEKEND_SHUT, RULE_ON, RULE_OFF))
-        assertFalse(WallRulesRepository.isLoosening(WallRule.WEEKEND_SHUT, RULE_OFF, RULE_ON))
-        assertFalse(WallRulesRepository.isLoosening(WallRule.SESSION_DND, RULE_ON, RULE_ON))
-    }
-
-    @Test
-    fun `a later bedtime or none is loosening, an earlier one is not`() {
+    fun `a stored value counts only when it is stricter than the fixed one`() {
         val bedtime = WallRule.BEDTIME_START_MINUTES
-        assertTrue(WallRulesRepository.isLoosening(bedtime, 17 * 60, 21 * 60))
-        assertTrue(WallRulesRepository.isLoosening(bedtime, 17 * 60, RULE_OFF_MINUTES))
-        assertFalse(WallRulesRepository.isLoosening(bedtime, 17 * 60, 16 * 60))
-        assertFalse(WallRulesRepository.isLoosening(bedtime, RULE_OFF_MINUTES, 23 * 60))
+        assertEquals(16 * 60, bedtime.fixedOrStricter(null))
+        assertEquals(16 * 60, bedtime.fixedOrStricter(21 * 60))
+        assertEquals(16 * 60, bedtime.fixedOrStricter(RULE_OFF_MINUTES))
+        assertEquals(14 * 60, bedtime.fixedOrStricter(14 * 60))
+        val start = WallRule.OPEN_WINDOW_START_MINUTES
+        assertEquals(8 * 60 + 10, start.fixedOrStricter(8 * 60))
+        assertEquals(8 * 60 + 10, start.fixedOrStricter(RULE_OFF_MINUTES))
+        assertEquals(8 * 60 + 20, start.fixedOrStricter(8 * 60 + 20))
+        val end = WallRule.OPEN_WINDOW_END_MINUTES
+        assertEquals(8 * 60 + 50, end.fixedOrStricter(10 * 60))
+        assertEquals(8 * 60 + 45, end.fixedOrStricter(8 * 60 + 45))
+        assertEquals(RULE_ON, WallRule.WEEKEND_SHUT.fixedOrStricter(RULE_OFF))
+        assertEquals(RULE_ON, WallRule.GATE_BROWSERS.fixedOrStricter(RULE_OFF))
     }
 
     @Test
-    fun `pending rules survive a round trip and junk is dropped`() {
-        val pending = mapOf(
-            WallRule.GATE_BROWSERS to PendingRule(RULE_OFF, 1_000L),
-            WallRule.WEEKEND_SHUT to PendingRule(RULE_OFF, 2_000L)
-        )
-        val encoded = WallRulesRepository.encodePendingRules(pending) + "nonsense" + "unknown|1|2" +
-            "daily_budget_minutes|60|3000"
-        assertEquals(pending, WallRulesRepository.parsePendingRules(encoded))
+    fun `a stored window the bedtime wall now covers falls back to the fixed one`() {
+        val rules = fixedRules { if (it == WallRule.OPEN_WINDOW_END_MINUTES) 8 * 60 + 30 else null }
+        assertEquals(8 * 60 + 40 to 8 * 60 + 50, gatedOpenWindow(rules))
+        val kept = fixedRules { if (it == WallRule.OPEN_WINDOW_END_MINUTES) 8 * 60 + 45 else null }
+        assertEquals(8 * 60 + 40 to 8 * 60 + 45, gatedOpenWindow(kept))
     }
 
     @Test
-    fun `every rule defaults to on, with weekend shut, 17 00 bedtime and 08 10 to 08 50 window`() {
+    fun `gated apps really open from the end of bedtime, not the window's start`() {
+        assertEquals(8 * 60 + 40 to 8 * 60 + 50, gatedOpenWindow(WallRules()))
+        val noBedtime = WallRules(mapOf(WallRule.BEDTIME_START_MINUTES to RULE_OFF_MINUTES))
+        assertEquals(8 * 60 + 10 to 8 * 60 + 50, gatedOpenWindow(noBedtime))
+        assertNull(gatedOpenWindow(WallRules(mapOf(WallRule.OPEN_WINDOW_START_MINUTES to RULE_OFF_MINUTES))))
+    }
+
+    @Test
+    fun `every rule defaults to on, with weekend shut, 16 00 bedtime and 08 10 to 08 50 window`() {
         val rules = WallRules()
         assertTrue(rules.gateBrowsers && rules.weekendShut && rules.earnTheFeed && rules.sessionDnd)
-        assertEquals(17 * 60, rules.bedtimeStartMinutes)
+        assertEquals(16 * 60, rules.bedtimeStartMinutes)
         assertEquals(8 * 60 + 10, rules.openWindowStartMinutes)
         assertEquals(8 * 60 + 50, rules.openWindowEndMinutes)
     }
 
     @Test
-    fun `bedtime runs from the evening until a morning alarm or seven`() {
-        val start = 17 * 60
-        assertFalse(bedtimeActive(16 * 60 + 59, start, alarmVerifiedToday = true))
-        assertTrue(bedtimeActive(17 * 60, start, alarmVerifiedToday = true))
-        assertTrue(bedtimeActive(23 * 60, start, alarmVerifiedToday = false))
-        // After midnight: shut until the alarm is verified…
-        assertTrue(bedtimeActive(4 * 60 + 29, start, alarmVerifiedToday = false))
-        assertFalse(bedtimeActive(4 * 60 + 31, start, alarmVerifiedToday = true))
-        // …or 07:00 on a day without one.
-        assertTrue(bedtimeActive(6 * 60 + 59, start, alarmVerifiedToday = false))
-        assertFalse(bedtimeActive(7 * 60, start, alarmVerifiedToday = false))
-        assertFalse(bedtimeActive(23 * 60, RULE_OFF_MINUTES, alarmVerifiedToday = false))
+    fun `bedtime runs from 16 00 to 08 40, whatever the alarms did`() {
+        val start = 16 * 60
+        assertFalse(bedtimeActive(15 * 60 + 59, start))
+        assertTrue(bedtimeActive(16 * 60, start))
+        assertTrue(bedtimeActive(23 * 60, start))
+        assertTrue(bedtimeActive(6 * 60 + 30, start))
+        assertTrue(bedtimeActive(8 * 60 + 39, start))
+        assertFalse(bedtimeActive(8 * 60 + 40, start))
+        assertFalse(bedtimeActive(12 * 60, start))
+        assertFalse(bedtimeActive(23 * 60, RULE_OFF_MINUTES))
     }
 
     @Test
@@ -185,18 +188,6 @@ class OpenWindowTest {
         assertFalse(outsideOpenWindow(3 * 60, RULE_OFF_MINUTES, end))
         // A window that ends before it starts is open at no time.
         assertTrue(outsideOpenWindow(15 * 60, 16 * 60, 15 * 60))
-    }
-
-    @Test
-    fun `opening earlier or closing later is loosening, narrowing is not`() {
-        val start = WallRule.OPEN_WINDOW_START_MINUTES
-        val end = WallRule.OPEN_WINDOW_END_MINUTES
-        assertTrue(WallRulesRepository.isLoosening(start, 8 * 60 + 10, 8 * 60))
-        assertTrue(WallRulesRepository.isLoosening(start, 8 * 60 + 10, RULE_OFF_MINUTES))
-        assertFalse(WallRulesRepository.isLoosening(start, 8 * 60 + 10, 8 * 60 + 20))
-        assertFalse(WallRulesRepository.isLoosening(start, RULE_OFF_MINUTES, 8 * 60 + 10))
-        assertTrue(WallRulesRepository.isLoosening(end, 8 * 60 + 50, 9 * 60))
-        assertFalse(WallRulesRepository.isLoosening(end, 8 * 60 + 50, 8 * 60 + 40))
     }
 
     @Test

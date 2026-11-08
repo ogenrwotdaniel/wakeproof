@@ -28,7 +28,7 @@ from .cloud import CloudError, firestore_for
 from .codec import (MIME_JPEG, MIME_PNG, MIME_TEXT, Clip, ClipError, clip_hash, cloud_body,
                     open_sealed, seal, to_png)
 from .lan import LAN_PORT, ClipServer, Mdns, local_ipv4_addrs, send_to_peers
-from .rules import (PRESENCE_FRESH_MS, STALE_MS, SeenIds, cloud_needed, fresh_presence_peers,
+from .rules import (PRESENCE_FRESH_MS, STALE_MS, SeenIds, cloud_needed, fresh_presence_peers, one_per_device,
                     receive_refusal, send_refusal)
 
 log = logging.getLogger("clipsync")
@@ -306,6 +306,9 @@ class ClipEngine:
             self.check_status()
         outcome = f"{mime} {len(body)} B: LAN {len(acked)}/{len(targets)}"
         if fs is not None:
+            # Every fresh presence doc, old installs included: a reinstall that
+            # shares the Clip key but not this laptop's pairing looks just like
+            # one, and skipping the cloud would leave it without the clip.
             peers = fresh_presence_peers(self.presence(fs), self.install_id, now_ms())
             if cloud_needed(peers, acked):
                 try:
@@ -516,9 +519,10 @@ class ClipEngine:
             if now - ms <= LAN_RECENT_MS:
                 e["lan"] = True
         out.pop(self.install_id, None)
-        for e in out.values():
+        rows = one_per_device(list(out.values()), set(paired))
+        for e in rows:
             e["name"] = e["name"] or "unknown device"
-        return sorted(out.values(), key=lambda e: (-e["lastSeenMs"], e["name"]))
+        return rows
 
     def status(self) -> dict:
         with self.lock:

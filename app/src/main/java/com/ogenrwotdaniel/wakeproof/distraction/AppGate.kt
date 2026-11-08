@@ -201,12 +201,17 @@ enum class GateVerdict {
     /** The local clock cannot be believed; see [clockUntrusted]. */
     CLOCK_WALL,
     /** Android keeps the text of the notifications the walls strip. */
-    HISTORY_WALL
+    HISTORY_WALL,
+    /** Settings' screen that would switch the uninstall lock off; see [com.ogenrwotdaniel.wakeproof.admin.UninstallLock]. */
+    ADMIN_LOCK_WALL
 }
 
 /**
  * The single decision, in priority order:
  *
+ * -1. The uninstall lock's off switch ([adminOffSwitch]) is walled before
+ *    anything, essential Settings included, so a pop-up or split screen
+ *    showing it is covered by the same paths as any walled app.
  * 0. Outside a session, an essential app in its first week ([quarantined]) is
  *    walled: a home or SMS app newly made the default, so choosing a default is
  *    not a way past the walls. Its wall offers the default-apps settings.
@@ -240,8 +245,10 @@ fun gateVerdict(
     quarantined: Boolean = false,
     clockUntrusted: Boolean = false,
     historyOn: Boolean = false,
-    capped: Boolean = false
+    capped: Boolean = false,
+    adminOffSwitch: Boolean = false
 ): GateVerdict = when {
+    adminOffSwitch -> GateVerdict.ADMIN_LOCK_WALL
     // A home or SMS app newly made the default keeps its first week, or choosing
     // a default would be the way past every wall. Its own wall comes first, ahead
     // of clock and sleep, because only it offers the way out (another default).

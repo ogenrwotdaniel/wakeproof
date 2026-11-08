@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.data
 
+import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmDays
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
@@ -59,8 +60,15 @@ enum class DayOutcome {
  */
 fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
     val live = alarms.filter { it.enabled && !it.deleted && AlarmDays.contains(it.daysMask, day) }
+    val pushups = live.filter { it.type == AlarmType.PUSHUP }
+    // Pushup rows on a locked minute ring once between them (the copies are
+    // never armed), and rows on a former locked minute never ring: counting
+    // them asked for pushups no alarm could bring, a miss every day. Decided by
+    // minute alone so the tablet, which holds no locked ids, scores the same.
+    val slots = StrictAlarm.SLOTS.map { it.minuteOfDay }.toSet()
+    val minutes = pushups.map { it.hour * 60 + it.minute }
     return DailyGoals(
-        pushupTarget = live.count { it.type == AlarmType.PUSHUP },
+        pushupTarget = minutes.count { it !in StrictAlarm.SILENT_MINUTES } + minutes.filter { it in slots }.toSet().size,
         waterTarget = live.count { it.type == AlarmType.WATER },
         mathTarget = live.count { it.type == AlarmType.MATH }
     )

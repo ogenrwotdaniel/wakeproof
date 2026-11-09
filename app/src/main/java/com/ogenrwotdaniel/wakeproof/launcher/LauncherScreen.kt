@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,6 +58,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.distraction.AppGate
@@ -223,11 +225,19 @@ fun LauncherScreen(
                 Spacer(Modifier.height(16.dp))
 
                 // Chrome's hours and hour, so a submission is planned before it is begun.
-                val chromeStatus by produceState<String?>(null, pinned, agenda, limits) {
-                    while (true) {
-                        value = viewModel.chromeStatus()
-                        // A minute is fine for a line read at a glance; each read walks today's events.
-                        kotlinx.coroutines.delay(60_000)
+                // Only while the home screen is showing: the launcher is never destroyed, and
+                // a minute-by-minute read of today's Chrome use behind other apps is wasted
+                // battery. Redrawn at once when the shared deadline changes, so it turns with the wall.
+                val homeLifecycle = LocalLifecycleOwner.current
+                val deadlineVersion by com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.changes.collectAsState()
+                val chromeStatus by produceState<String?>(null, pinned, agenda, limits, homeLifecycle, deadlineVersion) {
+                    homeLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                        while (true) {
+                            value = viewModel.chromeStatus()
+                            // On the minute, so the line turns at 08:40 and 16:00, not up to a minute late.
+                            val now = java.time.LocalTime.now()
+                            delay(millisToNextMinute(now.second, now.nano))
+                        }
                     }
                 }
                 chromeStatus?.let {
@@ -408,11 +418,15 @@ private fun Agenda(
 @Composable
 private fun Clock() {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = LocalDateTime.now()
-            // Wake on the next minute boundary, not every second.
-            delay((60 - now.second) * 1_000L)
+    val lifecycle = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycle) {
+        // Only while the home screen shows; it is never destroyed.
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                now = LocalDateTime.now()
+                // Wake on the next minute boundary, not every second.
+                delay(millisToNextMinute(now.second, now.nano))
+            }
         }
     }
     val context = LocalContext.current
@@ -608,3 +622,10 @@ private fun MindfulPause(
         }
     }
 }
+
+/** Wakes just past the minute, so a wake a few ms early does not read the old one twice. */
+private const val MINUTE_MARGIN_MILLIS = 50L
+
+/** Pure: milliseconds from [second]:[nano] to just past the next minute; one formula for every home-screen ticker. */
+internal fun millisToNextMinute(second: Int, nano: Int): Long =
+    60_000L - second * 1_000L - nano / 1_000_000 + MINUTE_MARGIN_MILLIS

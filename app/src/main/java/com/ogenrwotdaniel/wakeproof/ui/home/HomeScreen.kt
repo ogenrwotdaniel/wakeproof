@@ -469,7 +469,9 @@ private fun AddExamDialog(
 ) {
     var name by remember { mutableStateOf("") }
     val dateState = androidx.compose.material3.rememberDatePickerState(
-        initialSelectedDateMillis = System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
+        // A local day a week out, as the picker's UTC midnight. Now + 7 days read in UTC
+        // is local today + 6 before 09:00 in Korea: inside exam week, and soon held.
+        initialSelectedDateMillis = java.time.LocalDate.now().plusDays(7).toEpochDay() * 24L * 60 * 60 * 1000
     )
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
@@ -483,6 +485,18 @@ private fun AddExamDialog(
                     singleLine = true
                 )
                 androidx.compose.material3.DatePicker(state = dateState, showModeToggle = false)
+                // Exam week holds once begun (see heldExamsAfter): say so before it is too late.
+                val pickedDay = dateState.selectedDateMillis?.let { it / (24L * 60 * 60 * 1000) }
+                val today = java.time.LocalDate.now().toEpochDay()
+                if (pickedDay != null && pickedDay - today in 0 until com.ogenrwotdaniel.wakeproof.distraction.EXAM_WEEK_DAYS) {
+                    Text(
+                        "This starts exam week now: gated apps stay shut all day until the exam. " +
+                            "Check the date: you have ten minutes to fix it. After that it is held, " +
+                            "and changing or deleting the exam will not end it early.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         },
         confirmButton = {

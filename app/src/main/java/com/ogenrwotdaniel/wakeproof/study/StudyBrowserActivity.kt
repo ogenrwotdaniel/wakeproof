@@ -18,6 +18,7 @@ import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -26,6 +27,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
 import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.SIDELOADED_BUILD
 import com.ogenrwotdaniel.wakeproof.distraction.clockUntrusted
@@ -50,6 +52,10 @@ class StudyBrowserActivity : ComponentActivity() {
     private var web: WebView? = null
     private var pendingUpload: ValueCallback<Array<Uri>>? = null
     private var resumedAt = 0L
+    /** Elapsed realtime since which every sleep check has found the clock doubted; 0 when trusted. */
+    private var doubtedSince = 0L
+
+    private fun doubtedFor(): Long = if (doubtedSince > 0) SystemClock.elapsedRealtime() - doubtedSince else 0L
     private val handler = Handler(Looper.getMainLooper())
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -60,17 +66,30 @@ class StudyBrowserActivity : ComponentActivity() {
     private val sleepCheck = object : Runnable {
         override fun run() {
             when {
-                web != null && asleep() -> showSleep()
+                // Out of sight a clock doubt must last five minutes of checks to close the
+                // page: a passing network-time blip must not end a lecture or an upload the
+                // user cannot see, but a clock set back must not let one play past 21:00.
+                web != null && (nightNow() || (clockDoubted() && (visible() || doubtedFor() >= DOUBT_OUT_OF_SIGHT_MILLIS))) -> showSleep()
                 // On the sleep screen: the page comes back by itself at 04:00, or once the clock is fixed.
-                web == null && !asleep() -> recreate()
+                // Only while visible (split screen counts): behind other apps, onResume brings it back.
+                web == null && !asleep() && visible() -> recreate()
             }
-            if (web != null || asleep()) handler.postDelayed(this, SLEEP_CHECK_MILLIS)
+            // Real time, not a count of checks: those run on uptime, which stands still in deep sleep.
+            doubtedSince = if (clockDoubted()) doubtedSince.takeIf { it > 0 } ?: SystemClock.elapsedRealtime() else 0L
+            // On the sleep screen behind other apps there is nothing left to close, and
+            // onResume checks at once on return: no need to wake every 30 s all night.
+            if (web != null || (asleep() && visible())) handler.postDelayed(this, SLEEP_CHECK_MILLIS)
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // For the screen's whole life, not only while it is in front: a lecture left
+        // playing behind another app is stopped at 21:00 by the page closing, and a
+        // WebView has no MediaSession for the media guard to pause. Pausing the page
+        // on every trip away was tried and dropped: it froze live Collaborate classes.
+        handler.post(sleepCheck)
         if (asleep()) {
             showSleep()
             return
@@ -92,6 +111,19 @@ class StudyBrowserActivity : ComponentActivity() {
                     handOff(url)
                     return true
                 }
+
+                // Every request, before it is sent: shouldOverrideUrlLoading never sees a
+                // form post, a back/forward step or a frame inside the page, so this is
+                // what keeps a feed out of the one browser no wall lands on. A whole page
+                // must be a study site; any part of one (frames included) must come from
+                // STUDY_PART_HOSTS. Refused requests get an empty 403: a frame stays blank.
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    val url = request.url
+                    if (url.scheme != "https" && url.scheme != "http") return null // data:, blob: stay with the page
+                    val host = url.host ?: return refused()
+                    val allowed = if (request.isForMainFrame) studyPageAllowed(url.scheme, host) else studyPartAllowed(host)
+                    return if (allowed) null else refused()
+                }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(
@@ -111,7 +143,7 @@ class StudyBrowserActivity : ComponentActivity() {
         }
         web = view
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true) // the sign-in hops between hosts
-        setContentView(view)
+        setContentView(insetFrame(view))
         // A bundle saved from the sleep screen holds no page, so restoring can come back empty.
         if (savedInstanceState == null || view.restoreState(savedInstanceState) == null) {
             view.loadUrl(BLACKBOARD_URL)
@@ -132,12 +164,14 @@ class StudyBrowserActivity : ComponentActivity() {
             recreate()
             return
         }
+        // At once: the loop's 30 s are uptime, which stands still while the phone sleeps,
+        // so a page left open at 20:50 would otherwise come back usable at 21:30.
+        handler.removeCallbacks(sleepCheck)
         handler.post(sleepCheck)
     }
 
     override fun onPause() {
         super.onPause()
-        handler.removeCallbacks(sleepCheck)
         // Only time on the page counts; the sleep screen is not Blackboard.
         if (web != null) {
             StudyBrowserTime.add(this, LocalDate.now().toEpochDay(), SystemClock.elapsedRealtime() - resumedAt)
@@ -151,9 +185,13 @@ class StudyBrowserActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(sleepCheck)
         pendingUpload?.onReceiveValue(null)
         pendingUpload = null
-        web?.destroy()
+        web?.let { page ->
+            (page.parent as? ViewGroup)?.removeView(page)
+            page.destroy()
+        }
         web = null
         super.onDestroy()
     }
@@ -163,20 +201,33 @@ class StudyBrowserActivity : ComponentActivity() {
      * off that clock, and the clock wall that covers every other app never lands on
      * WakeProof's own screens.
      */
-    private fun asleep(): Boolean =
-        clockDoubted() || LocalTime.now().let { sleepWallActive(it.hour * 60 + it.minute) }
+    private fun asleep(): Boolean = clockDoubted() || nightNow()
+
+    private fun nightNow(): Boolean = LocalTime.now().let { sleepWallActive(it.hour * 60 + it.minute) }
+
+    /** On screen at all, split screen and pop-up view included. */
+    private fun visible(): Boolean = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     /** As the clock wall: the sideloaded build only, where it covers every app. */
     private fun clockDoubted(): Boolean = SIDELOADED_BUILD && clockUntrusted(this)
 
     /** The night's wall, kept here because no wall lands on WakeProof's own screens. */
     private fun showSleep() {
+        // A file picker open now would hand its file to a destroyed page: cancel it, so
+        // the upload fails visibly on return instead of vanishing.
+        pendingUpload?.onReceiveValue(null)
+        pendingUpload = null
         // The page's time so far, before it goes: onPause skips a screen with no page.
-        if (web != null) {
+        // Behind another app, onPause has already counted it.
+        if (web != null && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             StudyBrowserTime.add(this, LocalDate.now().toEpochDay(), SystemClock.elapsedRealtime() - resumedAt)
             resumedAt = SystemClock.elapsedRealtime()
         }
-        web?.destroy()
+        // Detached first: destroying a WebView still on screen can leak or misbehave.
+        web?.let { page ->
+            (page.parent as? ViewGroup)?.removeView(page)
+            page.destroy()
+        }
         web = null
         val text = TextView(this).apply {
             text = if (clockDoubted()) {
@@ -191,13 +242,37 @@ class StudyBrowserActivity : ComponentActivity() {
             gravity = Gravity.CENTER
             setPadding(64, 64, 64, 64)
         }
-        setContentView(FrameLayout(this).apply {
+        setContentView(insetFrame(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(text, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             ))
-        })
+        }))
     }
+
+    /**
+     * [content] inside a frame padded clear of the status bar, the navigation bar and
+     * the keyboard. Android 15 draws every app edge to edge, so without it Blackboard's
+     * bottom bar sat under the navigation buttons and could not be tapped.
+     */
+    private fun insetFrame(content: android.view.View): FrameLayout = FrameLayout(this).apply {
+        setBackgroundColor(Color.BLACK)
+        addView(content, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(this) { frame, insets ->
+            val bars = insets.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                    androidx.core.view.WindowInsetsCompat.Type.displayCutout() or
+                    androidx.core.view.WindowInsetsCompat.Type.ime()
+            )
+            frame.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            androidx.core.view.WindowInsetsCompat.CONSUMED
+        }
+    }
+
+    private fun refused(): WebResourceResponse =
+        WebResourceResponse("text/plain", "utf-8", 403, "Not a study site", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
 
     /** A link off the study sites goes to the phone's browser, under its own walls. */
     private fun handOff(url: String) {
@@ -222,6 +297,8 @@ class StudyBrowserActivity : ComponentActivity() {
 
     companion object {
         private const val SLEEP_CHECK_MILLIS = 30_000L
+        /** How long a doubted clock must last before it closes a page out of sight. */
+        private const val DOUBT_OUT_OF_SIGHT_MILLIS = 5 * 60_000L
 
         fun intent(context: Context): Intent =
             Intent(context, StudyBrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

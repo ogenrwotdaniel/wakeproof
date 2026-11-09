@@ -74,9 +74,23 @@ class AgendaRepository @Inject constructor(
         WearAgendaSync.pushSoon(context)
     }
 
-    /** Event instances from the start of today through the next [WINDOW_DAYS] days. */
-    suspend fun upcomingEvents(): List<AgendaEvent> = withContext(Dispatchers.IO) {
-        if (!hasPermission()) return@withContext emptyList()
+    /**
+     * Event instances from the start of today through the next [WINDOW_DAYS] days,
+     * every row that could be read; empty when the calendar could not be read.
+     */
+    suspend fun upcomingEvents(): List<AgendaEvent> = readEvents()?.first.orEmpty()
+
+    /**
+     * [upcomingEvents], but null unless the whole calendar was read (no permission,
+     * a failed or null query, or any row that failed), so a reader that must not
+     * mistake a failure for an empty day (Chrome's deadline pass) can tell: a
+     * skipped row may be today's deadline.
+     */
+    suspend fun upcomingEventsOrNull(): List<AgendaEvent>? = readEvents()?.takeIf { it.second }?.first
+
+    /** The rows read, and whether every row was; null without calendar access. */
+    private suspend fun readEvents(): Pair<List<AgendaEvent>, Boolean>? = withContext(Dispatchers.IO) {
+        if (!hasPermission()) return@withContext null
         val zone = ZoneId.systemDefault()
         val begin = LocalDate.now().atStartOfDay(zone).toInstant().toEpochMilli()
         val end = LocalDate.now().plusDays(WINDOW_DAYS).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -89,24 +103,32 @@ class AgendaRepository @Inject constructor(
             CalendarContract.Instances.CALENDAR_DISPLAY_NAME
         )
         val events = mutableListOf<AgendaEvent>()
-        runCatching {
-            CalendarContract.Instances.query(context.contentResolver, projection, begin, end)
-                ?.use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val eventId = cursor.getLong(0)
-                        val instanceBegin = cursor.getLong(1)
+        var badRows = 0
+        val read = runCatching {
+            val cursor = CalendarContract.Instances.query(context.contentResolver, projection, begin, end)
+                ?: error("calendar query returned no cursor")
+            cursor.use { rows ->
+                while (rows.moveToNext()) {
+                    // One odd row is skipped, not the whole read: the agenda, the watch
+                    // and Chrome's deadline all lean on the rest.
+                    val row = runCatching {
+                        val eventId = rows.getLong(0)
+                        val instanceBegin = rows.getLong(1)
                         events += AgendaEvent(
                             key = "$eventId:$instanceBegin",
-                            title = cursor.getString(3).orEmpty().ifBlank { "(untitled)" },
+                            title = rows.getString(3).orEmpty().ifBlank { "(untitled)" },
                             beginMillis = instanceBegin,
-                            endMillis = cursor.getLong(2),
-                            allDay = cursor.getInt(4) == 1,
-                            calendarName = cursor.getString(5).orEmpty()
+                            endMillis = rows.getLong(2),
+                            allDay = rows.getInt(4) == 1,
+                            calendarName = rows.getString(5).orEmpty()
                         )
                     }
+                    if (row.isFailure) badRows++
                 }
+            }
         }
-        events.sortedBy { it.beginMillis }
+        // A read that broke partway keeps the rows it got, as it always did, but is not whole.
+        events.sortedBy { it.beginMillis } to (read.isSuccess && badRows == 0)
     }
 
     private companion object {

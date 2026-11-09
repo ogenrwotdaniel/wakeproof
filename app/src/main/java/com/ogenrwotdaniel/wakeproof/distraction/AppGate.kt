@@ -231,7 +231,11 @@ enum class GateVerdict {
     /** Android keeps the text of the notifications the walls strip. */
     HISTORY_WALL,
     /** Settings' screen that would switch the uninstall lock off; see [com.ogenrwotdaniel.wakeproof.admin.UninstallLock]. */
-    ADMIN_LOCK_WALL
+    ADMIN_LOCK_WALL,
+    /** An app with fixed hours ([AppHours], Chrome) outside them; see [chromeHoursShut]. */
+    APP_HOURS_WALL,
+    /** A gated app during exam week; see [examWeekHeld]. */
+    EXAM_WALL
 }
 
 /**
@@ -255,8 +259,11 @@ enum class GateVerdict {
  * 5. An app in its first week ([quarantined]).
  * 6. Outside a session, gated and [capped] apps while Notification History is on.
  * 7. An app whose daily cap is spent is walled until midnight (or next open window).
- * 8. Shut outside the Monday–Thursday open window or all day Friday–Sunday
- *    ([GateVerdict.WINDOW_WALL]). The caller scopes [outsideWindow] to gated apps.
+ * 8. An app with fixed hours outside them ([GateVerdict.APP_HOURS_WALL]); a gated
+ *    app in exam week ([GateVerdict.EXAM_WALL]); otherwise shut outside the
+ *    Monday–Thursday open window or all day Friday–Sunday ([GateVerdict.WINDOW_WALL]).
+ *    The caller scopes [examWeek] and [outsideWindow] to gated apps. Each has its
+ *    own verdict so the wall says why without working it out again.
  * 9. For gated apps inside the window: the bedtime wall; otherwise
  *    [GateVerdict.ALLOW] directly (no countdown wait, no separate daily budget).
  */
@@ -268,6 +275,8 @@ fun gateVerdict(
     gated: Boolean,
     outsideWindow: Boolean = false,
     bedtime: Boolean = false,
+    appHoursShut: Boolean = false,
+    examWeek: Boolean = false,
     sleeping: Boolean = false,
     quarantined: Boolean = false,
     clockUntrusted: Boolean = false,
@@ -290,6 +299,8 @@ fun gateVerdict(
     quarantined -> GateVerdict.QUARANTINE_WALL
     historyOn && !focusSessionActive && (gated || capped) -> GateVerdict.HISTORY_WALL
     capSpent -> GateVerdict.CAP_WALL
+    appHoursShut -> GateVerdict.APP_HOURS_WALL
+    examWeek -> GateVerdict.EXAM_WALL
     outsideWindow -> GateVerdict.WINDOW_WALL
     !gated -> GateVerdict.ALLOW
     bedtime -> GateVerdict.BEDTIME_WALL

@@ -103,10 +103,27 @@ class LauncherViewModel @Inject constructor(
             }
             _pinned.value = pinnedApps(context, apps)
             _apps.value = apps
-            val upcoming = withContext(Dispatchers.IO) { agendaRepository.upcomingEvents() }
+            val readAt = android.os.SystemClock.elapsedRealtime()
+            val whole = withContext(Dispatchers.IO) { agendaRepository.upcomingEventsOrNull() }
             val today = LocalDate.now()
-            _agenda.value = upcoming.filter { onAgenda(it, today) }
-            WearAgendaSync.push(context, upcoming)
+            when {
+                // Calendar access gone: the agenda and the watch empty, as they always did.
+                // The shared deadline is left alone: no reading is not "no deadline".
+                !agendaRepository.hasPermission() -> {
+                    _agenda.value = emptyList()
+                    WearAgendaSync.push(context, emptyList())
+                }
+                whole != null -> {
+                    _agenda.value = whole.filter { onAgenda(it, today) }
+                    com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.publish(
+                        today.toEpochDay(), deadlineMinuteToday(whole, today, java.time.ZoneId.systemDefault()), readAt
+                    )
+                    WearAgendaSync.push(context, whole)
+                }
+                // A failed or partial read: the agenda shows what could be read, the watch and
+                // the shared deadline keep the last whole reading.
+                else -> _agenda.value = agendaRepository.upcomingEvents().filter { onAgenda(it, today) }
+            }
         }
     }
 
@@ -117,7 +134,8 @@ class LauncherViewModel @Inject constructor(
     suspend fun chromeStatus(): String? {
         if (_pinned.value.none { it.packageName == AppGate.CHROME }) return null
         val now = java.time.LocalDateTime.now()
-        val deadline = deadlineMinuteToday(_agenda.value, now.toLocalDate(), java.time.ZoneId.systemDefault())
+        // The wall's own reading, so the line never says open while the wall says shut.
+        val deadline = com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.forDay(now.toLocalDate().toEpochDay())
         return chromeStatusLine(
             day = now.dayOfWeek,
             minuteOfDay = now.hour * 60 + now.minute,

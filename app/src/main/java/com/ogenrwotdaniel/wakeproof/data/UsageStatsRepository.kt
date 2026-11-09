@@ -186,20 +186,26 @@ class UsageStatsRepository @Inject constructor(
     }
 
     /**
-     * Minutes per day over the last 7 days (oldest first) for [packages]
-     * together, measured like [snapshot]. Feeds the week card: time in the
-     * waiting apps, day by day.
+     * Minutes per day over the last 7 days (oldest first) for each of [groups]
+     * (each group's packages together), measured like [snapshot], from one walk
+     * of the week's events: one list per group in the same order, empty for an
+     * empty group. Feeds the week card: waiting apps and Chrome, day by day.
      */
-    suspend fun weekMinutesFor(packages: Set<String>): List<DayUsage> = withContext(Dispatchers.IO) {
-        if (!hasAccess() || packages.isEmpty()) return@withContext emptyList()
+    suspend fun weekMinutesForGroups(groups: List<Set<String>>): List<List<DayUsage>> = withContext(Dispatchers.IO) {
+        val all = groups.flatMapTo(mutableSetOf()) { it }
+        if (!hasAccess() || all.isEmpty()) return@withContext groups.map { emptyList() }
         val usm = context.getSystemService(UsageStatsManager::class.java)
         val zone = ZoneId.systemDefault()
         val now = System.currentTimeMillis()
         val days = (6 downTo 0).map { LocalDate.now().minusDays(it.toLong()) }
         val edges = days.map { it.atStartOfDay(zone).toInstant().toEpochMilli() } + now
-        val events = collectForegroundEvents(usm, edges.first(), now, packages)
+        val events = collectForegroundEvents(usm, edges.first(), now, all)
         val spans = foregroundMillisPerSpan(events, edges, now)
-        days.mapIndexed { index, day -> DayUsage(day.toEpochDay(), spans[index].values.sum() / 60_000) }
+        groups.map { group ->
+            if (group.isEmpty()) emptyList() else days.mapIndexed { index, day ->
+                DayUsage(day.toEpochDay(), spans[index].filterKeys { it in group }.values.sum() / 60_000)
+            }
+        }
     }
 
     /**

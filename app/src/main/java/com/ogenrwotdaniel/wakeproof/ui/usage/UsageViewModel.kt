@@ -229,8 +229,10 @@ class UsageViewModel @Inject constructor(
         val gated = withContext(Dispatchers.IO) {
             AppGate.gatedPackages(context, usageStatsRepository.installedApps().map { it.packageName }, gateBrowsers)
         }
-        val minutes = usageStatsRepository.weekMinutesFor(gated).associate { it.epochDay to it.minutes }
-        val chrome = usageStatsRepository.weekMinutesFor(setOf(AppGate.CHROME)).associate { it.epochDay to it.minutes }
+        // One walk of the week's events for both.
+        val (gatedWeek, chromeWeek) = usageStatsRepository.weekMinutesForGroups(listOf(gated, setOf(AppGate.CHROME)))
+        val minutes = gatedWeek.associate { it.epochDay to it.minutes }
+        val chrome = chromeWeek.associate { it.epochDay to it.minutes }
         val today = LocalDate.now().toEpochDay()
         val blackboard = com.ogenrwotdaniel.wakeproof.study.StudyBrowserTime.minutes(context, (today - 6)..today)
         return ((today - 6)..today).map { day ->

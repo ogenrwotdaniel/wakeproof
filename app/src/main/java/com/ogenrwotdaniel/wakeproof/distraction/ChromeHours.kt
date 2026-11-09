@@ -220,3 +220,36 @@ fun chromeStatusLine(
     val pass = if (deadline != null && close != CHROME_OPEN_END_MINUTES) " (deadline today)" else ""
     return "Chrome: ${capMinutes - usedMinutes} min left, open until ${formatClock(close)}$pass"
 }
+
+/**
+ * Today's deadline as last read from the calendar, by whichever reader read it
+ * last: the block service (housekeeping, the 15:00–21:00 minute check, Chrome in
+ * front) or the home screen's Chrome line. One reading for both, so the line and
+ * the wall never disagree about whether a deadline holds Chrome open.
+ */
+object ChromeDeadline {
+    private data class Reading(val epochDay: Long, val minute: Int?, val readAt: Long)
+
+    @Volatile private var reading: Reading? = null
+
+    private val _changes = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /** Bumped on every new reading, so the home-screen line redraws with the wall. */
+    val changes: kotlinx.coroutines.flow.StateFlow<Long> = _changes
+
+    /** Records a reading taken at [readAt] (elapsed realtime); an older one never overwrites a newer. */
+    @Synchronized
+    fun publish(epochDay: Long, minute: Int?, readAt: Long) {
+        val last = reading
+        if (last == null || readAt >= last.readAt) {
+            reading = Reading(epochDay, minute, readAt)
+            if (last?.epochDay != epochDay || last.minute != minute) _changes.value = _changes.value + 1
+        }
+    }
+
+    /** Elapsed realtime of the newest reading, 0 before any. */
+    fun lastReadAt(): Long = reading?.readAt ?: 0L
+
+    /** Today's deadline minute, or null when there is none or nothing has been read today. */
+    fun forDay(epochDay: Long): Int? = reading?.takeIf { it.epochDay == epochDay }?.minute
+}

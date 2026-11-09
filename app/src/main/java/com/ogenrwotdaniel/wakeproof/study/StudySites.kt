@@ -42,6 +42,64 @@ fun studySiteAllowed(url: String): Boolean {
     return studyHostAllowed(host)
 }
 
-/** Pure: [host] is one of [STUDY_HOST_SUFFIXES] or under one. */
+/**
+ * Pure: [studySiteAllowed] from a scheme and host already parsed (WebView's own
+ * parse), for a request whose full URL java.net.URI might refuse (a raw `|` or `{`
+ * in a sign-in query), which would leave a real page blank.
+ */
+fun studyPageAllowed(scheme: String?, host: String?): Boolean =
+    scheme == "https" && host != null && studyHostAllowed(host.lowercase())
+
+/** Pure: [host] is one of [STUDY_HOST_SUFFIXES] or under one, and not a proxy. */
 fun studyHostAllowed(host: String): Boolean =
-    STUDY_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }
+    underAny(host, STUDY_HOST_SUFFIXES) && !looksLikeProxy(host)
+
+/**
+ * A university proxy or redirector (`*.libproxy.unist.ac.kr`, EZproxy's
+ * `www-youtube-com.<proxy>`) would put any site under an allowed suffix. None of
+ * the hosts Blackboard was seen using (2026-11-10) has such a label.
+ */
+private fun looksLikeProxy(host: String): Boolean =
+    host.split('.').any { label -> "proxy" in label } ||
+        // EZproxy's host-for-host form; on UNIST only, where Blackboard's own regional
+        // hosts (several hyphens, on blackboard.com) do not live.
+        (underAny(host, listOf("unist.ac.kr")) && host.substringBefore('.').count { it == '-' } >= 2)
+
+private fun underAny(host: String, suffixes: List<String>): Boolean =
+    suffixes.any { host == it || host.endsWith(".$it") }
+
+/**
+ * Hosts a study page may load parts from (scripts, styles, files, video, its
+ * notification socket, and any frame inside it), beyond the page hosts. Taken from
+ * what Blackboard Ultra loaded on 2026-11-10 with a sign-in and a lecture: its
+ * file store and CDN, the Ally accessibility service, Pendo and New Relic (usage
+ * tracking it breaks without), and Microsoft's sign-in assets. A frame from
+ * anywhere else, a YouTube embed included, does not load: the part check is what
+ * keeps a feed out of the one browser no wall lands on.
+ */
+val STUDY_PART_HOSTS = listOf(
+    "blackboard.com",
+    // Course content (attached images, document and PDF previews) on hosted Learn.
+    "blackboardcdn.com",
+    "ally.ac",
+    "dmuwut6e40u5o.cloudfront.net",
+    "pendo.io",
+    "pendo-static-6207542686449664.storage.googleapis.com",
+    "js-agent.newrelic.com",
+    "bam.nr-data.net",
+    // Microsoft's sign-in page loads these by tenant and region; any one missing
+    // leaves the UNIST sign-in blank.
+    "aadcdn.msauth.net",
+    "aadcdn.msftauth.net",
+    "aadcdn.msftauthimages.net",
+    "logincdn.msauth.net",
+    "logincdn.msftauth.net",
+    "acctcdn.msauth.net",
+    "acctcdn.msftauth.net"
+)
+
+/** Pure: whether a part of a study page (anything not the whole page) may load from [host]. */
+fun studyPartAllowed(host: String): Boolean {
+    val h = host.lowercase()
+    return studyHostAllowed(h) || underAny(h, STUDY_PART_HOSTS)
+}

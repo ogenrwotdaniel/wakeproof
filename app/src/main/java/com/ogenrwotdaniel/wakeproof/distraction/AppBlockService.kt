@@ -354,9 +354,50 @@ class AppBlockService : Service() {
             while (true) {
                 val today = LocalDate.now().toEpochDay()
                 // A failed read keeps what was known: exam week must not lift on an I/O error.
-                examWeek = runCatching {
-                    examWeekFor(examDao.observeUpcoming(today).first().map { it.name to it.epochDay }, today)
-                }.getOrElse { examWeek }
+                // Holds and seen ids are read first, apart from the exams, and off the main
+                // thread (the first read loads the prefs file). Holds null when unreadable:
+                // then nothing is written back, or the stored holds would be replaced by this
+                // week's rows alone and a deleted exam's hold lost. An unreadable seen-list
+                // only delays a new hold by one read.
+                val (heldRead, seen) = withContext(Dispatchers.IO) {
+                    val heldSet = runCatching {
+                        nightPrefs.getStringSet(KEY_EXAMS_HELD, emptySet()).orEmpty()
+                            .mapNotNullTo(mutableSetOf()) { decodeHeldExam(it) }
+                    }.getOrNull()
+                    val seenAt = runCatching {
+                        nightPrefs.getStringSet(KEY_EXAMS_SEEN, emptySet()).orEmpty()
+                            .mapNotNull { decodeSeen(it) }.toMap()
+                    }.getOrNull()
+                    // Either unreadable: nothing is written back. A lost seen-list written back
+                    // would restart every exam's grace.
+                    if (seenAt == null) null to emptyMap() else heldSet to seenAt
+                }
+                val held = heldRead.orEmpty()
+                examWeek = try {
+                    val rows = examDao.observeUpcoming(today).first()
+                        .map { ExamRow(it.syncId, it.name, it.epochDay, it.updatedAt) }
+                    val exams = rows.map { it.name to it.epochDay }
+                    // Kept, so deleting, moving or undercutting an exam mid-week cannot lift the wall.
+                    val holds = heldExamsAfter(
+                        held, seen, rows, today, clockProven(this@AppBlockService), System.currentTimeMillis()
+                    )
+                    val keep = holds.held
+                    if (heldRead != null && (keep != held || holds.seen != seen)) {
+                        nightPrefs.edit()
+                            .putStringSet(KEY_EXAMS_HELD, keep.mapTo(mutableSetOf()) { encodeHeldExam(it) })
+                            .putStringSet(KEY_EXAMS_SEEN, holds.seen.mapTo(mutableSetOf()) { (k, t) -> encodeSeen(k, t) })
+                            .apply()
+                    }
+                    // Holds unreadable: the week known before still stands until its exam.
+                    val fromMemory = if (heldRead == null) listOfNotNull(examWeek) else emptyList()
+                    examWeekHeld(exams, keep + fromMemory, today)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The last week known, too, while its exam has not passed: it may come
+                    // from an exam not yet held.
+                    examWeekHeld(emptyList(), held + listOfNotNull(examWeek?.takeIf { it.epochDay >= today }), today)
+                }
                 delay(EXAM_WEEK_REFRESH_MILLIS)
             }
         }
@@ -423,13 +464,48 @@ class AppBlockService : Service() {
             while (true) {
                 // First, so a restart late on a deadline day does not shut Chrome
                 // until the slower reads below are done.
-                runCatching { refreshChromeDeadline() }
+                try {
+                    refreshChromeDeadline()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The last reading stands; the next pass tries again.
+                }
                 // Ends a new app's quarantine week on time.
                 refreshQuarantine()
                 // A locked-alarm ring whose service died is started again.
                 runCatching { StrictAlarm.resumeIfPending(this@AppBlockService) }
                 runCatching { nightReminders() }
                 delay(HOUSEKEEPING_EVERY_MILLIS)
+            }
+        }
+        // From 15:00 to 21:00 on weekdays the calendar is read every minute, not every
+        // five: a deadline added after Chrome shut must open it as soon as the home
+        // screen says so, not five minutes later.
+        scope.launch {
+            while (true) {
+                // Every minute, window or not: outside it the pass is a clock check and no
+                // read. A longer sleep runs on uptime, which stands still in deep sleep, and
+                // could leave the check asleep well into the window.
+                delay(DEADLINE_FRESH_MILLIS)
+                val now = LocalDateTime.now()
+                val minute = now.hour * 60 + now.minute
+                // Screen on only, and not when warnChrome has just read it.
+                val lastRead = maxOf(deadlineReadAt, ChromeDeadline.lastReadAt())
+                // A little under the loop's minute, so a wake a moment early does not skip a whole minute.
+                val fresh = SystemClock.elapsedRealtime() - lastRead < DEADLINE_FRESH_MILLIS - 10_000L
+                val interactive = powerManager.isInteractive
+                if (interactive && !fresh && now.dayOfWeek.value <= 5 &&
+                    minute in DEADLINE_WATCH_FROM until SLEEP_START_MINUTES
+                ) {
+                    try {
+                        refreshChromeDeadline()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // A failed read keeps the last deadline; the next minute tries again.
+                    }
+                }
             }
         }
         scope.launch {
@@ -670,14 +746,16 @@ class AppBlockService : Service() {
             onFocusList = current in focusList,
             capSpent = capSpent,
             gated = gated,
-            // Exam week shuts gated apps all day, window or not; see [ExamWeek].
-            outsideWindow = (gated && examWeek != null) || (gated && windowShutActive(
+            outsideWindow = gated && windowShutActive(
                 dayOfWeek = now.dayOfWeek,
                 minuteOfDay = minuteOfDay,
                 weekendShut = rules.weekendShut,
                 startMinutes = rules.openWindowStartMinutes,
                 endMinutes = rules.openWindowEndMinutes
-            )) || appHoursFor(current)?.let { chromeHoursShut(now.dayOfWeek, minuteOfDay, chromeDeadline(), it) } == true,
+            ),
+            appHoursShut = appHoursFor(current)?.let { chromeHoursShut(now.dayOfWeek, minuteOfDay, chromeDeadline(), it) } == true,
+            // Exam week shuts gated apps all day, window or not; see [ExamWeek].
+            examWeek = gated && examWeek != null,
             bedtime = gated && bedtimeActive(
                 minuteOfDay = minuteOfDay,
                 startMinutes = rules.bedtimeStartMinutes
@@ -744,17 +822,19 @@ class AppBlockService : Service() {
                 capMinutes = limit?.minutes ?: 0,
                 reopensAt = nextOpenFor(current, now.dayOfWeek)
             )
-            // Read once: the state is volatile, and a second read could find it gone.
-            GateVerdict.WINDOW_WALL -> if (appHoursFor(current) == null && examWeek.also { examNow = it } != null) {
-                val exam = examNow!!
+            GateVerdict.EXAM_WALL -> {
+                // Read once: the state is volatile. Gone by now means the week just ended;
+                // the next tick lets the app through.
+                val exam = examWeek
                 BlockedActivity.ruleIntent(
                     this,
                     "Exam week",
-                    "${exam.name} is on ${LocalDate.ofEpochDay(exam.epochDay).format(EXAM_DAY_FORMAT)}. " +
+                    (exam?.let { "${it.name} is on ${LocalDate.ofEpochDay(it.epochDay).format(EXAM_DAY_FORMAT)}. " } ?: "") +
                         "$label and every other gated app stay shut until it is over. " +
                         "The phone and SMS always work."
                 )
-            } else if (appHoursFor(current) != null) {
+            }
+            GateVerdict.APP_HOURS_WALL -> {
                 val hours = appHoursFor(current) ?: CHROME_HOURS
                 BlockedActivity.ruleIntent(
                     this,
@@ -767,7 +847,8 @@ class AppBlockService : Service() {
                         "Blackboard on the home screen is open every day. " +
                         "The phone and SMS always work."
                 )
-            } else {
+            }
+            GateVerdict.WINDOW_WALL -> {
                 val open = openWindow()
                 val (headline, body) = windowWallCopy(
                     label = label,
@@ -960,27 +1041,28 @@ class AppBlockService : Service() {
     private fun chromeOpensText(day: java.time.DayOfWeek, minuteOfDay: Int, afterToday: Boolean): String =
         chromeOpensPhrase(chromeNextOpening(day, minuteOfDay, afterToday, chromeDeadline()), ::clock)
 
-    /** The exam that makes today exam week ([examWeekFor]), or null. */
+    /**
+     * The exam that makes today exam week ([examWeekHeld]), or null. It can name a
+     * held exam since deleted or moved: a begun week never lifts early.
+     */
     @Volatile private var examWeek: ExamWeek? = null
 
-    /** [examWeek] as [wallIntent] read it, on the main thread only. */
-    private var examNow: ExamWeek? = null
 
     /** When today's deadline was last read; Chrome in front reads it every minute. */
     @Volatile private var deadlineReadAt = 0L
 
-    /** Today's deadline minute from the calendar, read by [refreshChromeDeadline]; null on another day. */
-    @Volatile private var chromeDeadlineRead: Pair<Long, Int?> = -1L to null
-
-    private fun chromeDeadline(): Int? =
-        chromeDeadlineRead.takeIf { it.first == LocalDate.now().toEpochDay() }?.second
+    /** Today's deadline minute, shared with the home screen's Chrome line ([ChromeDeadline]). */
+    private fun chromeDeadline(): Int? = ChromeDeadline.forDay(LocalDate.now().toEpochDay())
 
     /** Housekeeping: the calendar is read every few minutes, never on the tick. */
     private suspend fun refreshChromeDeadline() {
+        val readAt = SystemClock.elapsedRealtime()
+        deadlineReadAt = readAt
         val today = LocalDate.now()
-        val events = agendaRepository.upcomingEvents()
-        chromeDeadlineRead = today.toEpochDay() to
-            deadlineMinuteToday(events, today, java.time.ZoneId.systemDefault())
+        // A failed read publishes nothing: saved as "no deadline", it would be the newest
+        // reading and shut Chrome in the middle of an upload.
+        val events = agendaRepository.upcomingEventsOrNull() ?: return
+        ChromeDeadline.publish(today.toEpochDay(), deadlineMinuteToday(events, today, java.time.ZoneId.systemDefault()), readAt)
     }
 
     /**
@@ -991,8 +1073,17 @@ class AppBlockService : Service() {
         // A deadline added just before 16:00 must be seen before the wall lands on the upload.
         val sinceRead = SystemClock.elapsedRealtime() - deadlineReadAt
         if (sinceRead > DEADLINE_FRESH_MILLIS) {
+            // Stamped now as well as in the read, so ticks before it lands launch no more reads.
             deadlineReadAt = SystemClock.elapsedRealtime()
-            scope.launch { runCatching { refreshChromeDeadline() } }
+            scope.launch {
+                try {
+                    refreshChromeDeadline()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The last reading stands.
+                }
+            }
         }
         val limit = blockedLimit(hours.packageName) ?: return
         val used = if (baselineFor == hours.packageName) {
@@ -1002,7 +1093,7 @@ class AppBlockService : Service() {
         }
         val today = LocalDate.now().toEpochDay()
         val close = chromeCloseMinute(LocalDate.now().dayOfWeek, chromeDeadline(), hours)
-        val prefs = chromePrefs
+        val prefs = nightPrefs
         // Keyed on the minute it announced: a deadline read after the 16:00 warning
         // moves the close, and that later close is warned of too.
         val closingKey = today * MINUTES_PER_DAY + (close ?: 0)
@@ -1029,7 +1120,8 @@ class AppBlockService : Service() {
         }
     }
 
-    private val chromePrefs by lazy {
+    /** Night reminders, Chrome's warnings and the held exam week share one file. */
+    private val nightPrefs by lazy {
         createDeviceProtectedStorageContext().getSharedPreferences(NIGHT_PREFS, Context.MODE_PRIVATE)
     }
 
@@ -1217,8 +1309,7 @@ class AppBlockService : Service() {
         val now = System.currentTimeMillis()
         val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
         val today = LocalDate.now().toEpochDay()
-        val prefs = createDeviceProtectedStorageContext()
-            .getSharedPreferences(NIGHT_PREFS, Context.MODE_PRIVATE)
+        val prefs = nightPrefs
         if (windDownDue(minuteOfDay, prefs.getLong(KEY_WIND_DOWN_DAY, -1L), today)) {
             prefs.edit().putLong(KEY_WIND_DOWN_DAY, today).apply()
             nightNotice(
@@ -1821,6 +1912,9 @@ class AppBlockService : Service() {
         /** Often enough that a new exam or midnight takes hold within a few minutes. */
         private const val EXAM_WEEK_REFRESH_MILLIS = 5 * 60_000L
         private const val DEADLINE_FRESH_MILLIS = 60_000L
+        private const val DEADLINE_WATCH_FROM = 15 * 60
+        private const val KEY_EXAMS_HELD = "exam_weeks_held"
+        private const val KEY_EXAMS_SEEN = "exam_week_seen_at"
         private val EXAM_DAY_FORMAT = java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM")
         private const val KEY_CHROME_HOUR_DAY = "chrome_hour_day"
         private const val CHROME_CHANNEL_ID = "wakeproof_chrome_hours"

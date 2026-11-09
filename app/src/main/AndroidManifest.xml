@@ -184,6 +184,16 @@
             android:taskAffinity=""
             android:theme="@style/Theme.WakeProof.Translucent" />
 
+        <!-- Blackboard inside WakeProof, locked to UNIST's sites (study/StudySites.kt). Its own
+             task, so it comes back from recents; rotation must not reload an upload. -->
+        <activity
+            android:name=".study.StudyBrowserActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="false"
+            android:label="Blackboard"
+            android:taskAffinity="com.ogenrwotdaniel.wakeproof.study"
+            android:theme="@style/Theme.WakeProof" />
+
         <receiver
             android:name=".alarm.BootReceiver"
             android:directBootAware="true"

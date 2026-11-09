@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.MediaPlayer
-import android.media.RingtoneManager
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
@@ -338,7 +337,12 @@ class PomodoroTimerService : Service() {
                 runCatching { dying.release() }
             }
         }
-        chimePlayer?.release()
+        // The session-complete chime starts just before stopSelf; releasing it
+        // here would cut it off. It releases itself on completion or error, and
+        // this late release (a no-op after those) catches one that never got there.
+        chimePlayer?.let { player ->
+            android.os.Handler(mainLooper).postDelayed({ runCatching { player.release() } }, CHIME_RELEASE_MS)
+        }
         chimePlayer = null
         _state.value = PomodoroState()
         super.onDestroy()
@@ -498,7 +502,9 @@ class PomodoroTimerService : Service() {
         "Leave $appLabel within ${TREE_GRACE_MS / 1000} s or this focus block won't count."
     )
 
-    private fun notifyTree(title: String, text: String) {
+    /** [sound] is the raw tone to play, or null for none; tree news gets the low warning note. */
+    private fun notifyTree(title: String, text: String, sound: Int? = R.raw.tree_warning) {
+        sound?.let(::chime)
         val open = PendingIntent.getActivity(
             this, 4,
             Intent(this, com.ogenrwotdaniel.wakeproof.MainActivity::class.java)
@@ -593,11 +599,8 @@ class PomodoroTimerService : Service() {
 
     private suspend fun onPhaseComplete() {
         val current = _state.value
-        // The session-complete notification alerts loudly on its own channel, so
-        // chiming here too would fire the same tone twice over itself.
-        val finishing = current.phase == PomodoroPhase.FOCUS &&
-            current.targetFocusBlocks in 1..(current.completedFocusSessions + 1)
-        if (!finishing) chime()
+        // The session-complete notification's channel is silent; this is its sound too.
+        chime()
         if (current.phase == PomodoroPhase.FOCUS) {
             runCatching {
                 completionRepository.log(
@@ -763,14 +766,16 @@ class PomodoroTimerService : Service() {
         syncWatch()
         AppBlockService.sync(applicationContext)
         onSessionUnderway()
-        notifyTree(
-            "Session resumed",
-            if (outcome.witheredBlock || resume.treeWithered) {
-                "Closing WakeProof doesn't end a session — it cost this block's tree."
-            } else {
-                "Closing WakeProof doesn't end a session."
-            }
-        )
+        // Only news is told: the timer screen already shows a session running on.
+        if (outcome.witheredBlock || resume.treeWithered) {
+            notifyTree(
+                "Session resumed",
+                "Closing WakeProof doesn't end a session — it cost this block's tree.",
+                // Often after a reboot in the night: a notice, not a reason to sound
+                // the alarm stream through Do Not Disturb.
+                sound = null
+            )
+        }
     }
 
     /** Focus block [block]'s length (1-based); see [focusSecondsForBlock]. */
@@ -785,34 +790,45 @@ class PomodoroTimerService : Service() {
     }
 
     /**
-     * Phase-transition alert, deliberately loud: the tone is played through the
-     * ALARM stream at full player volume rather than handed to [RingtoneManager],
-     * whose notification stream sits far too low to be heard over study music or
-     * from across the room — and a transition you miss defeats the timer. Falls
-     * back to the plain ringtone if the player cannot be built.
+     * Phase-transition alert. It plays the bundled soft two-note chime
+     * (`res/raw/focus_chime`, `tools/sounds/chime.py`) at [CHIME_VOLUME]. It used to
+     * be the phone's default notification tone at full volume, which was loud and
+     * frightening at the end of every block. It stays on the ALARM stream so session
+     * Do Not Disturb and a muted notification stream cannot swallow it, and a
+     * transition you miss defeats the timer. The vibration below is the part that
+     * carries across the room.
      */
-    private fun chime() {
-        chimePlayer?.release()
-        chimePlayer = null
-        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        val started = uri != null && runCatching {
+    private fun chime(tone: Int = R.raw.focus_chime) {
+        // One still playing is left to finish (it releases itself), so a tree
+        // notice right after a transition does not cut the transition's chime off.
+        var fresh: MediaPlayer? = null
+        runCatching {
             MediaPlayer().also { player ->
+                fresh = player
                 chimePlayer = player
                 player.setAudioAttributes(ALERT_AUDIO_ATTRIBUTES)
-                player.setDataSource(this, uri)
-                player.setVolume(1f, 1f)
+                resources.openRawResourceFd(tone).use { fd ->
+                    player.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
+                }
+                player.setVolume(CHIME_VOLUME, CHIME_VOLUME)
                 player.setOnPreparedListener { it.start() }
                 player.setOnCompletionListener { done ->
                     done.release()
                     if (chimePlayer === done) chimePlayer = null
                 }
-                player.setOnErrorListener { _, _, _ -> true } // stay silent, never crash
+                player.setOnErrorListener { failed, _, _ ->
+                    failed.release()
+                    if (chimePlayer === failed) chimePlayer = null
+                    fallbackTone()
+                    true // never crash
+                }
                 player.prepareAsync()
             }
-        }.isSuccess
-        if (!started) {
-            chimePlayer = null
-            runCatching { RingtoneManager.getRingtone(this, uri)?.play() }
+        }.onFailure {
+            // Only the player this call made: an earlier chime still playing is left alone.
+            fresh?.release()
+            if (chimePlayer === fresh) chimePlayer = null
+            fallbackTone()
         }
         // Two firm pulses at full amplitude: one soft buzz goes unnoticed in a pocket.
         getSystemService(VibratorManager::class.java).defaultVibrator.vibrate(
@@ -823,6 +839,20 @@ class PomodoroTimerService : Service() {
         )
     }
 
+    /**
+     * The phone's own notification tone, for when the bundled chime cannot play.
+     * On the notification stream, not the alarm one, so it is the ordinary level
+     * the user already lives with: a transition must still be heard, and the
+     * channel itself is silent.
+     */
+    private fun fallbackTone() {
+        runCatching {
+            android.media.RingtoneManager.getRingtone(
+                this, android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+            )?.play()
+        }
+    }
+
     private fun createChannel() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
@@ -830,19 +860,19 @@ class PomodoroTimerService : Service() {
                 CHANNEL_ID, "Pomodoro timer", NotificationManager.IMPORTANCE_LOW
             ).apply { description = "Live Pomodoro countdown" }
         )
-        // Separate channel for the end of a session: the countdown itself has to
-        // stay silent, but this one must cut through, so it alerts on the alarm
-        // stream instead of the quieter notification stream.
+        manager.deleteNotificationChannel(LEGACY_ALERT_CHANNEL_ID)
+        // Separate channel for the end of a session and tree warnings: heads-up
+        // importance so they show over other apps; the sound is [chime]'s.
         manager.createNotificationChannel(
             NotificationChannel(
                 ALERT_CHANNEL_ID, "Pomodoro alerts", NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Session-complete alerts"
-                setSound(
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
-                    ALERT_AUDIO_ATTRIBUTES
-                )
-                enableVibration(true)
+                // Silent channel: the service plays [chime] itself, so the
+                // last block and tree warnings get the same soft level as every
+                // other transition instead of the alarm stream at full scale.
+                setSound(null, null)
+                enableVibration(false) // [chime] vibrates too; two would overlap
             }
         )
     }
@@ -911,7 +941,20 @@ class PomodoroTimerService : Service() {
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.POMODORO_STOP"
         private const val ACTION_RESTORE = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESTORE"
         private const val CHANNEL_ID = "wakeproof_pomodoro"
-        private const val ALERT_CHANNEL_ID = "wakeproof_pomodoro_alerts"
+        /**
+         * A channel's sound cannot be changed once created, so the soft chime
+         * needed a new id; [LEGACY_ALERT_CHANNEL_ID] (the loud default tone) is deleted.
+         */
+        private const val ALERT_CHANNEL_ID = "wakeproof_pomodoro_alerts_soft"
+        private const val LEGACY_ALERT_CHANNEL_ID = "wakeproof_pomodoro_alerts"
+        /**
+         * Player level for the transition chime on the alarm stream. That stream
+         * usually sits near the top, so full scale was a jolt; this is clearly
+         * audible across a desk without startling.
+         */
+        private const val CHIME_VOLUME = 0.35f
+        /** Longer than the 2.6 s chime, with room for a slow prepare. */
+        private const val CHIME_RELEASE_MS = 10_000L
         private const val NOTIFICATION_ID = 2
         private const val SESSION_DONE_NOTIFICATION_ID = 3
         private const val TREE_NOTIFICATION_ID = 5

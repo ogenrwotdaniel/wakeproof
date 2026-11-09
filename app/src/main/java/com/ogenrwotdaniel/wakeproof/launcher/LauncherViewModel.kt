@@ -19,6 +19,8 @@ import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.agenda.EventReminders
 import com.ogenrwotdaniel.wakeproof.agenda.startEventFocus
+import com.ogenrwotdaniel.wakeproof.distraction.chromeStatusLine
+import com.ogenrwotdaniel.wakeproof.distraction.deadlineMinuteToday
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync
@@ -106,6 +108,25 @@ class LauncherViewModel @Inject constructor(
             _agenda.value = upcoming.filter { onAgenda(it, today) }
             WearAgendaSync.push(context, upcoming)
         }
+    }
+
+    /**
+     * The home screen's line on Chrome ([chromeStatusLine]), or null when Chrome
+     * is not pinned. Today's deadline comes from the agenda already read.
+     */
+    suspend fun chromeStatus(): String? {
+        if (_pinned.value.none { it.packageName == AppGate.CHROME }) return null
+        val now = java.time.LocalDateTime.now()
+        val deadline = deadlineMinuteToday(_agenda.value, now.toLocalDate(), java.time.ZoneId.systemDefault())
+        return chromeStatusLine(
+            day = now.dayOfWeek,
+            minuteOfDay = now.hour * 60 + now.minute,
+            deadline = deadline,
+            usedMinutes = usedMinutesToday(AppGate.CHROME),
+            // Always there ([withFixedCaps]); read from the one place the wall reads too.
+            capMinutes = limits.value[AppGate.CHROME]?.minutes ?: return null,
+            formatClock = { m -> com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime(context, m / 60, m % 60) }
+        )
     }
 
     /** Minutes spent in [packageName] today, for the mindful pause. */

@@ -23,11 +23,17 @@ private const val CLAUDE = "com.anthropic.claude"
 /** Standalone Google Gemini — replaces the gated Google app (`googlequicksearchbox`), 2026-11-06. */
 private const val GEMINI = AppGate.GEMINI_APP
 
+/** Chrome — where assignments are submitted; pinned and ungated by the user's request, 2026-11-09. */
+private const val CHROME = AppGate.CHROME
+
+/** Microsoft Outlook — UNIST university email, instead of the portal (user's request, 2026-11-09). */
+private const val OUTLOOK = "com.microsoft.office.outlook"
+
 /** KakaoBank — added by the user's request, 2026-10-27. */
-private const val KAKAOBANK = "com.kakaobank.channel"
+private const val KAKAOBANK = AppGate.KAKAOBANK
 
 /** UNIST Smart-Check (attendance) — added by the user's request, 2026-11-04. */
-private const val UNIST_SMART_CHECK = "kr.ac.unist.atdc"
+private const val UNIST_SMART_CHECK = AppGate.UNIST_SMART_CHECK
 
 /**
  * Samsung's Expert RAW camera. The package name is from memory, not read off
@@ -41,12 +47,12 @@ private const val EXPERT_RAW_LABEL = "Expert RAW"
  * the new-app quarantine: the bank and attendance apps are needed the day they
  * are put back, and a role can be handed to any app, so role pins do not count.
  */
-val NAMED_TOOLS = setOf(EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, KAKAOBANK, UNIST_SMART_CHECK)
+val NAMED_TOOLS = setOf(EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, CHROME, OUTLOOK, KAKAOBANK, UNIST_SMART_CHECK)
 
 /**
  * The tools that are always on the home screen and cannot be unpinned, in
- * order: the phone, the cameras, notes, Claude, Gemini, the bank, UNIST
- * attendance, the clock and the calendar.
+ * order: the phone, the cameras, notes, Claude, Gemini, Chrome, Outlook,
+ * the bank, UNIST attendance, the clock and the calendar.
  * Chosen by the user as things a phone is FOR rather than things it is used
  * to fill time with. Roles (phone, camera, clock, calendar) are resolved from
  * whatever app holds them, so a non-Samsung default still lands here; apps
@@ -67,7 +73,7 @@ fun permanentPackages(context: Context): List<String> {
         Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
     )
     return listOfNotNull(
-        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, KAKAOBANK, UNIST_SMART_CHECK,
+        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, CHROME, OUTLOOK, KAKAOBANK, UNIST_SMART_CHECK,
         clock, calendar
     )
         .filter { it != context.packageName }

@@ -49,6 +49,10 @@ import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
 import com.ogenrwotdaniel.wakeproof.data.WallDay
 import com.ogenrwotdaniel.wakeproof.distraction.BEDTIME_END_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.CHROME_DAILY_CAP_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.CHROME_OPEN_END_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.CHROME_OPEN_START_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.DEADLINE_WORDS_SHOWN
 import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_START_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.WallRule
@@ -610,8 +614,8 @@ private fun WallRulesSection(
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    // Earn-the-feed only acts with no open window, and the window is fixed on.
-    WallRule.entries.filter { it != WallRule.EARN_THE_FEED }.forEach { rule ->
+    // Browser gating is fixed on, so its row would say only what Chrome's below does.
+    WallRule.entries.filter { it != WallRule.GATE_BROWSERS }.forEach { rule ->
         val value = rules.value(rule)
         Column(Modifier.fillMaxWidth()) {
             Text(text = "🔒 " + ruleTitle(rule, value, context), style = MaterialTheme.typography.bodyLarge)
@@ -634,6 +638,21 @@ private fun WallRulesSection(
                 }
             }
         }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        fun clock(m: Int) = formatAlarmTime(context, m / 60, m % 60)
+        Text(
+            text = "🔒 Chrome: weekdays ${clock(CHROME_OPEN_START_MINUTES)}–${clock(CHROME_OPEN_END_MINUTES)}, " +
+                "$CHROME_DAILY_CAP_MINUTES min a day",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Every other browser follows the gated schedule. On a weekday, a calendar event " +
+                "titled $DEADLINE_WORDS_SHOWN keeps Chrome open until then, as late as " +
+                "${clock(SLEEP_START_MINUTES)}. Blackboard on the home screen is open every day.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
     // Fixed in code (NightRules) like the rest.
     Column(Modifier.fillMaxWidth()) {
@@ -672,7 +691,6 @@ private fun gatedOpenText(rules: WallRules, context: android.content.Context): S
 private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Context): String = when (rule) {
     WallRule.GATE_BROWSERS -> "Gate browsers too"
     WallRule.WEEKEND_SHUT -> "Shut Friday to Sunday"
-    WallRule.EARN_THE_FEED -> "Earn the feed"
     WallRule.BEDTIME_START_MINUTES ->
         if (value < 0) "Bedtime wall: off"
         else "Bedtime wall from ${formatAlarmTime(context, value / 60, value % 60)}"
@@ -685,12 +703,9 @@ private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Conte
 }
 
 private fun ruleSubtitle(rule: WallRule, context: android.content.Context): String = when (rule) {
-    WallRule.GATE_BROWSERS ->
-        "Chrome, Samsung Internet and other browsers follow the same schedule as social apps."
+    WallRule.GATE_BROWSERS -> "Every browser but Chrome follows the same schedule as social apps."
     WallRule.WEEKEND_SHUT ->
         "Gated apps stay completely shut from Friday through Sunday, reopening Monday."
-    WallRule.EARN_THE_FEED ->
-        "When no open window is set, gated apps stay shut until today's first focus block."
     WallRule.BEDTIME_START_MINUTES ->
         "Gated apps shut until ${formatAlarmTime(context, BEDTIME_END_MINUTES / 60, BEDTIME_END_MINUTES % 60)} the next morning."
     WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."

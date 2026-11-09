@@ -11,8 +11,30 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Only the collections the phone, tablet, watch and laptop write, so a bug or
+    // a stolen token cannot grow the tree into new places. Keep in step with
+    // SyncTable.kt, SyncEngine, LiveFocusSession, LiveCloudFeed, StudyUsageSync,
+    // ClipCloud, wear/CloudDocuments.kt and tools/clip/clipsync/cloud.py.
+    function owner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function knownCollection(collection) {
+      return collection in [
+        'alarms', 'completion_logs', 'flashcards', 'exams', 'parked_thoughts',
+        'settings', 'live', 'studyUsage', 'clips'
+      ];
+    }
+
+    // Every document WakeProof writes is a flat record of a few dozen fields at
+    // most; a clip chunk is one field. Firestore caps a document at 1 MiB anyway.
+    function reasonableShape() {
+      return request.resource.data.keys().size() <= 64;
+    }
+
     match /users/{userId}/{collection}/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, delete: if owner(userId) && knownCollection(collection);
+      allow create, update: if owner(userId) && knownCollection(collection) && reasonableShape();
     }
 
     // Anything not matched above is denied. Firestore denies by default, but

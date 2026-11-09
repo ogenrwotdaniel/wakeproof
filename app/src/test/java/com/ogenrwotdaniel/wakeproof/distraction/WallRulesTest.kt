@@ -50,7 +50,7 @@ class WallRulesTest {
     @Test
     fun `every rule defaults to on, with weekend shut, 16 00 bedtime and 08 10 to 08 50 window`() {
         val rules = WallRules()
-        assertTrue(rules.gateBrowsers && rules.weekendShut && rules.earnTheFeed && rules.sessionDnd)
+        assertTrue(rules.gateBrowsers && rules.weekendShut && rules.sessionDnd)
         assertEquals(16 * 60, rules.bedtimeStartMinutes)
         assertEquals(8 * 60 + 10, rules.openWindowStartMinutes)
         assertEquals(8 * 60 + 50, rules.openWindowEndMinutes)
@@ -71,10 +71,55 @@ class WallRulesTest {
 
     @Test
     fun `browsers are gated only while the rule is on`() {
-        val chrome = "com.android.chrome"
+        val samsung = "com.sec.android.app.sbrowser"
         val other = ApplicationInfo.CATEGORY_UNDEFINED
-        assertTrue(AppGate.isGated(chrome, other, null, isBrowser = true, gateBrowsers = true))
-        assertFalse(AppGate.isGated(chrome, other, null, isBrowser = true, gateBrowsers = false))
+        assertTrue(AppGate.isGated(samsung, other, null, isBrowser = true, gateBrowsers = true))
+        assertFalse(AppGate.isGated(samsung, other, null, isBrowser = true, gateBrowsers = false))
+    }
+
+    @Test
+    fun `chrome alone is never gated, but chrome beta is`() {
+        val other = ApplicationInfo.CATEGORY_UNDEFINED
+        assertFalse(AppGate.isGated(AppGate.CHROME, other, null, isBrowser = true, gateBrowsers = true))
+        assertTrue(AppGate.isGated("com.chrome.beta", other, null, isBrowser = true, gateBrowsers = true))
+    }
+
+    @Test
+    fun `chrome opens 08 40 to 16 00 on weekdays and is shut otherwise`() {
+        val mon = DayOfWeek.MONDAY
+        assertTrue(chromeHoursShut(mon, 8 * 60 + 39))
+        assertFalse(chromeHoursShut(mon, 8 * 60 + 40))
+        assertFalse(chromeHoursShut(DayOfWeek.FRIDAY, 15 * 60 + 59))
+        assertTrue(chromeHoursShut(mon, 16 * 60))
+        assertTrue(chromeHoursShut(mon, 0))
+        assertTrue(chromeHoursShut(DayOfWeek.SATURDAY, 10 * 60))
+        assertTrue(chromeHoursShut(DayOfWeek.SUNDAY, 10 * 60))
+    }
+
+    @Test
+    fun `chrome always carries an hour block cap, tighter if one was stored`() {
+        val other = "com.example" to com.ogenrwotdaniel.wakeproof.data.AppLimit(30)
+        assertEquals(
+            com.ogenrwotdaniel.wakeproof.data.AppLimit(60, com.ogenrwotdaniel.wakeproof.data.LimitMode.BLOCK),
+            withFixedCaps(mapOf(other))[AppGate.CHROME]
+        )
+        assertEquals(other.second, withFixedCaps(mapOf(other))["com.example"])
+        val looser = AppGate.CHROME to com.ogenrwotdaniel.wakeproof.data.AppLimit(120)
+        assertEquals(60, withFixedCaps(mapOf(looser))[AppGate.CHROME]?.minutes)
+        val tighter = AppGate.CHROME to com.ogenrwotdaniel.wakeproof.data.AppLimit(20)
+        assertEquals(20, withFixedCaps(mapOf(tighter))[AppGate.CHROME]?.minutes)
+    }
+
+    @Test
+    fun `chrome's next opening`() {
+        val mon = DayOfWeek.MONDAY
+        assertEquals(ChromeOpening.TODAY, chromeNextOpening(mon, 7 * 60, afterToday = false))
+        assertEquals(ChromeOpening.TOMORROW, chromeNextOpening(mon, 17 * 60, afterToday = false))
+        assertEquals(ChromeOpening.TOMORROW, chromeNextOpening(mon, 7 * 60, afterToday = true))
+        assertEquals(ChromeOpening.MONDAY, chromeNextOpening(DayOfWeek.FRIDAY, 17 * 60, afterToday = false))
+        assertEquals(ChromeOpening.MONDAY, chromeNextOpening(DayOfWeek.FRIDAY, 7 * 60, afterToday = true))
+        assertEquals(ChromeOpening.MONDAY, chromeNextOpening(DayOfWeek.SATURDAY, 7 * 60, afterToday = false))
+        assertEquals(ChromeOpening.TOMORROW, chromeNextOpening(DayOfWeek.SUNDAY, 7 * 60, afterToday = false))
     }
 
     @Test
@@ -155,20 +200,19 @@ class WallRulesTest {
 
     @Test
     fun `the walls stand in front of a gated app inside the window and leave other apps alone`() {
-        fun verdict(bedtime: Boolean = false, feedEarned: Boolean = true) =
+        fun verdict(bedtime: Boolean = false) =
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = false, gated = true, bedtime = bedtime, feedEarned = feedEarned
+                capSpent = false, gated = true, bedtime = bedtime
             )
         assertEquals(GateVerdict.ALLOW, verdict())
-        assertEquals(GateVerdict.BEDTIME_WALL, verdict(bedtime = true, feedEarned = false))
-        assertEquals(GateVerdict.EARN_WALL, verdict(feedEarned = false))
+        assertEquals(GateVerdict.BEDTIME_WALL, verdict(bedtime = true))
 
         assertEquals(
             GateVerdict.ALLOW,
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = false, gated = false, bedtime = true, feedEarned = false
+                capSpent = false, gated = false, bedtime = true
             )
         )
     }
@@ -191,22 +235,15 @@ class OpenWindowTest {
     }
 
     @Test
-    fun `outside the window comes before bedtime and earn-the-feed`() {
+    fun `outside the window comes before bedtime`() {
         fun verdict(gated: Boolean, outsideWindow: Boolean = true) = gateVerdict(
             essential = false, focusSessionActive = false, onFocusList = false,
             capSpent = false, gated = gated,
-            outsideWindow = outsideWindow, bedtime = true, feedEarned = false
+            outsideWindow = outsideWindow, bedtime = true
         )
         assertEquals(GateVerdict.WINDOW_WALL, verdict(gated = true))
         assertEquals(GateVerdict.WINDOW_WALL, verdict(gated = false))
         assertEquals(GateVerdict.ALLOW, verdict(gated = false, outsideWindow = false))
     }
 
-    @Test
-    fun `the open window counts as earned, without one the focus block is needed`() {
-        assertTrue(feedEarned(earnTheFeed = true, focusDoneToday = false, windowStartMinutes = 490))
-        assertFalse(feedEarned(earnTheFeed = true, focusDoneToday = false, windowStartMinutes = RULE_OFF_MINUTES))
-        assertTrue(feedEarned(earnTheFeed = true, focusDoneToday = true, windowStartMinutes = RULE_OFF_MINUTES))
-        assertTrue(feedEarned(earnTheFeed = false, focusDoneToday = false, windowStartMinutes = RULE_OFF_MINUTES))
-    }
 }

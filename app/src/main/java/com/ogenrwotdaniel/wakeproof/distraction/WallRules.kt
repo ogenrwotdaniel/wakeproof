@@ -34,9 +34,6 @@ enum class WallRule(val key: String, val default: Int) {
      */
     WEEKEND_SHUT("weekend_shut", RULE_ON),
 
-    /** Gated apps stay shut until today's first focus block is done (when no window is set). */
-    EARN_THE_FEED("earn_the_feed", RULE_ON),
-
     /**
      * Minute of the day the bedtime wall starts. It lasts until
      * [BEDTIME_END_MINUTES] (16:00 to 08:40 since 2026-11-08, was 17:00 until
@@ -95,7 +92,6 @@ data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
     fun value(rule: WallRule): Int = values[rule] ?: rule.default
     val gateBrowsers: Boolean get() = value(WallRule.GATE_BROWSERS) != RULE_OFF
     val weekendShut: Boolean get() = value(WallRule.WEEKEND_SHUT) != RULE_OFF
-    val earnTheFeed: Boolean get() = value(WallRule.EARN_THE_FEED) != RULE_OFF
     val bedtimeStartMinutes: Int get() = value(WallRule.BEDTIME_START_MINUTES)
     val sessionDnd: Boolean get() = value(WallRule.SESSION_DND) != RULE_OFF
     val openWindowStartMinutes: Int get() = value(WallRule.OPEN_WINDOW_START_MINUTES)
@@ -107,6 +103,8 @@ data class WallRules(val values: Map<WallRule, Int> = emptyMap()) {
  * editable is read only through [WallRule.fixedOrStricter]: a stricter bedtime
  * or narrower window stays, a later bedtime, a switch turned off or a loosening
  * queued behind the week never comes back. Nothing writes here any more.
+ * Kept (2026-11-09): the phone and tablet were updated in place from the
+ * editable build, so a stricter value saved then may still be there.
  */
 @Singleton
 class WallRulesRepository @Inject constructor(@ApplicationContext private val context: Context) {
@@ -261,12 +259,3 @@ fun windowWallCopy(
     }
     return "Not open now" to body
 }
-
-/**
- * Pure: whether the feed is earned. The open window counts as earned
- * (2026-11-01, user's choice): at 08:10 there is rarely a focus block done
- * yet, so earn-the-feed would have kept a morning window shut almost every
- * day. With the window off, earn-the-feed works as before.
- */
-fun feedEarned(earnTheFeed: Boolean, focusDoneToday: Boolean, windowStartMinutes: Int): Boolean =
-    !earnTheFeed || focusDoneToday || windowStartMinutes >= 0

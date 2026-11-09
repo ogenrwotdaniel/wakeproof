@@ -153,6 +153,13 @@ class WindowNotificationGuard : NotificationListenerService() {
         AppBlockService.walledNow(sbn.packageName)?.let { return it }
         val now = LocalDateTime.now()
         val minuteOfDay = now.hour * 60 + now.minute
+        // Chrome is not gated, so the window below would never remove its web pushes,
+        // nor those of sites installed from it, which post as their own shell. The
+        // calendar is not read here, so a deadline is assumed: a removed notification
+        // is lost for good, and this only runs while the block service is down.
+        notificationHoursFor(sbn.packageName)?.let { hours ->
+            return chromeHoursShut(now.dayOfWeek, minuteOfDay, deadline = SLEEP_START_MINUTES, hours = hours)
+        }
         // The bedtime wall (until 08:40) takes the window's start, so the real
         // opening, not the raw window, decides what is removed.
         val open = gatedOpenWindow(rules)

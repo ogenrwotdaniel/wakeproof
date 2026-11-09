@@ -44,6 +44,16 @@ object AppGate {
     const val PLAY_STORE = "com.android.vending"
 
     /**
+     * Chrome, the one browser left ungated (2026-11-09, user's request): it is
+     * where assignments are submitted, and a deadline does not wait for the
+     * 08:10 window. Only the stable package; Beta, Samsung Internet and every
+     * other browser stay gated. Chrome keeps hours of its own instead
+     * ([chromeHoursShut], [CHROME_DAILY_CAP_MINUTES]), and is still behind the
+     * sleep, focus, clock and quarantine walls.
+     */
+    const val CHROME = "com.android.chrome"
+
+    /**
      * Named outright because an app's declared category is optional and many
      * leave it unset. Messaging apps are on it by the user's choice; SMS apps
      * are NOT — see [isGated].
@@ -85,7 +95,9 @@ object AppGate {
      * trampoline) hosted inside [GOOGLE_APP] to [GEMINI_APP], while leaving
      * Google Discover (`GoogleAppActivity`, `ContentViewerActivity`), Search
      * (`SearchActivity`), and the in-app web viewer (`SilkPaneActivity`) under
-     * [GOOGLE_APP] so they remain gated.
+     * [GOOGLE_APP] so they remain gated. A site installed from Chrome as an app
+     * has a small launcher package of its own ([WEBAPK_PREFIX]) but its screens
+     * are Chrome's, so they stay [CHROME] and share its weekday hours and hour.
      */
     fun effectivePackage(packageName: String, className: String): String =
         if (packageName == GOOGLE_APP &&
@@ -97,11 +109,26 @@ object AppGate {
         }
 
     /**
+     * The launcher shells Chrome installs for sites saved as apps. Their screens
+     * run in Chrome; their notifications follow Chrome's hours
+     * ([notificationHoursFor]). Not exempt from [NewAppQuarantine]: a package
+     * name is no proof, and Blackboard has its own screen.
+     */
+    const val WEBAPK_PREFIX = "org.chromium.webapk."
+
+    /** KakaoBank: its sign-in and payment pages open inside Chrome. */
+    const val KAKAOBANK = "com.kakaobank.channel"
+
+    /** UNIST Smart-Check (attendance). */
+    const val UNIST_SMART_CHECK = "kr.ac.unist.atdc"
+
+
+    /**
      * Browsers, named outright for the same reason as [KNOWN_GATED_PACKAGES];
      * [browserPackages] adds whatever else on the phone opens a plain web link.
      */
     val KNOWN_BROWSERS = setOf(
-        "com.android.chrome", "com.chrome.beta", "com.sec.android.app.sbrowser",
+        CHROME, "com.chrome.beta", "com.sec.android.app.sbrowser",
         "org.mozilla.firefox", "com.brave.browser", "com.opera.browser",
         "com.opera.mini.native", "com.microsoft.emmx", "com.duckduckgo.mobile.android",
         "com.vivaldi.browser", "com.kiwibrowser.browser", "com.naver.whale",
@@ -132,6 +159,7 @@ object AppGate {
      *
      * Browsers are gated when [gateBrowsers]: otherwise instagram.com and
      * youtube.com in a browser skip every wall the apps themselves are behind.
+     * [CHROME] is the exception, kept open for coursework.
      */
     fun isGated(
         packageName: String,
@@ -144,7 +172,7 @@ object AppGate {
             packageName != defaultSmsPackage && (
                 category == ApplicationInfo.CATEGORY_SOCIAL ||
                     category == ApplicationInfo.CATEGORY_VIDEO ||
-                    (gateBrowsers && isBrowser)
+                    (gateBrowsers && isBrowser && packageName != CHROME)
                 )
             )
 
@@ -193,7 +221,7 @@ val SIDELOADED_BUILD = BuildConfig.DEBUG
 
 /** What [AppBlockService] does about the app on screen. */
 enum class GateVerdict {
-    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL, EARN_WALL,
+    ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL,
     /** The night's sleep wall over every non-essential app; see [sleepWallActive]. */
     SLEEP_WALL,
     /** An app in its first week; see [NewAppQuarantine]. */
@@ -229,7 +257,7 @@ enum class GateVerdict {
  * 7. An app whose daily cap is spent is walled until midnight (or next open window).
  * 8. Shut outside the Monday–Thursday open window or all day Friday–Sunday
  *    ([GateVerdict.WINDOW_WALL]). The caller scopes [outsideWindow] to gated apps.
- * 9. For gated apps inside the window: bedtime wall, then earn-the-feed; otherwise
+ * 9. For gated apps inside the window: the bedtime wall; otherwise
  *    [GateVerdict.ALLOW] directly (no countdown wait, no separate daily budget).
  */
 fun gateVerdict(
@@ -240,7 +268,6 @@ fun gateVerdict(
     gated: Boolean,
     outsideWindow: Boolean = false,
     bedtime: Boolean = false,
-    feedEarned: Boolean = true,
     sleeping: Boolean = false,
     quarantined: Boolean = false,
     clockUntrusted: Boolean = false,
@@ -266,6 +293,5 @@ fun gateVerdict(
     outsideWindow -> GateVerdict.WINDOW_WALL
     !gated -> GateVerdict.ALLOW
     bedtime -> GateVerdict.BEDTIME_WALL
-    !feedEarned -> GateVerdict.EARN_WALL
     else -> GateVerdict.ALLOW
 }

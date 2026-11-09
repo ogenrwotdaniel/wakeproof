@@ -15,6 +15,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import com.ogenrwotdaniel.wakeproof.distraction.withFixedCaps
 
 private val Context.limitsDataStore: DataStore<Preferences> by preferencesDataStore("distraction_limits")
 
@@ -44,7 +45,7 @@ class DistractionLimitRepository @Inject constructor(
 
     /** Package → daily cap. */
     val limits: Flow<Map<String, AppLimit>> = dataStore.data.map { prefs ->
-        parseLimits(prefs[LIMITS] ?: emptySet())
+        withFixedCaps(parseLimits(prefs[LIMITS] ?: emptySet()))
     }
 
     suspend fun currentLimits(): Map<String, AppLimit> = limits.first()
@@ -71,7 +72,9 @@ class DistractionLimitRepository @Inject constructor(
         dataStore.edit { prefs ->
             // Loosenings queued under the old week are never landed; drop them with the first change.
             DEAD_KEYS.forEach { prefs.remove(it) }
-            val current = parseLimits(prefs[LIMITS] ?: emptySet())[packageName]
+            // Judged against what is enforced: a Chrome cap looser than its fixed hour
+            // would be stored, reported as applied, and then ignored.
+            val current = withFixedCaps(parseLimits(prefs[LIMITS] ?: emptySet()))[packageName]
             if (isLoosening(current, proposed)) return@edit
             prefs[LIMITS] = withLimit(prefs[LIMITS] ?: emptySet(), packageName, proposed)
             applied = true

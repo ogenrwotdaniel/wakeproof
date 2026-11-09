@@ -24,7 +24,9 @@ fun gatedAppsInOtherProfiles(context: Context, gateBrowsers: Boolean): List<Stri
         .flatMap { user -> launcherApps.getActivityList(null, user) }
         .filter { activity ->
             val info = activity.applicationInfo
-            AppGate.isGated(
+            // Chrome too: its hours are kept only in this profile, so a copy elsewhere
+            // is a browser with none. Listed so it can be removed.
+            info.packageName == AppGate.CHROME || AppGate.isGated(
                 packageName = info.packageName,
                 category = info.category,
                 defaultSmsPackage = sms,

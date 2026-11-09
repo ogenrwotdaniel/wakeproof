@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
@@ -58,6 +59,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
+import com.ogenrwotdaniel.wakeproof.distraction.AppGate
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.formatDurationMinutes
 import java.time.Instant
@@ -138,9 +140,12 @@ fun LauncherScreen(
 
     // Gated apps open directly inside their Mon–Thu 08:10–08:50 window (no 5-min
     // wait) and hit BlockedActivity via onLaunch outside it. Non-gated capped apps
-    // keep the 45 s mindful pause; everything else opens at once.
+    // keep the 45 s mindful pause; everything else opens at once. Chrome skips it:
+    // its hours and fixed hour cap already bound it, and a deadline is no time to wait.
     val open: (InstalledApp) -> Unit = { app ->
-        if (app.packageName in limits && app.packageName !in gated) {
+        if (app.packageName in limits && app.packageName !in gated &&
+            com.ogenrwotdaniel.wakeproof.distraction.appHoursFor(app.packageName) == null
+        ) {
             pausing = app
         } else {
             onLaunch(app.packageName)
@@ -217,6 +222,23 @@ fun LauncherScreen(
                 )
                 Spacer(Modifier.height(16.dp))
 
+                // Chrome's hours and hour, so a submission is planned before it is begun.
+                val chromeStatus by produceState<String?>(null, pinned, agenda, limits) {
+                    while (true) {
+                        value = viewModel.chromeStatus()
+                        // A minute is fine for a line read at a glance; each read walks today's events.
+                        kotlinx.coroutines.delay(60_000)
+                    }
+                }
+                chromeStatus?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+
                 val byPackage = apps.associateBy { it.packageName }
                 val favorites = settings.launcherFavorites
                     .filter { it !in gated && it !in limits }
@@ -234,6 +256,20 @@ fun LauncherScreen(
                             onAppInfo = { onAppInfo(app.packageName) }
                         )
                     }
+                    // WakeProof's own Blackboard screen, open when Chrome is not.
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    Text(
+                        text = "Blackboard",
+                        fontSize = 22.sp,
+                        color = Color.White,
+                        modifier = Modifier
+                            .combinedClickable(onClick = {
+                                context.startActivity(
+                                    com.ogenrwotdaniel.wakeproof.study.StudyBrowserActivity.intent(context)
+                                )
+                            })
+                            .padding(vertical = 6.dp)
+                    )
                     favorites.forEach { app ->
                         AppRow(
                             app = app,

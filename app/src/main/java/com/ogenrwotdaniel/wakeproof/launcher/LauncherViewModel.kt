@@ -20,7 +20,6 @@ import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.agenda.EventReminders
 import com.ogenrwotdaniel.wakeproof.agenda.startEventFocus
 import com.ogenrwotdaniel.wakeproof.distraction.chromeStatusLine
-import com.ogenrwotdaniel.wakeproof.distraction.deadlineMinuteToday
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import com.ogenrwotdaniel.wakeproof.wear.WearAgendaSync
@@ -104,32 +103,29 @@ class LauncherViewModel @Inject constructor(
             _pinned.value = pinnedApps(context, apps)
             _apps.value = apps
             val readAt = android.os.SystemClock.elapsedRealtime()
-            val whole = withContext(Dispatchers.IO) { agendaRepository.upcomingEventsOrNull() }
+            val read = withContext(Dispatchers.IO) { agendaRepository.readCalendar() }
             val today = LocalDate.now()
-            when {
+            if (read == null) {
                 // Calendar access gone: the agenda and the watch empty, as they always did.
                 // The shared deadline is left alone: no reading is not "no deadline".
-                !agendaRepository.hasPermission() -> {
-                    _agenda.value = emptyList()
-                    WearAgendaSync.push(context, emptyList())
-                }
-                whole != null -> {
-                    _agenda.value = whole.filter { onAgenda(it, today) }
-                    com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.publish(
-                        today.toEpochDay(), deadlineMinuteToday(whole, today, java.time.ZoneId.systemDefault()), readAt
-                    )
-                    WearAgendaSync.push(context, whole)
-                }
-                // A failed or partial read: the agenda shows what could be read, the watch and
-                // the shared deadline keep the last whole reading.
-                else -> _agenda.value = agendaRepository.upcomingEvents().filter { onAgenda(it, today) }
+                _agenda.value = emptyList()
+                WearAgendaSync.push(context, emptyList())
+            } else {
+                // The agenda shows every row that could be read. The watch gets only a whole
+                // read, keeping its last one otherwise; the shared deadline takes a partial
+                // read only for a later deadline ([deadlineAfterRead]).
+                _agenda.value = read.events.filter { onAgenda(it, today) }
+                com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.publishFrom(
+                    read, today, java.time.ZoneId.systemDefault(), readAt
+                )
+                if (read.whole) WearAgendaSync.push(context, read.events)
             }
         }
     }
 
     /**
      * The home screen's line on Chrome ([chromeStatusLine]), or null when Chrome
-     * is not pinned. Today's deadline comes from the agenda already read.
+     * is not pinned. Today's deadline is the shared reading ([ChromeDeadline]).
      */
     suspend fun chromeStatus(): String? {
         if (_pinned.value.none { it.packageName == AppGate.CHROME }) return null

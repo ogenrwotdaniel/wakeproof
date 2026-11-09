@@ -230,7 +230,7 @@ fun LauncherScreen(
                 // battery. Redrawn at once when the shared deadline changes, so it turns with the wall.
                 val homeLifecycle = LocalLifecycleOwner.current
                 val deadlineVersion by com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.changes.collectAsState()
-                val chromeStatus by produceState<String?>(null, pinned, agenda, limits, homeLifecycle, deadlineVersion) {
+                val chromeStatus by produceState<String?>(null, pinned, limits, homeLifecycle, deadlineVersion) {
                     homeLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                         while (true) {
                             value = viewModel.chromeStatus()

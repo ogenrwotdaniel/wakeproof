@@ -469,9 +469,11 @@ private fun AddExamDialog(
 ) {
     var name by remember { mutableStateOf("") }
     val dateState = androidx.compose.material3.rememberDatePickerState(
-        // A local day a week out, as the picker's UTC midnight. Now + 7 days read in UTC
-        // is local today + 6 before 09:00 in Korea: inside exam week, and soon held.
-        initialSelectedDateMillis = java.time.LocalDate.now().plusDays(7).toEpochDay() * 24L * 60 * 60 * 1000
+        // A local day 8 out, as the picker's UTC midnight: the first day heldExamsAfter
+        // does not hold (it holds from the day before exam week), so an untouched default
+        // is not held today; it is from tomorrow, like any planned exam. Now + days read
+        // in UTC is a local day short before 09:00 in Korea.
+        initialSelectedDateMillis = java.time.LocalDate.now().plusDays(com.ogenrwotdaniel.wakeproof.distraction.EXAM_WEEK_DAYS + 1L).toEpochDay() * 24L * 60 * 60 * 1000
     )
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
@@ -488,13 +490,34 @@ private fun AddExamDialog(
                 // Exam week holds once begun (see heldExamsAfter): say so before it is too late.
                 val pickedDay = dateState.selectedDateMillis?.let { it / (24L * 60 * 60 * 1000) }
                 val today = java.time.LocalDate.now().toEpochDay()
-                if (pickedDay != null && pickedDay - today in 0 until com.ogenrwotdaniel.wakeproof.distraction.EXAM_WEEK_DAYS) {
+                // The same range heldExamsAfter holds: exam week, and the day before it.
+                if (pickedDay != null && pickedDay - today in 0..com.ogenrwotdaniel.wakeproof.distraction.EXAM_WEEK_DAYS) {
+                    val starts = if (pickedDay - today == com.ogenrwotdaniel.wakeproof.distraction.EXAM_WEEK_DAYS.toLong()) "tomorrow" else "now"
+                    // The service gives no grace on a doubted clock (heldExamsAfter): do not promise one.
+                    val dialogContext = LocalContext.current
+                    val clockDoubted = remember {
+                        com.ogenrwotdaniel.wakeproof.distraction.SIDELOADED_BUILD && runCatching {
+                            com.ogenrwotdaniel.wakeproof.distraction.clockUntrusted(dialogContext)
+                        }.getOrDefault(false)
+                    }
+                    val grace = if (clockDoubted) {
+                        "Check the date before saving: this device's clock is not trusted, so it is held " +
+                            "within minutes,"
+                    } else {
+                        "Check the date: you have at least ten minutes to fix it. After that it is held,"
+                    }
                     Text(
-                        "This starts exam week now: gated apps stay shut all day until the exam. " +
-                            "Check the date: you have ten minutes to fix it. After that it is held, " +
-                            "and changing or deleting the exam will not end it early.",
+                        "This starts exam week $starts: gated apps stay shut all day until the exam. " +
+                            "$grace and changing or deleting the exam will not end it early.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
+                    )
+                } else if (pickedDay != null && pickedDay > today) {
+                    // A later date is held too, with no warning on the day: say it here.
+                    Text(
+                        "Gated apps shut for the seven days up to the exam. From the day before " +
+                            "those, the exam is held: changing or deleting it will not end them early.",
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }

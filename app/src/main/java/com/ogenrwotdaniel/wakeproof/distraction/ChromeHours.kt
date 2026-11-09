@@ -247,9 +247,55 @@ object ChromeDeadline {
         }
     }
 
-    /** Elapsed realtime of the newest reading, 0 before any. */
-    fun lastReadAt(): Long = reading?.readAt ?: 0L
+    /**
+     * Publishes what [read] (a calendar read taken at [readAt]) says of [today]'s
+     * deadline, by [deadlineAfterRead]: the one rule both readers (the block service
+     * and the home screen) go through, so they never disagree.
+     */
+    @Synchronized
+    fun publishFrom(
+        read: com.ogenrwotdaniel.wakeproof.data.CalendarRead,
+        today: java.time.LocalDate,
+        zone: java.time.ZoneId,
+        readAt: Long
+    ) {
+        val found = deadlineMinuteToday(read.events, today, zone)
+        // Noted even when nothing is published, or with one bad row in the calendar the
+        // service would not see that the home screen had just read, and would read again
+        // every minute. Apart from the reading's own time: stamping the reading would let
+        // this read shadow a whole one that began earlier and lands later with a deadline.
+        if (readAt > attemptAt) attemptAt = readAt
+        // Whole for today is enough: a bad row on another day cannot be today's deadline,
+        // and must not keep a deleted deadline standing until night.
+        val next = deadlineAfterRead(read.todayWhole, found, forDay(today.toEpochDay())) ?: return
+        publish(today.toEpochDay(), next.minute, readAt)
+    }
+
+    /** Elapsed realtime of the newest calendar read that came here, published or not. */
+    @Volatile private var attemptAt = 0L
+
+    /** Elapsed realtime of the newest read, whether or not it published; 0 before any. */
+    fun lastReadAt(): Long = maxOf(reading?.readAt ?: 0L, attemptAt)
 
     /** Today's deadline minute, or null when there is none or nothing has been read today. */
     fun forDay(epochDay: Long): Int? = reading?.takeIf { it.epochDay == epochDay }?.minute
 }
+
+/**
+ * Pure: the deadline minute to keep for today after a read that found [found].
+ * A read [whole] for today is the truth, deadline or not. A partial read (a row
+ * that may be today's unreadable) may only move the deadline later: the row it skipped may be
+ * today's deadline, so its "none", or an earlier deadline it did read, must not
+ * replace one already known ([current]) and shut Chrome in the middle of an
+ * upload; but one bad row anywhere in the week must not switch the pass off.
+ * Returns null for "publish nothing".
+ */
+fun deadlineAfterRead(whole: Boolean, found: Int?, current: Int?): DeadlineReading? = when {
+    whole -> DeadlineReading(found)
+    found == null -> null
+    current == null || found > current -> DeadlineReading(found)
+    else -> null
+}
+
+/** A deadline reading to publish, [minute] null for "no deadline today". */
+data class DeadlineReading(val minute: Int?)

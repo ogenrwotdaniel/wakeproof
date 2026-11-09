@@ -78,18 +78,16 @@ class AgendaRepository @Inject constructor(
      * Event instances from the start of today through the next [WINDOW_DAYS] days,
      * every row that could be read; empty when the calendar could not be read.
      */
-    suspend fun upcomingEvents(): List<AgendaEvent> = readEvents()?.first.orEmpty()
+    suspend fun upcomingEvents(): List<AgendaEvent> = readCalendar()?.events.orEmpty()
 
     /**
-     * [upcomingEvents], but null unless the whole calendar was read (no permission,
-     * a failed or null query, or any row that failed), so a reader that must not
-     * mistake a failure for an empty day (Chrome's deadline pass) can tell: a
-     * skipped row may be today's deadline.
+     * One read of the calendar: the rows that could be read, whether that was all
+     * of them ([CalendarRead.whole]) and whether it was all of today's
+     * ([CalendarRead.todayWhole]). Null without calendar access. A reader that must
+     * not mistake a failure for an empty day (Chrome's deadline pass) tells the two
+     * apart from one query.
      */
-    suspend fun upcomingEventsOrNull(): List<AgendaEvent>? = readEvents()?.takeIf { it.second }?.first
-
-    /** The rows read, and whether every row was; null without calendar access. */
-    private suspend fun readEvents(): Pair<List<AgendaEvent>, Boolean>? = withContext(Dispatchers.IO) {
+    suspend fun readCalendar(): CalendarRead? = withContext(Dispatchers.IO) {
         if (!hasPermission()) return@withContext null
         val zone = ZoneId.systemDefault()
         val begin = LocalDate.now().atStartOfDay(zone).toInstant().toEpochMilli()
@@ -104,6 +102,7 @@ class AgendaRepository @Inject constructor(
         )
         val events = mutableListOf<AgendaEvent>()
         var badRows = 0
+        var badToday = 0
         val read = runCatching {
             val cursor = CalendarContract.Instances.query(context.contentResolver, projection, begin, end)
                 ?: error("calendar query returned no cursor")
@@ -123,12 +122,23 @@ class AgendaRepository @Inject constructor(
                             calendarName = rows.getString(5).orEmpty()
                         )
                     }
-                    if (row.isFailure) badRows++
+                    if (row.isFailure) {
+                        badRows++
+                        // Its start alone, when that much can be read, tells whether it
+                        // could have been one of today's.
+                        val startsAt = runCatching { rows.getLong(1) }.getOrNull()
+                        // A null start reads back as 0: that is no proof of another day.
+                        if (startsAt == null || startsAt <= 0L || mayBeToday(startsAt, begin)) badToday++
+                    }
                 }
             }
         }
         // A read that broke partway keeps the rows it got, as it always did, but is not whole.
-        events.sortedBy { it.beginMillis } to (read.isSuccess && badRows == 0)
+        CalendarRead(
+            events.sortedBy { it.beginMillis },
+            whole = read.isSuccess && badRows == 0,
+            todayWhole = read.isSuccess && badToday == 0
+        )
     }
 
     private companion object {
@@ -136,3 +146,21 @@ class AgendaRepository @Inject constructor(
         const val WINDOW_DAYS = 7L
     }
 }
+
+/**
+ * One calendar read; see [AgendaRepository.readCalendar]. [todayWhole]: every row
+ * that failed provably starts on another day, so today's rows are all here even
+ * when the read is not [whole].
+ */
+data class CalendarRead(val events: List<AgendaEvent>, val whole: Boolean, val todayWhole: Boolean)
+
+/**
+ * Pure: an unreadable row starting at [startMillis] may be one of today's
+ * ([todayStartMillis] is today's local midnight). From a day before, since an
+ * all-day event starts at UTC midnight, up to 12 hours ahead of the local one,
+ * to 25 hours after: the longest local day, which also covers an all-day event's
+ * UTC midnight up to 14 hours behind. No wider, or tomorrow's bad row would keep
+ * a deleted deadline standing today.
+ */
+fun mayBeToday(startMillis: Long, todayStartMillis: Long): Boolean =
+    startMillis >= todayStartMillis - 86_400_000L && startMillis < todayStartMillis + 25 * 3_600_000L

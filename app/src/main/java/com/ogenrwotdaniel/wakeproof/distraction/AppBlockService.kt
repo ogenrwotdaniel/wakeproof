@@ -378,8 +378,34 @@ class AppBlockService : Service() {
                         .map { ExamRow(it.syncId, it.name, it.epochDay, it.updatedAt) }
                     val exams = rows.map { it.name to it.epochDay }
                     // Kept, so deleting, moving or undercutting an exam mid-week cannot lift the wall.
+                    // Sideloaded only: on Play automatic time zone off is an ordinary
+                    // traveller's setting, and must not cost a new exam its grace. A check
+                    // that throws is no doubt: the grace then still ends by the clock.
+                    val doubtedNow = SIDELOADED_BUILD &&
+                        runCatching { clockUntrusted(this@AppBlockService) }.getOrDefault(false)
+                    // Doubted on two reads running: a clock a few minutes off after a reboot
+                    // or a zone change rights itself, and must not hold a date just typed
+                    // with no grace. A clock kept wound is still doubted at the next read.
+                    // The run of doubted reads is stored ([examClockDoubted]), so a restart
+                    // neither begins it again nor counts as its second read. An unreadable
+                    // store is no doubt and is not written back.
+                    val storedDoubt = runCatching { nightPrefs.getString(KEY_EXAM_CLOCK_DOUBT, null) }
+                    val boot = runCatching {
+                        android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT)
+                    }.getOrDefault(-1)
+                    val doubt = examClockDoubted(
+                        doubtedNow, storedDoubt.getOrNull()?.let { decodeClockDoubt(it) }, boot, SystemClock.elapsedRealtime()
+                    )
+                    val doubted = doubt.first && storedDoubt.isSuccess
+                    if (storedDoubt.isSuccess && heldRead != null) runCatching {
+                        val next = doubt.second?.let { "${it.boot}|${it.since}|${it.lastSeen}" }
+                        if (next != storedDoubt.getOrNull()) {
+                            nightPrefs.edit().putString(KEY_EXAM_CLOCK_DOUBT, next).apply()
+                        }
+                    }
                     val holds = heldExamsAfter(
-                        held, seen, rows, today, clockProven(this@AppBlockService), System.currentTimeMillis()
+                        held, seen, rows, today, clockProven(this@AppBlockService), System.currentTimeMillis(),
+                        clockDoubted = doubted
                     )
                     val keep = holds.held
                     if (heldRead != null && (keep != held || holds.seen != seen)) {
@@ -491,9 +517,8 @@ class AppBlockService : Service() {
                 val now = LocalDateTime.now()
                 val minute = now.hour * 60 + now.minute
                 // Screen on only, and not when warnChrome has just read it.
-                val lastRead = maxOf(deadlineReadAt, ChromeDeadline.lastReadAt())
                 // A little under the loop's minute, so a wake a moment early does not skip a whole minute.
-                val fresh = SystemClock.elapsedRealtime() - lastRead < DEADLINE_FRESH_MILLIS - 10_000L
+                val fresh = deadlineFresh(DEADLINE_FRESH_MILLIS - 10_000L)
                 val interactive = powerManager.isInteractive
                 if (interactive && !fresh && now.dayOfWeek.value <= 5 &&
                     minute in DEADLINE_WATCH_FROM until SLEEP_START_MINUTES
@@ -1051,6 +1076,10 @@ class AppBlockService : Service() {
     /** When today's deadline was last read; Chrome in front reads it every minute. */
     @Volatile private var deadlineReadAt = 0L
 
+    /** Whether anyone (this service or the home screen) read the calendar within [withinMillis]. */
+    private fun deadlineFresh(withinMillis: Long): Boolean =
+        SystemClock.elapsedRealtime() - maxOf(deadlineReadAt, ChromeDeadline.lastReadAt()) < withinMillis
+
     /** Today's deadline minute, shared with the home screen's Chrome line ([ChromeDeadline]). */
     private fun chromeDeadline(): Int? = ChromeDeadline.forDay(LocalDate.now().toEpochDay())
 
@@ -1059,10 +1088,11 @@ class AppBlockService : Service() {
         val readAt = SystemClock.elapsedRealtime()
         deadlineReadAt = readAt
         val today = LocalDate.now()
-        // A failed read publishes nothing: saved as "no deadline", it would be the newest
-        // reading and shut Chrome in the middle of an upload.
-        val events = agendaRepository.upcomingEventsOrNull() ?: return
-        ChromeDeadline.publish(today.toEpochDay(), deadlineMinuteToday(events, today, java.time.ZoneId.systemDefault()), readAt)
+        // A failed read publishes nothing, and a partial one only a later deadline
+        // ([deadlineAfterRead]): saved as the newest reading, anything else could shut
+        // Chrome in the middle of an upload.
+        val read = agendaRepository.readCalendar() ?: return
+        ChromeDeadline.publishFrom(read, today, java.time.ZoneId.systemDefault(), readAt)
     }
 
     /**
@@ -1071,8 +1101,9 @@ class AppBlockService : Service() {
      */
     private fun warnChrome(hours: AppHours, minuteOfDay: Int) {
         // A deadline added just before 16:00 must be seen before the wall lands on the upload.
-        val sinceRead = SystemClock.elapsedRealtime() - deadlineReadAt
-        if (sinceRead > DEADLINE_FRESH_MILLIS) {
+        // By this service's own read alone: a home-screen read that broke partway counts
+        // as an attempt, and must not stand in for the read that catches that deadline.
+        if (SystemClock.elapsedRealtime() - deadlineReadAt > DEADLINE_FRESH_MILLIS) {
             // Stamped now as well as in the read, so ticks before it lands launch no more reads.
             deadlineReadAt = SystemClock.elapsedRealtime()
             scope.launch {
@@ -1915,6 +1946,7 @@ class AppBlockService : Service() {
         private const val DEADLINE_WATCH_FROM = 15 * 60
         private const val KEY_EXAMS_HELD = "exam_weeks_held"
         private const val KEY_EXAMS_SEEN = "exam_week_seen_at"
+        private const val KEY_EXAM_CLOCK_DOUBT = "exam_clock_doubt"
         private val EXAM_DAY_FORMAT = java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM")
         private const val KEY_CHROME_HOUR_DAY = "chrome_hour_day"
         private const val CHROME_CHANNEL_ID = "wakeproof_chrome_hours"

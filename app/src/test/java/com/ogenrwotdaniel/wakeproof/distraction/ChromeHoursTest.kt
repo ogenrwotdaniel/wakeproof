@@ -98,4 +98,31 @@ class ChromeHoursTest {
             AppGate.effectivePackage(AppGate.CHROME, "org.chromium.chrome.browser.customtabs.CustomTabActivity")
         )
     }
+
+    @Test
+    fun `a partial calendar read may only move the deadline later`() {
+        // A whole read is the truth.
+        assertEquals(DeadlineReading(18 * 60), deadlineAfterRead(whole = true, found = 18 * 60, current = null))
+        assertEquals(DeadlineReading(null), deadlineAfterRead(whole = true, found = null, current = 18 * 60))
+        assertEquals(DeadlineReading(14 * 60), deadlineAfterRead(whole = true, found = 14 * 60, current = 18 * 60))
+        // A partial one: a new or later deadline yes, an earlier one or none no.
+        assertEquals(DeadlineReading(18 * 60), deadlineAfterRead(whole = false, found = 18 * 60, current = null))
+        assertEquals(DeadlineReading(19 * 60), deadlineAfterRead(whole = false, found = 19 * 60, current = 18 * 60))
+        assertNull(deadlineAfterRead(whole = false, found = 14 * 60, current = 18 * 60))
+        assertNull(deadlineAfterRead(whole = false, found = null, current = 18 * 60))
+    }
+
+    @Test
+    fun `an unreadable calendar row counts against today only when it may start today`() {
+        val day = 86_400_000L
+        val todayStart = 20_000L * day
+        assertTrue(com.ogenrwotdaniel.wakeproof.data.mayBeToday(todayStart + 10 * 3_600_000L, todayStart))
+        // An all-day event starts at UTC midnight, hours off the local one either way.
+        assertTrue(com.ogenrwotdaniel.wakeproof.data.mayBeToday(todayStart - 9 * 3_600_000L, todayStart))
+        assertTrue(com.ogenrwotdaniel.wakeproof.data.mayBeToday(todayStart + 14 * 3_600_000L, todayStart))
+        // Tomorrow afternoon's row is not today's.
+        assertFalse(com.ogenrwotdaniel.wakeproof.data.mayBeToday(todayStart + day + 9 * 3_600_000L, todayStart))
+        assertFalse(com.ogenrwotdaniel.wakeproof.data.mayBeToday(todayStart + 3 * day, todayStart))
+        assertFalse(com.ogenrwotdaniel.wakeproof.data.mayBeToday(todayStart - 2 * day, todayStart))
+    }
 }

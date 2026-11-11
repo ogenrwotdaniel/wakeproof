@@ -40,9 +40,14 @@ class StudyUsageSync @Inject constructor(
     private val settings: SettingsRepository
 ) {
 
-    /** This device's measured minutes today, per study package (WakeProof included). */
+    /**
+     * This device's measured minutes today, per study package. WakeProof itself
+     * is left out (2026-11-11): it is the home screen and the countdown, and a
+     * phone left showing the timer through a session started on the watch was
+     * counted as an hour of study on top of the session.
+     */
     suspend fun localMinutesToday(): Map<String, Long> {
-        val study = settings.settings.first().studyApps + context.packageName
+        val study = settings.settings.first().studyApps - context.packageName
         return usageStats.todayForegroundMillisFor(study).mapValues { (_, millis) -> millis / 60_000 }
     }
 

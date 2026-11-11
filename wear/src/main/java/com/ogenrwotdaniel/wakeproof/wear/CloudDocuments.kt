@@ -39,6 +39,15 @@ internal object CloudContract {
     const val T_FOCUS_MINUTES = "focusMinutes"
     const val T_SUBJECT = "subject"
 
+    // The rest of the session (2026-11-11), so the tablet can run it too: read by
+    // app `LiveWatchTimer.fromFields`.
+    const val T_SESSION_ID = "sessionId"
+    const val T_ORIGIN = "origin"
+    const val T_SHORT_MINUTES = "shortBreakMinutes"
+    const val T_LONG_MINUTES = "longBreakMinutes"
+    const val T_LONG_EVERY = "longBreakEvery"
+    const val T_LAST_FOCUS_SECONDS = "lastFocusSeconds"
+
     /**
      * Phone -> watch: a fresh Google ID token for the phone's own account, so the
      * watch can sign in without a picker on a 45 mm screen. MessageClient, since
@@ -87,6 +96,12 @@ internal object CloudDocuments {
         CloudContract.T_TARGET to state.targetFocusBlocks,
         CloudContract.T_FOCUS_MINUTES to state.durations.focusMinutes,
         CloudContract.T_SUBJECT to state.subject,
+        CloudContract.T_SESSION_ID to state.sessionId,
+        CloudContract.T_ORIGIN to state.origin,
+        CloudContract.T_SHORT_MINUTES to state.durations.shortBreakMinutes,
+        CloudContract.T_LONG_MINUTES to state.durations.longBreakMinutes,
+        CloudContract.T_LONG_EVERY to state.longBreakEvery,
+        CloudContract.T_LAST_FOCUS_SECONDS to state.lastFocusSeconds,
         CloudContract.UPDATED_AT to now
     )
 

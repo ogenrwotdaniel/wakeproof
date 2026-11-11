@@ -29,11 +29,41 @@ class LiveWatchTimerRulesTest {
             mapOf(
                 "active" to true, "running" to false, "phase" to "LONG_BREAK",
                 "phaseEndsAt" to 5L, "remainingMillis" to 60_000L, "completedFocus" to 4L,
-                "targetFocusBlocks" to 4L, "subject" to "Maths", "focusMinutes" to 25L
+                "targetFocusBlocks" to 4L, "subject" to "Maths", "focusMinutes" to 25L,
+                "sessionId" to "0f8fad5b-d9cb", "origin" to "watch", "shortBreakMinutes" to 5L,
+                "longBreakMinutes" to 15L, "longBreakEvery" to 4L, "lastFocusSeconds" to 1_200L
             ),
             serverUpdatedAtMillis = 7L
         )
-        assertEquals(LiveWatchTimer(true, false, "LONG_BREAK", 5L, 60_000L, 4, 4, "Maths", 7L), parsed)
+        assertEquals(
+            LiveWatchTimer(
+                true, false, "LONG_BREAK", 5L, 60_000L, 4, 4, "Maths", 7L,
+                sessionId = "0f8fad5b-d9cb", origin = "watch", focusMinutes = 25, shortBreakMinutes = 5,
+                longBreakMinutes = 15, longBreakEvery = 4, lastFocusSeconds = 1_200
+            ),
+            parsed
+        )
+    }
+
+    @Test
+    fun `a running watch session can be joined, a paused or unnamed one cannot`() {
+        val running = LiveWatchTimer(
+            true, true, "SHORT_BREAK", now + 120_000L, 0L, 2, 4, "Maths", now,
+            sessionId = "0f8fad5b-d9cb", focusMinutes = 25, shortBreakMinutes = 5,
+            longBreakMinutes = 15, longBreakEvery = 4
+        )
+        val shared = running.toShared()!!
+        assertEquals("0f8fad5b-d9cb", shared.id)
+        assertEquals(com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroPhase.SHORT_BREAK, shared.phase)
+        assertEquals(25 * 60, shared.focusSeconds)
+        // An older watch sent no last-block length: an ordinary block.
+        assertEquals(25 * 60, shared.lastFocusSeconds)
+        assertTrue(shared.fromOrigin)
+        // The watch running the phone's session is not the one that keeps its time.
+        assertFalse(running.copy(origin = "phone").toShared()!!.fromOrigin)
+        assertNull(running.copy(running = false).toShared())
+        assertNull(running.copy(sessionId = "").toShared())
+        assertNull(timer().toShared())
     }
 
     @Test

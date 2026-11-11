@@ -2,26 +2,32 @@ package com.ogenrwotdaniel.wakeproof.ui.usage
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -34,42 +40,47 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.data.AppLimit
-import com.ogenrwotdaniel.wakeproof.data.AppUsage
 import com.ogenrwotdaniel.wakeproof.data.DayUsage
-import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.DistractionLimitRepository
+import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.LimitMode
 import com.ogenrwotdaniel.wakeproof.data.StudyTimeSummary
+import com.ogenrwotdaniel.wakeproof.data.UsageSnapshot
 import com.ogenrwotdaniel.wakeproof.data.WallDay
 import com.ogenrwotdaniel.wakeproof.distraction.BEDTIME_END_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.CHROME_DAILY_CAP_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.CHROME_OPEN_END_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.CHROME_OPEN_START_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.DEADLINE_WORDS_SHOWN
+import com.ogenrwotdaniel.wakeproof.distraction.MINUTES_PER_DAY
 import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_START_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.WallRule
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import com.ogenrwotdaniel.wakeproof.distraction.gatedOpenWindow
-import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.components.AppPickerDialog
 import com.ogenrwotdaniel.wakeproof.ui.components.ChartBar
 import com.ogenrwotdaniel.wakeproof.ui.components.LabeledBarChart
 import com.ogenrwotdaniel.wakeproof.ui.components.chartDayLabel
+import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.ui.formatCompactDuration
 import java.time.LocalDate
+import java.time.LocalTime
 
 /**
- * Phone-usage dashboard: today's screen time vs focus time, a 7-day screen
- * time chart, and today's top apps. Gated on the "usage access" special grant.
+ * Screen time: today's study time against the rest, the week, today's apps and
+ * their caps, and the day's walls drawn on one 24-hour strip. Gated on the
+ * "usage access" special grant. Laid out as cards, one subject each, with no
+ * lock marks (2026-11-11, the user's request): everything here is fixed and
+ * the user knows it.
  */
 @Composable
 fun UsageScreen(
@@ -84,7 +95,6 @@ fun UsageScreen(
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
     val studyTime by viewModel.studyTime.collectAsStateWithLifecycle()
-    val studyPackages by viewModel.studyPackages.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
     val report by viewModel.report.collectAsStateWithLifecycle()
     val reportUi by viewModel.reportUi.collectAsStateWithLifecycle()
@@ -107,11 +117,11 @@ fun UsageScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(24.dp)
+                .padding(horizontal = 20.dp, vertical = 24.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(text = "Phone usage", style = MaterialTheme.typography.headlineMedium)
+            Text(text = "Screen time", style = MaterialTheme.typography.headlineMedium)
 
             if (!hasAccess) {
                 Text(
@@ -127,190 +137,96 @@ fun UsageScreen(
                 ) { Text("Grant usage access") }
             } else {
                 snapshot?.let { snap ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(
-                                text = formatMinutes(snap.todayMinutes),
-                                style = MaterialTheme.typography.displaySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "screen time today",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = focusSummary(today.focusMinutes, snap.todayMinutes),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
+                    TodayCard(snapshot = snap, study = studyTime, focusMinutes = today.focusMinutes)
 
                     studyTime?.let { summary ->
                         StudyTimeCard(summary = summary, labelOf = viewModel::appLabel)
                     }
 
-                    Text(
-                        text = "Screen time — last 7 days",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    UsageWeekChart(week = snap.week)
+                    SectionCard(title = "Other screen time", caption = "Last 7 days") {
+                        UsageWeekChart(week = snap.week)
+                    }
 
                     val subjectRows = subjectMinutes.filter { it.minutes > 0 }
                     if (subjectRows.isNotEmpty()) {
-                        Text(
-                            text = "Focus by subject — 7 days",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val maxSubject = subjectRows.maxOf { it.minutes }
-                        subjectRows.forEach { row ->
-                            Column(Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = row.subject ?: "Untagged",
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                    Text(
-                                        text = formatMinutes(row.minutes.toLong()),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                LinearProgressIndicator(
-                                    progress = { row.minutes.toFloat() / maxSubject },
-                                    modifier = Modifier.fillMaxWidth()
+                        SectionCard(title = "Focus by subject", caption = "Last 7 days") {
+                            val maxSubject = subjectRows.maxOf { it.minutes }
+                            subjectRows.forEach { row ->
+                                MeterRow(
+                                    label = row.subject ?: "Untagged",
+                                    value = formatMinutes(row.minutes.toLong()),
+                                    fraction = row.minutes.toFloat() / maxSubject
                                 )
                             }
                         }
                     }
 
-                    Text(
-                        text = "Top apps today",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    val max = snap.topApps.maxOfOrNull { it.minutes } ?: 1
-                    snap.topApps.forEach { app ->
-                        val limit = limits[app.packageName]
-                        val overLimit = limit != null && app.minutes >= limit.minutes
-                        Column(Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = (if (app.packageName in studyPackages) "📚 " else "") +
-                                        app.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                TextButton(
-                                    onClick = {
-                                        limitDialogFor = InstalledApp(app.packageName, app.label)
-                                    }
-                                ) {
-                                    Text(
-                                        when {
-                                            limit == null -> "Set limit"
-                                            limit.mode == LimitMode.BLOCK ->
-                                                "🔒 ${limit.minutes}m cap"
-                                            else -> "⏳ ${limit.minutes}m cap"
-                                        }
-                                    )
-                                }
-                                Text(
-                                    text = formatMinutes(app.minutes),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (overLimit) MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            LinearProgressIndicator(
-                                progress = { app.minutes.toFloat() / max },
-                                modifier = Modifier.fillMaxWidth(),
+                    SectionCard(title = "Apps today", caption = "Outside your study apps") {
+                        val max = snap.topApps.maxOfOrNull { it.minutes } ?: 1
+                        snap.topApps.forEach { app ->
+                            val limit = limits[app.packageName]
+                            val overLimit = limit != null && app.minutes >= limit.minutes
+                            MeterRow(
+                                label = app.label,
+                                value = formatMinutes(app.minutes),
+                                fraction = app.minutes.toFloat() / max,
                                 color = if (overLimit) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.primary,
+                                action = if (limit == null) "Set limit" else "${limit.minutes}m cap",
+                                onAction = { limitDialogFor = InstalledApp(app.packageName, app.label) }
+                            )
+                        }
+                        if (snap.topApps.isEmpty()) {
+                            Text(
+                                text = "No app usage recorded yet today.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                    if (snap.topApps.isEmpty()) {
-                        Text(
-                            text = "No app usage recorded yet today.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
 
-                    // Separate from the top-apps list on purpose: a cap on something
+                    // Separate from the apps list on purpose: a cap on something
                     // barely used today would never appear there, which reads as the
                     // limit not having saved.
-                    Text(
-                        text = "Daily limits",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    limitedApps.forEach { capped ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = (if (capped.limit.mode == LimitMode.BLOCK) "🔒 " else "⏳ ") +
-                                        capped.label,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                                Text(
-                                    text = "${capped.usedMinutes} of ${capped.limit.minutes} min" +
-                                        if (capped.usedMinutes >= capped.limit.minutes) {
-                                            if (capped.limit.mode == LimitMode.BLOCK) " — blocked until midnight"
-                                            else " — over"
-                                        } else "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (capped.usedMinutes >= capped.limit.minutes)
-                                        MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            TextButton(
-                                onClick = {
-                                    limitDialogFor = InstalledApp(capped.packageName, capped.label)
-                                }
-                            ) { Text("Tighten") }
+                    SectionCard(title = "Daily limits") {
+                        limitedApps.forEach { capped ->
+                            val spent = capped.usedMinutes >= capped.limit.minutes
+                            MeterRow(
+                                label = capped.label,
+                                value = "${capped.usedMinutes} of ${capped.limit.minutes} min",
+                                fraction = capped.usedMinutes.toFloat() / capped.limit.minutes.coerceAtLeast(1),
+                                color = if (spent) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary,
+                                note = when {
+                                    spent && capped.limit.mode == LimitMode.BLOCK -> "Shut until midnight"
+                                    spent -> "Over"
+                                    capped.limit.mode == LimitMode.BLOCK -> "Shuts when spent"
+                                    else -> "Reminder only"
+                                },
+                                action = "Tighten",
+                                onAction = { limitDialogFor = InstalledApp(capped.packageName, capped.label) }
+                            )
                         }
+                        if (limitedApps.isEmpty()) {
+                            Text(
+                                text = "No limits set yet.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.loadInstalledApps()
+                                showAppPicker = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Limit another app") }
                     }
-                    if (limitedApps.isEmpty()) {
-                        Text(
-                            text = "No limits set yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.loadInstalledApps()
-                            showAppPicker = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Limit another app…") }
-                    Text(
-                        text = "🔒 Limits are fixed once set: they can be tightened at once " +
-                            "but never raised, softened or removed.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
 
                     if (otherProfileApps.isNotEmpty()) {
                         OtherProfileWarning(otherProfileApps)
                     }
-                    WallRulesSection(
+                    ScheduleCard(
                         rules = wallRules,
                         dndAccess = dndAccess,
                         notificationAccess = notificationAccess,
@@ -331,45 +247,34 @@ fun UsageScreen(
                     )
                     if (wallWeek.isNotEmpty()) WallWeekCard(wallWeek)
 
-                    Text(
-                        text = "Weekly coach report",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    report?.let { cached ->
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp)) {
-                                Text(
-                                    text = cached.text,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Text(
-                                    text = "Written ${LocalDate.ofEpochDay(cached.epochDay)}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                    SectionCard(title = "Weekly report") {
+                        report?.let { cached ->
+                            Text(text = cached.text, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = "Written ${LocalDate.ofEpochDay(cached.epochDay)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    }
-                    Button(
-                        onClick = viewModel::generateReport,
-                        enabled = !reportUi.generating,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                        Button(
+                            onClick = viewModel::generateReport,
+                            enabled = !reportUi.generating,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                when {
+                                    reportUi.generating -> "Writing your report…"
+                                    report == null -> "Write this week's report"
+                                    else -> "Refresh the report"
+                                }
+                            )
+                        }
                         Text(
-                            when {
-                                reportUi.generating -> "Writing your report…"
-                                report == null -> "Generate weekly report"
-                                else -> "Refresh weekly report"
-                            }
+                            text = "Written on your phone from your own logs. Nothing is sent anywhere.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = "Written on your phone from your own logs — no key, no network, " +
-                            "nothing sent anywhere.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
 
@@ -403,6 +308,158 @@ fun UsageScreen(
                 limitDialogFor = app
             },
             onDismiss = { showAppPicker = false }
+        )
+    }
+}
+
+/** One subject, one card: a title, an optional quiet caption beside it, then the content. */
+@Composable
+private fun SectionCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    caption: String? = null,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                caption?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            content()
+        }
+    }
+}
+
+/** A rounded bar filled to [fraction]. */
+@Composable
+private fun Meter(fraction: Float, color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Box(
+            Modifier
+                // NaN (0 of 0) and overshoot both land on a drawable width.
+                .fillMaxWidth(if (fraction.isNaN()) 0f else fraction.coerceIn(0f, 1f))
+                .fillMaxHeight()
+                .clip(CircleShape)
+                .background(color)
+        )
+    }
+}
+
+/** A name, its figure and a bar; optionally a quiet [note] and one text [action]. */
+@Composable
+private fun MeterRow(
+    label: String,
+    value: String,
+    fraction: Float,
+    color: Color = MaterialTheme.colorScheme.primary,
+    note: String? = null,
+    action: String? = null,
+    onAction: () -> Unit = {}
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Meter(fraction = fraction, color = color)
+        if (note != null || action != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = note.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                action?.let { TextButton(onClick = onAction) { Text(it) } }
+            }
+        }
+    }
+}
+
+/**
+ * Today in two figures: study, and everything else. WakeProof's own screens
+ * are named underneath and counted as neither; see [UsageSnapshot].
+ */
+@Composable
+private fun TodayCard(snapshot: UsageSnapshot, study: StudyTimeSummary?, focusMinutes: Int) {
+    val studyMinutes = study?.totalMinutes ?: 0L
+    val other = snapshot.todayMinutes
+    val studyColor = MaterialTheme.colorScheme.primary
+    val otherColor = MaterialTheme.colorScheme.tertiary
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth()) {
+                Stat(label = "Study", value = formatMinutes(studyMinutes), color = studyColor, modifier = Modifier.weight(1f))
+                Stat(label = "Other screen time", value = formatMinutes(other), color = otherColor, modifier = Modifier.weight(1f))
+            }
+            if (studyMinutes + other > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (studyMinutes > 0) Box(Modifier.weight(studyMinutes.toFloat()).fillMaxHeight().background(studyColor))
+                    if (other > 0) Box(Modifier.weight(other.toFloat()).fillMaxHeight().background(otherColor))
+                }
+            }
+            Text(
+                text = if (focusMinutes > 0) "$focusMinutes min of focus sessions today."
+                else "No focus session yet today.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "WakeProof itself (the home screen, the timer) was on screen " +
+                    "${formatMinutes(snapshot.ownMinutes)} and counts as neither. A focus session " +
+                    "counts once, whichever device ran it and whatever the phone showed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun Stat(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(text = value, style = MaterialTheme.typography.displaySmall, color = color)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -469,7 +526,7 @@ private fun LimitDialog(
                     modifier = Modifier.padding(top = 8.dp)
                 )
                 Text(
-                    text = "🔒 Permanent: once set, this limit can only be tightened. It can " +
+                    text = "Permanent: once set, this limit can only be tightened. It can " +
                         "never be raised, switched back to Nudge or removed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.tertiary,
@@ -499,19 +556,11 @@ private const val MAX_LIMIT_MINUTES = 240
 private fun formatMinutes(minutes: Long): String =
     if (minutes >= 60) "%dh %02dm".format(minutes / 60, minutes % 60) else "${minutes}m"
 
-private fun focusSummary(focusMinutes: Int, screenMinutes: Long): String {
-    if (focusMinutes <= 0) return "No focus sessions yet today — start a Pomodoro!"
-    val percent = if (screenMinutes > 0) (focusMinutes * 100 / screenMinutes).toInt() else 100
-    return "🎯 $focusMinutes min focused — $percent% of screen time was deep work"
-}
-
 /**
- * Time in study apps today, credited by name, across every synced device. Mostly
- * so that an afternoon writing in Samsung Notes shows up as what it was rather
- * than as anonymous screen time. Focus time no screen measured (a block timed on
- * the watch, or on paper) is added as its own row, credited to the app focus is
- * spent in — see [com.ogenrwotdaniel.wakeproof.data.studyTimeSummary] for why it
- * never double counts.
+ * Time in study apps today, by name, across every synced device. Focus time no
+ * screen measured (a block timed on the watch, or on paper) is added as its own
+ * row, credited to the app focus is spent in — see
+ * [com.ogenrwotdaniel.wakeproof.data.studyTimeSummary] for why it never double counts.
  */
 @Composable
 private fun StudyTimeCard(
@@ -519,56 +568,39 @@ private fun StudyTimeCard(
     labelOf: (String) -> String,
     modifier: Modifier = Modifier
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = "📚 ${formatMinutes(summary.totalMinutes)} studying today",
-                style = MaterialTheme.typography.titleMedium
+    SectionCard(title = "Study", caption = formatMinutes(summary.totalMinutes), modifier = modifier) {
+        val total = summary.totalMinutes.coerceAtLeast(1).toFloat()
+        summary.measured.forEach { app ->
+            MeterRow(label = app.label, value = formatMinutes(app.minutes), fraction = app.minutes / total)
+        }
+        val credited = summary.creditedPackage
+        if (credited != null && summary.creditedMinutes > 0) {
+            MeterRow(
+                label = "${labelOf(credited)} · focus timer",
+                value = formatMinutes(summary.creditedMinutes),
+                fraction = summary.creditedMinutes / total,
+                color = MaterialTheme.colorScheme.secondary
             )
-            summary.measured.forEach { app ->
-                StudyRow(label = app.label, minutes = app.minutes)
-            }
-            val credited = summary.creditedPackage
-            if (credited != null && summary.creditedMinutes > 0) {
-                StudyRow(
-                    label = "${labelOf(credited)} · focus timer",
-                    minutes = summary.creditedMinutes
-                )
-            }
-            if (summary.peers.isNotEmpty()) {
-                val context = LocalContext.current
-                Text(
-                    text = "Includes " + summary.peers.joinToString { peer ->
-                        val at = peerTime(peer.updatedAtMillis)
-                        "${peer.deviceName} (as of ${formatAlarmTime(context, at.hour, at.minute)})"
-                    } + ".",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+        }
+        if (summary.peers.isNotEmpty()) {
+            val context = LocalContext.current
             Text(
-                text = if (credited != null) {
-                    "Focus-timer time no screen measured — a block on your watch, or on " +
-                        "paper — counts as ${labelOf(credited)}. Choose which apps count in " +
-                        "Settings → Study apps."
-                } else {
-                    "Choose which apps count in Settings → Study apps. A running focus " +
-                        "timer counts toward your goal whichever app you study in."
-                },
+                text = "Includes " + summary.peers.joinToString { peer ->
+                    val at = peerTime(peer.updatedAtMillis)
+                    "${peer.deviceName} (as of ${formatAlarmTime(context, at.hour, at.minute)})"
+                } + ".",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-@Composable
-private fun StudyRow(label: String, minutes: Long) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium)
         Text(
-            text = formatMinutes(minutes),
-            style = MaterialTheme.typography.bodyMedium,
+            text = if (credited != null) {
+                "Focus time no screen measured (a session on your watch, or on paper) " +
+                    "counts as ${labelOf(credited)}. Study apps are chosen in Settings."
+            } else {
+                "Study apps are chosen in Settings."
+            },
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -596,12 +628,13 @@ private fun UsageWeekChart(week: List<DayUsage>, modifier: Modifier = Modifier) 
 }
 
 /**
- * The walls over gated apps, read-only: every one is fixed in code
- * ([com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository]), so the rows
- * carry no switch and no Edit, only the grants a wall needs to work.
+ * The day's walls, read-only: every one is fixed in code
+ * ([com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository]). Two 24-hour
+ * strips, one for gated apps and one for everything else, then the same hours
+ * in words and the grants a wall needs to work.
  */
 @Composable
-private fun WallRulesSection(
+private fun ScheduleCard(
     rules: WallRules,
     dndAccess: Boolean,
     notificationAccess: Boolean,
@@ -609,128 +642,150 @@ private fun WallRulesSection(
     onGrantNotifications: () -> Unit
 ) {
     val context = LocalContext.current
-    Text(
-        text = "Walls",
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    // Browser gating is fixed on, so its row would say only what Chrome's below does.
-    WallRule.entries.filter { it != WallRule.GATE_BROWSERS }.forEach { rule ->
-        val value = rules.value(rule)
-        Column(Modifier.fillMaxWidth()) {
-            Text(text = "🔒 " + ruleTitle(rule, value, context), style = MaterialTheme.typography.bodyLarge)
+    fun clock(m: Int) = formatAlarmTime(context, m / 60, m % 60)
+    val open = gatedOpenWindow(rules)?.takeIf { it.first < it.second }
+    val openColor = MaterialTheme.colorScheme.primary
+    val shutColor = MaterialTheme.colorScheme.surfaceVariant
+    val nightColor = MaterialTheme.colorScheme.tertiary
+    val now = LocalTime.now().let { it.hour * 60 + it.minute }
+
+    SectionCard(title = "Schedule", caption = "Every day's walls") {
+        DayStrip(
+            label = "Gated apps",
+            base = shutColor,
+            spans = listOfNotNull(open?.let { Span(it.first, it.second, openColor) }),
+            nowMinute = now
+        )
+        DayStrip(
+            label = "Everything else",
+            base = openColor.copy(alpha = 0.35f),
+            spans = listOf(
+                Span(SLEEP_START_MINUTES, MINUTES_PER_DAY, nightColor),
+                Span(0, SLEEP_END_MINUTES, nightColor)
+            ),
+            nowMinute = now
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf(0, 6 * 60, 12 * 60, 18 * 60, MINUTES_PER_DAY - 1).forEach { minute ->
+                Text(
+                    text = if (minute == MINUTES_PER_DAY - 1) clock(0) else clock(minute),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ScheduleRow(
+            swatch = openColor,
+            label = "Gated apps open",
+            value = when {
+                open == null -> "Never"
+                rules.weekendShut -> "Mon–Thu ${clock(open.first)}–${clock(open.second)}"
+                else -> "${clock(open.first)}–${clock(open.second)}"
+            }
+        )
+        if (rules.weekendShut) ScheduleRow(swatch = shutColor, label = "Friday to Sunday", value = "Shut all day")
+        if (rules.bedtimeStartMinutes >= 0) {
+            ScheduleRow(
+                swatch = shutColor,
+                label = "Bedtime wall",
+                value = "${clock(rules.bedtimeStartMinutes)}–${clock(BEDTIME_END_MINUTES)}"
+            )
+        }
+        ScheduleRow(
+            swatch = nightColor,
+            label = "Night wall",
+            value = "${clock(SLEEP_START_MINUTES)}–${clock(SLEEP_END_MINUTES)}"
+        )
+        Text(
+            text = "Gated apps are social, video, messaging, the Play Store and every browser. " +
+                "The night wall shuts every app but calls, Clock, Calendar, WakeProof and a " +
+                "running focus session's apps. In a focus session Do Not Disturb is on.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (rules.sessionDnd && !dndAccess) {
+            OutlinedButton(onClick = onGrantDnd, modifier = Modifier.fillMaxWidth()) {
+                Text("Allow Do Not Disturb access")
+            }
+        }
+        if (!notificationAccess) {
+            OutlinedButton(onClick = onGrantNotifications, modifier = Modifier.fillMaxWidth()) {
+                Text("Allow notification access")
+            }
             Text(
-                text = ruleSubtitle(rule, context),
+                text = "Needed to remove walled apps' notifications while they are shut.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (rule == WallRule.OPEN_WINDOW_END_MINUTES) {
-                gatedOpenText(rules, context)?.let {
-                    Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-                }
-            }
-            if (rule == WallRule.SESSION_DND && !dndAccess) {
-                TextButton(onClick = onGrantDnd) { Text("Allow Do Not Disturb access") }
-            }
-            if (rule == WallRule.OPEN_WINDOW_START_MINUTES && !notificationAccess) {
-                TextButton(onClick = onGrantNotifications) {
-                    Text("Allow notification access to hide walled apps' notifications")
-                }
-            }
         }
     }
-    Column(Modifier.fillMaxWidth()) {
-        fun clock(m: Int) = formatAlarmTime(context, m / 60, m % 60)
+}
+
+/** Minutes of the day `[from, to)` drawn in [color] on a [DayStrip]. */
+private data class Span(val from: Int, val to: Int, val color: Color)
+
+/** One 24-hour strip: [base] all day, [spans] over it, and a mark at [nowMinute]. */
+@Composable
+private fun DayStrip(label: String, base: Color, spans: List<Span>, nowMinute: Int) {
+    val mark = MaterialTheme.colorScheme.onSurface
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            text = "🔒 Chrome: weekdays ${clock(CHROME_OPEN_START_MINUTES)}–${clock(CHROME_OPEN_END_MINUTES)}, " +
-                "$CHROME_DAILY_CAP_MINUTES min a day",
-            style = MaterialTheme.typography.bodyLarge
-        )
-        Text(
-            text = "Every other browser follows the gated schedule. On a weekday, a calendar event " +
-                "titled $DEADLINE_WORDS_SHOWN keeps Chrome open until then, as late as " +
-                "${clock(SLEEP_START_MINUTES)}. Blackboard on the home screen is open every day.",
-            style = MaterialTheme.typography.bodySmall,
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Canvas(Modifier.fillMaxWidth().height(18.dp)) {
+            val radius = CornerRadius(size.height / 2)
+            drawRoundRect(color = base, cornerRadius = radius)
+            spans.forEach { span ->
+                val left = size.width * span.from / MINUTES_PER_DAY
+                // Never thinner than can be seen: half an hour is 2 % of the strip.
+                val width = (size.width * (span.to - span.from) / MINUTES_PER_DAY).coerceAtLeast(6.dp.toPx())
+                drawRoundRect(
+                    color = span.color,
+                    topLeft = Offset(left.coerceAtMost(size.width - width), 0f),
+                    size = Size(width, size.height),
+                    cornerRadius = radius
+                )
+            }
+            val x = size.width * nowMinute / MINUTES_PER_DAY
+            drawLine(color = mark, start = Offset(x, -3.dp.toPx()), end = Offset(x, size.height + 3.dp.toPx()), strokeWidth = 2.dp.toPx())
+        }
     }
-    // Fixed in code (NightRules) like the rest.
-    Column(Modifier.fillMaxWidth()) {
-        Text(
-            text = "🔒 Night wall ${formatAlarmTime(context, SLEEP_START_MINUTES / 60, SLEEP_START_MINUTES % 60)}" +
-                "–${formatAlarmTime(context, SLEEP_END_MINUTES / 60, SLEEP_END_MINUTES % 60)}",
-            style = MaterialTheme.typography.bodyLarge
-        )
-        Text(
-            text = "Every app but calls, the home screen, Settings, Clock, Calendar, WakeProof and " +
-                "a running focus session's apps is shut.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+}
+
+@Composable
+private fun ScheduleRow(swatch: Color, label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(swatch))
+        Spacer(Modifier.width(10.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(text = value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
     }
-    Text(
-        text = "Every wall is fixed: none can be moved, loosened or turned off from the phone.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-}
-
-/**
- * What the open window really leaves once the bedtime wall (until 08:40) takes
- * its share, or null when the window is off. Without it a window ending before
- * 08:40 looks open and never is.
- */
-private fun gatedOpenText(rules: WallRules, context: android.content.Context): String? {
-    val (opens, closes) = gatedOpenWindow(rules) ?: return null
-    val days = if (rules.weekendShut) "Monday to Thursday" else "every day"
-    fun clock(m: Int) = formatAlarmTime(context, m / 60, m % 60)
-    return if (opens >= closes) "Gated apps never open: the bedtime wall covers the whole window."
-    else "Gated apps are open ${clock(opens)}–${clock(closes)}, $days."
-}
-
-private fun ruleTitle(rule: WallRule, value: Int, context: android.content.Context): String = when (rule) {
-    WallRule.GATE_BROWSERS -> "Gate browsers too"
-    WallRule.WEEKEND_SHUT -> "Shut Friday to Sunday"
-    WallRule.BEDTIME_START_MINUTES ->
-        if (value < 0) "Bedtime wall: off"
-        else "Bedtime wall from ${formatAlarmTime(context, value / 60, value % 60)}"
-    WallRule.SESSION_DND -> "Do Not Disturb in sessions"
-    WallRule.OPEN_WINDOW_START_MINUTES ->
-        if (value < 0) "Open window: off (open all day Mon–Thu)"
-        else "Open window starts ${formatAlarmTime(context, value / 60, value % 60)}"
-    WallRule.OPEN_WINDOW_END_MINUTES ->
-        "Open window ends ${formatAlarmTime(context, value / 60, value % 60)}"
-}
-
-private fun ruleSubtitle(rule: WallRule, context: android.content.Context): String = when (rule) {
-    WallRule.GATE_BROWSERS -> "Every browser but Chrome follows the same schedule as social apps."
-    WallRule.WEEKEND_SHUT ->
-        "Gated apps stay completely shut from Friday through Sunday, reopening Monday."
-    WallRule.BEDTIME_START_MINUTES ->
-        "Gated apps shut until ${formatAlarmTime(context, BEDTIME_END_MINUTES / 60, BEDTIME_END_MINUTES % 60)} the next morning."
-    WallRule.SESSION_DND -> "Only what your Do Not Disturb settings allow gets through."
-    WallRule.OPEN_WINDOW_START_MINUTES ->
-        "Monday to Thursday gated apps open at this time; outside the window their notifications are removed."
-    WallRule.OPEN_WINDOW_END_MINUTES ->
-        "Inside the Monday–Thursday window gated apps open directly with no countdown wait."
 }
 
 /** Gated apps WakeProof cannot see, because they live in another profile. */
 @Composable
 private fun OtherProfileWarning(apps: List<String>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = "Outside the walls",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.error
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
             Text(
                 text = "${apps.joinToString()} ${if (apps.size == 1) "is" else "are"} also " +
                     "installed in Secure Folder, Dual Messenger or a work profile. WakeProof " +
                     "can't see that copy, so it bypasses the schedule and focus walls. " +
                     "Uninstall it there.",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
         }
     }
@@ -739,27 +794,22 @@ private fun OtherProfileWarning(apps: List<String>) {
 /** The last 7 days in gated apps, today last. */
 @Composable
 private fun WallWeekCard(week: List<WallDay>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text = "Gated apps — last 7 days", style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = "${formatMinutes(week.sumOf { it.waitingAppMinutes })} across gated apps",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            week.forEach { day ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(
-                        text = chartDayLabel(day.epochDay, LocalDate.now().toEpochDay()),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = formatMinutes(day.waitingAppMinutes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
+    val today = LocalDate.now().toEpochDay()
+    SectionCard(
+        title = "Gated apps",
+        caption = "${formatMinutes(week.sumOf { it.waitingAppMinutes })} in 7 days"
+    ) {
+        LabeledBarChart(
+            bars = week.map { day ->
+                ChartBar(
+                    label = chartDayLabel(day.epochDay, today),
+                    value = day.waitingAppMinutes.toFloat(),
+                    valueLabel = if (day.waitingAppMinutes > 0) formatCompactDuration(day.waitingAppMinutes.toInt()) else "",
+                    emphasized = day.epochDay == today,
+                    reached = true
+                )
+            },
+            height = 112.dp
+        )
     }
 }

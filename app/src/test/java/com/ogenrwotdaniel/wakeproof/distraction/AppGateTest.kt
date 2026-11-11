@@ -129,22 +129,21 @@ class AppGateTest {
     }
 
     @Test
-    fun `app hours and exam week each name their own wall, after a spent cap and before the window`() {
-        fun verdict(cap: Boolean = false, hours: Boolean = false, exam: Boolean = false, window: Boolean = false, gated: Boolean = true) =
+    fun `exam week names its own wall, after a spent cap and before the window`() {
+        fun verdict(cap: Boolean = false, exam: Boolean = false, window: Boolean = false) =
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = cap, gated = gated, outsideWindow = window, appHoursShut = hours, examWeek = exam
+                capSpent = cap, gated = true, outsideWindow = window, examWeek = exam
             )
-        assertEquals(GateVerdict.APP_HOURS_WALL, verdict(hours = true, gated = false))
         assertEquals(GateVerdict.EXAM_WALL, verdict(exam = true, window = true))
         assertEquals(GateVerdict.WINDOW_WALL, verdict(window = true))
-        assertEquals(GateVerdict.CAP_WALL, verdict(cap = true, hours = true, exam = true))
-        // Neither lets a session or the night through.
+        assertEquals(GateVerdict.CAP_WALL, verdict(cap = true, exam = true))
+        // It does not let the night through.
         assertEquals(
             GateVerdict.SLEEP_WALL,
             gateVerdict(
                 essential = false, focusSessionActive = false, onFocusList = false,
-                capSpent = false, gated = false, sleeping = true, appHoursShut = true
+                capSpent = false, gated = true, sleeping = true, examWeek = true
             )
         )
     }

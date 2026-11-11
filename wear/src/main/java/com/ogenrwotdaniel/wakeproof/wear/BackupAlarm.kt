@@ -31,7 +31,7 @@ internal object AlarmScheduleContract {
 /**
  * The watch as a BACKUP for the phone's locked alarms (2026-11-04). The phone
  * is the single point of failure — flat, switched off, or crashed, and nothing
- * rings at 04:00. The watch knows the locked times (pushed by the phone) and
+ * rings at 03:00. The watch knows the locked times (pushed by the phone) and
  * checks [GRACE_MILLIS] after each one: if the phone has not reported a ring
  * since shortly before it, the watch rings on its own — the song on its
  * speaker, an alarm-strength buzz, and a notification saying the phone did

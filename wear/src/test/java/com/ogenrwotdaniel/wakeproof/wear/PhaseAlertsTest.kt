@@ -65,4 +65,17 @@ class PhaseAlertsTest {
         assertEquals("2 blocks · 50m focused\nToday 50m", sessionSummary(2, 50, FocusDay(50, 0)))
         assertEquals("2 blocks · 50m focused", sessionSummary(2, 50, null))
     }
+
+    @Test
+    fun `the phone's timer buzzes the wrist on a change of phase and at its end, not on a repeat`() {
+        fun timer(phase: String, running: Boolean = true) = TimerSnapshot(true, running, phase, 60, 0L)
+        org.junit.Assert.assertEquals("Focus", phoneTimerKey(timer("Focus")))
+        org.junit.Assert.assertNull(phoneTimerKey(timer("Focus", running = false)))
+        org.junit.Assert.assertNull(phoneTimerKey(null))
+        org.junit.Assert.assertSame(BuzzPattern.PEER_PHASE, phoneTimerBuzz(null, "Focus"))
+        org.junit.Assert.assertSame(BuzzPattern.PEER_PHASE, phoneTimerBuzz("Focus", "Short break"))
+        org.junit.Assert.assertNull(phoneTimerBuzz("Focus", "Focus"))
+        org.junit.Assert.assertSame(BuzzPattern.PEER_DONE, phoneTimerBuzz("Focus", null))
+        org.junit.Assert.assertNull(phoneTimerBuzz(null, null))
+    }
 }

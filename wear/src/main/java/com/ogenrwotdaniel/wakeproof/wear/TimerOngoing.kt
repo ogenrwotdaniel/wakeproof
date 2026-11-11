@@ -28,6 +28,19 @@ internal object TimerContract {
     const val KEY_FINISH_AT = "t_finish_at"
     /** The phone's wall clock at the push (app `WearContract.KEY_UPDATED`, shared with stats). */
     const val KEY_UPDATED = "updated_at"
+
+    // The phone's session itself (2026-11-11): app `WearContract.KEY_TIMER_*`.
+    const val KEY_SESSION_ID = "t_session_id"
+    const val KEY_ORIGIN = "t_origin"
+    const val KEY_PHASE_NAME = "t_phase_name"
+    const val KEY_COMPLETED = "t_completed"
+    const val KEY_TARGET = "t_target"
+    const val KEY_FOCUS_SEC = "t_focus_sec"
+    const val KEY_SHORT_SEC = "t_short_sec"
+    const val KEY_LONG_SEC = "t_long_sec"
+    const val KEY_LONG_EVERY = "t_long_every"
+    const val KEY_LAST_FOCUS_SEC = "t_last_focus_sec"
+    const val KEY_SUBJECT = "t_subject"
 }
 
 /** A single push of Pomodoro timer state from the phone. */
@@ -38,7 +51,9 @@ data class TimerSnapshot(
     val remainingSeconds: Int,
     val finishAtMillis: Long,
     /** When the phone pushed this, its clock; 0 = unknown (older phone build). */
-    val updatedAtMillis: Long = 0L
+    val updatedAtMillis: Long = 0L,
+    /** The session itself, when the phone sent one: what "Continue here" runs. */
+    val session: PhoneSession? = null
 ) {
     /**
      * Pure: whether this mirror still describes a live phone session at [now].
@@ -67,7 +82,23 @@ data class TimerSnapshot(
             phase = map.getString(TimerContract.KEY_PHASE, ""),
             remainingSeconds = map.getInt(TimerContract.KEY_REMAINING, 0),
             finishAtMillis = map.getLong(TimerContract.KEY_FINISH_AT, 0L),
-            updatedAtMillis = map.getLong(TimerContract.KEY_UPDATED, 0L)
+            updatedAtMillis = map.getLong(TimerContract.KEY_UPDATED, 0L),
+            session = map.getString(TimerContract.KEY_SESSION_ID)?.takeIf { it.isNotBlank() }?.let { id ->
+                PhoneSession(
+                    sessionId = id,
+                    origin = map.getString(TimerContract.KEY_ORIGIN).orEmpty(),
+                    phaseName = map.getString(TimerContract.KEY_PHASE_NAME).orEmpty(),
+                    phaseEndsAt = map.getLong(TimerContract.KEY_FINISH_AT, 0L),
+                    completedFocus = map.getInt(TimerContract.KEY_COMPLETED, 0),
+                    targetFocusBlocks = map.getInt(TimerContract.KEY_TARGET, 0),
+                    focusSeconds = map.getInt(TimerContract.KEY_FOCUS_SEC, 0),
+                    shortBreakSeconds = map.getInt(TimerContract.KEY_SHORT_SEC, 0),
+                    longBreakSeconds = map.getInt(TimerContract.KEY_LONG_SEC, 0),
+                    longBreakEvery = map.getInt(TimerContract.KEY_LONG_EVERY, 0),
+                    lastFocusSeconds = map.getInt(TimerContract.KEY_LAST_FOCUS_SEC, 0),
+                    subject = map.getString(TimerContract.KEY_SUBJECT)?.takeIf { it.isNotBlank() }
+                )
+            }
         )
 
         /** See [liveAt]. */

@@ -33,7 +33,18 @@ phone over the Data Layer, and the phone syncs them.
   `SyncEngine` never pulls it), written on every timer transition. Home on any
   device shows it as "Focus on your watch" (`LiveWatchTimerRules`, unit-tested):
   hidden 10 min after a running phase should have ended with no update (watch
-  offline) and 12 h after a pause.
+  offline) and 12 h after a pause. Since 2026-11-11 it also carries the rest of
+  the session (`sessionId`, `origin`, break lengths, `longBreakEvery`,
+  `lastFocusSeconds`), which `LiveWatchTimer.toShared` reads into a
+  `SharedSession` so the tablet can run the same session ("Continue here").
+* **One session, every device.** `live/focusSession` (written by a phone or
+  tablet running a session, read by the other to wall itself) carries the same
+  `SharedSession` fields next to `endsAt` and `installId`. A device that joins
+  runs the countdown from the same phase end and records each finished block as
+  `completion_logs/{sessionId}-b{n}` (`sharedBlockId`, the watch's
+  `WatchTimer.blockId`), so the copies from two devices are one document and one
+  row. A block withered on any device that ran it stays SKIPPED
+  (`CompletionRepository.logFocusBlock`).
 * **Freshness on the reader.** `LiveCloudFeed`, while Home is on screen, also
   listens to the newest `completion_logs` doc and runs a normal sync pass when
   its server stamp passes this device's cursor — so new blocks appear within

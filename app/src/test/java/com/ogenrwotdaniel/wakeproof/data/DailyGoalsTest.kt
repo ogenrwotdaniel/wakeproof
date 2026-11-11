@@ -56,15 +56,19 @@ class DailyGoalsTest {
     fun `old copies of the locked pair ask for no extra pushups`() {
         val goals = dailyGoalsFrom(
             listOf(
-                alarm(AlarmType.PUSHUP, hour = 4, minute = 0), alarm(AlarmType.PUSHUP, hour = 6, minute = 5),
-                // Copies synced back from a reinstall, and the pair before the move.
-                alarm(AlarmType.PUSHUP, hour = 4, minute = 0), alarm(AlarmType.PUSHUP, hour = 3, minute = 0),
-                alarm(AlarmType.PUSHUP, hour = 5, minute = 30),
-                alarm(AlarmType.PUSHUP, hour = 7, minute = 0)
+                alarm(AlarmType.PUSHUP, hour = 3, minute = 0), alarm(AlarmType.PUSHUP, hour = 5, minute = 40),
+                // Copies synced back from a reinstall, and the pairs before the moves.
+                alarm(AlarmType.PUSHUP, hour = 3, minute = 0), alarm(AlarmType.PUSHUP, hour = 4, minute = 0),
+                alarm(AlarmType.PUSHUP, hour = 5, minute = 30), alarm(AlarmType.PUSHUP, hour = 6, minute = 5),
+                alarm(AlarmType.PUSHUP, hour = 7, minute = 0),
+                // The fixed water alarm and a copy of it ring once between them.
+                alarm(AlarmType.WATER, hour = 8, minute = 20), alarm(AlarmType.WATER, hour = 8, minute = 20),
+                alarm(AlarmType.WATER, hour = 12, minute = 0)
             ),
             DayOfWeek.MONDAY
         )
         assertEquals(3, goals.pushupTarget)
+        assertEquals(2, goals.waterTarget)
     }
 
     @Test

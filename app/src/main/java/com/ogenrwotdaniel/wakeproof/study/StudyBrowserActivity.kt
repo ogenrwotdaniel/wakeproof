@@ -38,8 +38,8 @@ import java.time.LocalTime
 
 /**
  * Blackboard inside WakeProof, locked to [STUDY_HOST_SUFFIXES]. Any other link is
- * handed to the phone (so it lands in Chrome, under Chrome's hours) instead of
- * opening here, which is what keeps this screen open when Chrome is not.
+ * handed to the phone (so it lands in a browser, behind the gated apps' walls)
+ * instead of opening here, which is what keeps this screen open when they are not.
  *
  * WakeProof is essential to the block service, so no wall ever lands here; the
  * night's sleep wall is kept by this screen itself, checked every half minute.
@@ -68,9 +68,9 @@ class StudyBrowserActivity : ComponentActivity() {
             when {
                 // Out of sight a clock doubt must last five minutes of checks to close the
                 // page: a passing network-time blip must not end a lecture or an upload the
-                // user cannot see, but a clock set back must not let one play past 21:00.
+                // user cannot see, but a clock set back must not let one play past the sleep wall's start.
                 web != null && (nightNow() || (clockDoubted() && (visible() || doubtedFor() >= DOUBT_OUT_OF_SIGHT_MILLIS))) -> showSleep()
-                // On the sleep screen: the page comes back by itself at 04:00, or once the clock is fixed.
+                // On the sleep screen: the page comes back by itself when the wall lifts, or once the clock is fixed.
                 // Only while visible (split screen counts): behind other apps, onResume brings it back.
                 web == null && !asleep() && visible() -> recreate()
             }
@@ -86,7 +86,7 @@ class StudyBrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // For the screen's whole life, not only while it is in front: a lecture left
-        // playing behind another app is stopped at 21:00 by the page closing, and a
+        // playing behind another app is stopped at the sleep wall by the page closing, and a
         // WebView has no MediaSession for the media guard to pause. Pausing the page
         // on every trip away was tried and dropped: it froze live Collaborate classes.
         handler.post(sleepCheck)

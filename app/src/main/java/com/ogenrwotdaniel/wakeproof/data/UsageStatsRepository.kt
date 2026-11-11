@@ -102,13 +102,24 @@ internal fun foregroundMillisPerSpan(
     }
 }
 
-/** One day's total screen time across launchable apps. */
+/** One day's screen time across launchable apps. */
 data class DayUsage(val epochDay: Long, val minutes: Long)
 
-/** Everything the phone-usage screen shows. */
+/**
+ * Everything the phone-usage screen shows. Screen time here is time outside
+ * the study apps and outside WakeProof itself (2026-11-11): an afternoon in
+ * Samsung Notes is the opposite of what the number warns about, and WakeProof
+ * is the home screen and the timer, which is on screen for a whole session
+ * just to show the countdown.
+ */
 data class UsageSnapshot(
+    /** Today outside study apps and WakeProof. */
     val todayMinutes: Long = 0,
+    /** Today in WakeProof's own screens; shown, counted as neither study nor screen time. */
+    val ownMinutes: Long = 0,
+    /** Today's heaviest apps outside study apps and WakeProof. */
     val topApps: List<AppUsage> = emptyList(),
+    /** The last 7 days outside study apps and WakeProof, oldest first. */
     val week: List<DayUsage> = emptyList()
 )
 
@@ -148,8 +159,9 @@ class UsageStatsRepository @Inject constructor(
      * subtracting neighbours, so a session running across midnight is split
      * between the two days instead of being lost or double-counted.
      */
-    suspend fun snapshot(): UsageSnapshot = withContext(Dispatchers.IO) {
+    suspend fun snapshot(studyApps: Set<String> = emptySet()): UsageSnapshot = withContext(Dispatchers.IO) {
         if (!hasAccess()) return@withContext UsageSnapshot()
+        val apart = studyApps + context.packageName
         val usm = context.getSystemService(UsageStatsManager::class.java)
         val labels = launchableAppLabels()
         val zone = ZoneId.systemDefault()
@@ -166,11 +178,12 @@ class UsageStatsRepository @Inject constructor(
         val week = days.mapIndexed { index, day ->
             DayUsage(
                 epochDay = day.toEpochDay(),
-                minutes = spans[index].values.sum() / 60_000
+                minutes = spans[index].filterKeys { it !in apart }.values.sum() / 60_000
             )
         }
 
         val topApps = spans[days.lastIndex]
+            .filterKeys { it !in apart }
             .map { (pkg, millis) ->
                 AppUsage(pkg, labels[pkg] ?: appLabel(pkg), millis / 60_000)
             }
@@ -180,6 +193,7 @@ class UsageStatsRepository @Inject constructor(
 
         UsageSnapshot(
             todayMinutes = week.last().minutes,
+            ownMinutes = (spans[days.lastIndex][context.packageName] ?: 0L) / 60_000,
             topApps = topApps,
             week = week
         )
@@ -189,7 +203,7 @@ class UsageStatsRepository @Inject constructor(
      * Minutes per day over the last 7 days (oldest first) for each of [groups]
      * (each group's packages together), measured like [snapshot], from one walk
      * of the week's events: one list per group in the same order, empty for an
-     * empty group. Feeds the week card: waiting apps and Chrome, day by day.
+     * empty group. Feeds the week card: gated apps, day by day.
      */
     suspend fun weekMinutesForGroups(groups: List<Set<String>>): List<List<DayUsage>> = withContext(Dispatchers.IO) {
         val all = groups.flatMapTo(mutableSetOf()) { it }

@@ -9,8 +9,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import com.ogenrwotdaniel.wakeproof.data.AgendaEvent
@@ -140,14 +138,11 @@ fun LauncherScreen(
         if (granted) viewModel.refresh()
     }
 
-    // Gated apps open directly inside their Mon–Thu 08:10–08:50 window (no 5-min
-    // wait) and hit BlockedActivity via onLaunch outside it. Non-gated capped apps
-    // keep the 45 s mindful pause; everything else opens at once. Chrome skips it:
-    // its hours and fixed hour cap already bound it, and a deadline is no time to wait.
+    // Gated apps open directly inside their Mon–Thu 08:20–08:50 window (no wait)
+    // and hit BlockedActivity via onLaunch outside it. Non-gated capped apps
+    // keep the 45 s mindful pause; everything else opens at once.
     val open: (InstalledApp) -> Unit = { app ->
-        if (app.packageName in limits && app.packageName !in gated &&
-            com.ogenrwotdaniel.wakeproof.distraction.appHoursFor(app.packageName) == null
-        ) {
+        if (app.packageName in limits && app.packageName !in gated) {
             pausing = app
         } else {
             onLaunch(app.packageName)
@@ -224,31 +219,6 @@ fun LauncherScreen(
                 )
                 Spacer(Modifier.height(16.dp))
 
-                // Chrome's hours and hour, so a submission is planned before it is begun.
-                // Only while the home screen is showing: the launcher is never destroyed, and
-                // a minute-by-minute read of today's Chrome use behind other apps is wasted
-                // battery. Redrawn at once when the shared deadline changes, so it turns with the wall.
-                val homeLifecycle = LocalLifecycleOwner.current
-                val deadlineVersion by com.ogenrwotdaniel.wakeproof.distraction.ChromeDeadline.changes.collectAsState()
-                val chromeStatus by produceState<String?>(null, pinned, limits, homeLifecycle, deadlineVersion) {
-                    homeLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                        while (true) {
-                            value = viewModel.chromeStatus()
-                            // On the minute, so the line turns at 08:40 and 16:00, not up to a minute late.
-                            val now = java.time.LocalTime.now()
-                            delay(millisToNextMinute(now.second, now.nano))
-                        }
-                    }
-                }
-                chromeStatus?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
                 val byPackage = apps.associateBy { it.packageName }
                 val favorites = settings.launcherFavorites
                     .filter { it !in gated && it !in limits }
@@ -266,7 +236,7 @@ fun LauncherScreen(
                             onAppInfo = { onAppInfo(app.packageName) }
                         )
                     }
-                    // WakeProof's own Blackboard screen, open when Chrome is not.
+                    // WakeProof's own Blackboard screen, open when the browsers are not.
                     val context = androidx.compose.ui.platform.LocalContext.current
                     Text(
                         text = "Blackboard",

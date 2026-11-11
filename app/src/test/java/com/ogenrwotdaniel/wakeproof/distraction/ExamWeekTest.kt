@@ -171,16 +171,6 @@ class ExamWeekTest {
     }
 
     @Test
-    fun `chrome has one row of hours, and its shells only lend it their notifications`() {
-        assertEquals(CHROME_HOURS, appHoursFor(AppGate.CHROME))
-        // A shell's notifications follow Chrome; the shell itself is judged as itself.
-        assertNull(appHoursFor("org.chromium.webapk.a1b2c3"))
-        assertEquals(CHROME_HOURS, notificationHoursFor("org.chromium.webapk.a1b2c3"))
-        assertNull(appHoursFor("com.chrome.beta"))
-        assertEquals(CHROME_DAILY_CAP_MINUTES, withFixedCaps(emptyMap())[AppGate.CHROME]?.minutes)
-    }
-
-    @Test
     fun `the clock is doubted for exam holds only after a run of doubted reads in one boot`() {
         val min = 60_000L
         // One doubted read begins a run and is not yet a doubt.

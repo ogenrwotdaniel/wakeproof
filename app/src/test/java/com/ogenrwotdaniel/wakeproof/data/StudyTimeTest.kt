@@ -91,4 +91,25 @@ class StudyTimeTest {
         val s = summary(local = mapOf(notes to 0L, wakeproof to 3L))
         assertEquals(listOf(wakeproof), s.measured.map { it.packageName })
     }
+
+    @Test
+    fun `WakeProof's own screens are not study, whichever device reported them`() {
+        val own = "com.ogenrwotdaniel.wakeproof"
+        val notes = "com.samsung.android.app.notes"
+        val summary = studyTimeSummary(
+            today = 10L,
+            local = mapOf(notes to 20L, own to 90L),
+            localLabels = mapOf(notes to "Samsung Notes"),
+            // A tablet on an older build still reports its home screen and timer.
+            peers = listOf(DeviceStudyUsage("Tab", 10L, mapOf(own to 60L))),
+            focusMinutes = 50L,
+            creditPackage = notes,
+            ownPackage = own
+        )
+        assertEquals(listOf(notes), summary.measured.map { it.packageName })
+        // A session timed on the watch with the phone showing the countdown counts once.
+        assertEquals(50L, summary.totalMinutes)
+        assertEquals(30L, summary.creditedMinutes)
+        assertEquals(emptyList<DeviceStudyUsage>(), summary.peers)
+    }
 }

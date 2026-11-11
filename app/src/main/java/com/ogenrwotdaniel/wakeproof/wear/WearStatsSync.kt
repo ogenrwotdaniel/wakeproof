@@ -45,6 +45,23 @@ object WearContract {
     const val KEY_TIMER_FINISH_AT = "t_finish_at"
 
     /**
+     * The phone's session on the same item (2026-11-11), so the watch can run
+     * it too ("Continue here"); see `SharedSession`. Absent while paused or for
+     * a session with no id. MUST match wear `TimerContract`.
+     */
+    const val KEY_TIMER_SESSION_ID = "t_session_id"
+    const val KEY_TIMER_ORIGIN = "t_origin"
+    const val KEY_TIMER_PHASE_NAME = "t_phase_name"
+    const val KEY_TIMER_COMPLETED = "t_completed"
+    const val KEY_TIMER_TARGET = "t_target"
+    const val KEY_TIMER_FOCUS_SEC = "t_focus_sec"
+    const val KEY_TIMER_SHORT_SEC = "t_short_sec"
+    const val KEY_TIMER_LONG_SEC = "t_long_sec"
+    const val KEY_TIMER_LONG_EVERY = "t_long_every"
+    const val KEY_TIMER_LAST_FOCUS_SEC = "t_last_focus_sec"
+    const val KEY_TIMER_SUBJECT = "t_subject"
+
+    /**
      * Watch -> phone commands, carried on the MessageClient rather than the
      * DataClient.
      *
@@ -114,6 +131,15 @@ object WearContract {
     const val KEY_WS_TARGET = "ws_target"
     const val KEY_WS_SUBJECT = "ws_subject"
     const val KEY_WS_UPDATED_AT = "ws_updated_at"
+
+    /** The rest of the watch's session (2026-11-11), so the phone can join it; see `SharedSession`. */
+    const val KEY_WS_SESSION_ID = "ws_session_id"
+    const val KEY_WS_ORIGIN = "ws_origin"
+    const val KEY_WS_FOCUS_MIN = "ws_focus_min"
+    const val KEY_WS_SHORT_MIN = "ws_short_min"
+    const val KEY_WS_LONG_MIN = "ws_long_min"
+    const val KEY_WS_LONG_EVERY = "ws_long_every"
+    const val KEY_WS_LAST_FOCUS_SEC = "ws_last_focus_sec"
     const val KEY_SESSION_ID = "s_id"
     const val KEY_SESSION_STARTED = "s_started"
     const val KEY_SESSION_ENDED = "s_ended"

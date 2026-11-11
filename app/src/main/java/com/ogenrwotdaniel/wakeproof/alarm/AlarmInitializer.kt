@@ -40,21 +40,19 @@ class AlarmInitializer @Inject constructor(
 
     /**
      * Pins every [StrictAlarm] slot on the ringing device: adopts an alarm the
-     * first time (the earliest unlocked pushup alarm, or a new one), brings it
-     * back if it was deleted, and rewrites any change to it.
+     * first time ([strictAlarmCandidate], or a new one), brings it back if it
+     * was deleted, and rewrites any change to it.
      */
     suspend fun enforceStrict() {
         if (!devicePolicy.ringsAlarms) return
-        WearAlarmSync.pushSchedule(context, StrictAlarm.SLOTS.map { it.minuteOfDay })
+        WearAlarmSync.pushSchedule(context, StrictAlarm.hardMinutes)
         StrictAlarm.SLOTS.forEachIndexed { index, slot ->
             val all = repository.getAllAlarmsIncludingDeleted()
             val syncId = StrictAlarm.syncId(context, index)
             var row = all.firstOrNull { it.syncId == syncId }
             if (row == null) {
-                row = strictAlarmCandidate(all, taken = StrictAlarm.syncIds(context)) ?: run {
-                    repository.addAlarm(
-                        StrictAlarm.TYPE, slot.hour, slot.minute, strictLabel(slot)
-                    )
+                row = strictAlarmCandidate(all, slot, taken = StrictAlarm.syncIds(context)) ?: run {
+                    repository.addAlarm(slot.type, slot.hour, slot.minute, strictLabel(slot))
                     repository.getAllAlarmsIncludingDeleted().maxByOrNull { it.id }
                 } ?: return@forEachIndexed
             }

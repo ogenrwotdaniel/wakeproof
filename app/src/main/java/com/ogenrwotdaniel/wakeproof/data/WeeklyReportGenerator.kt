@@ -25,8 +25,6 @@ data class WeekStats(
 data class WallDay(
     val epochDay: Long,
     val waitingAppMinutes: Long = 0,
-    /** Chrome, the one ungated browser, which has an hour a day. */
-    val chromeMinutes: Long = 0,
     /** WakeProof's own Blackboard screen. */
     val blackboardMinutes: Long = 0
 )
@@ -117,13 +115,6 @@ class WeeklyReportGenerator @Inject constructor() {
         if (waiting > 0 && waiting > focusTotal) {
             lines += "Social, video and messaging apps took ${formatDuration(waiting.toInt())} " +
                 "this week — more than your focus time."
-        }
-        // Chrome is for coursework; more of it than Blackboard says it went elsewhere.
-        val chrome = stats.wall.sumOf { it.chromeMinutes }
-        val blackboard = stats.wall.sumOf { it.blackboardMinutes }
-        if (chrome >= 60 && chrome > blackboard) {
-            lines += "Chrome took ${formatDuration(chrome.toInt())}, more than Blackboard " +
-                "(${formatDuration(blackboard.toInt())}). Coursework lives on Blackboard."
         }
         stats.topApps.firstOrNull()?.takeIf { it.minutes >= 60 }?.let { app ->
             lines += "${app.label} alone took ${formatDuration(app.minutes.toInt())} today."

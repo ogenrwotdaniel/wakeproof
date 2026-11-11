@@ -983,20 +983,28 @@ private fun TimePickerDialog(
  */
 @Composable
 private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
+    val context = LocalContext.current
+    // The water alarm is fixed in the schedule only; it rings like any other.
+    val hard = StrictAlarm.slotOf(context, alarm)?.hard != false
     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp)) {
         Text(
-            text = formatAlarmTime(LocalContext.current, alarm.hour, alarm.minute),
+            text = formatAlarmTime(context, alarm.hour, alarm.minute),
             style = MaterialTheme.typography.headlineSmall
         )
         Text(
             text = (if (isStrictLabel(alarm.label)) "" else alarm.label).ifBlank { "Locked" } +
-                " · ${StrictAlarm.REPS} pushups · every day",
+                (if (hard) " · ${StrictAlarm.REPS} pushups" else " · water") + " · every day",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
-                "no emergency dismiss, and keeps ringing after a restart until it is done.",
+            text = if (hard) {
+                "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
+                    "no emergency dismiss, and keeps ringing after a restart until it is done."
+            } else {
+                "Fixed. It cannot be changed, switched off or deleted. Snooze and the " +
+                    "emergency dismiss work as on any other alarm."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary
         )

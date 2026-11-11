@@ -58,6 +58,8 @@ data class StudyTimeSummary(
  * @param local this device's minutes per study package.
  * @param focusMinutes today's verified focus minutes, every device included.
  * @param creditPackage the app focus time is spent in, or null for no credit.
+ * @param ownPackage WakeProof itself, dropped from every device's report: a
+ *   build from before 2026-11-11 still publishes its home screen and timer as study.
  */
 fun studyTimeSummary(
     today: Long,
@@ -65,13 +67,14 @@ fun studyTimeSummary(
     localLabels: Map<String, String>,
     peers: List<DeviceStudyUsage>,
     focusMinutes: Long,
-    creditPackage: String?
+    creditPackage: String?,
+    ownPackage: String? = null
 ): StudyTimeSummary {
     val current = peers.filter { it.epochDay == today }
     val totals = LinkedHashMap<String, Long>()
     (listOf(local) + current.map { it.minutes }).forEach { device ->
         device.forEach { (pkg, minutes) ->
-            if (minutes > 0) totals[pkg] = (totals[pkg] ?: 0L) + minutes
+            if (minutes > 0 && pkg != ownPackage) totals[pkg] = (totals[pkg] ?: 0L) + minutes
         }
     }
     val labelOf = { pkg: String ->
@@ -85,6 +88,6 @@ fun studyTimeSummary(
         measured = measured,
         creditedPackage = credit,
         creditedMinutes = if (credit != null) shortfall else 0L,
-        peers = current.filter { peer -> peer.minutes.values.any { it > 0 } }
+        peers = current.filter { peer -> peer.minutes.any { (pkg, minutes) -> minutes > 0 && pkg != ownPackage } }
     )
 }

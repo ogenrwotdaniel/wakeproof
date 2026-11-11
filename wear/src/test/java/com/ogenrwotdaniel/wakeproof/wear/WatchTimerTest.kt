@@ -224,4 +224,50 @@ class WatchTimerTest {
         )
         assertEquals(t0 + 185 * minute, now)
     }
+
+    @Test
+    fun `a session's blocks are named by the session, the same on every device`() {
+        val zone = ZoneOffset.UTC
+        val start = 1_800_000_000_000L
+        val state = WatchTimer.start(WatchDurations(), "Maths", start, WatchSession.ONE_HOUR, sessionId = "0f8fad5b-d9cb")
+        val first = WatchTimer.advance(state, start + 25 * 60_000L, zone)
+        // The phone's sharedBlockId must give the same string.
+        assertEquals("0f8fad5b-d9cb-b1", first.completed?.id)
+        assertEquals("0f8fad5b-d9cb-b1", WatchTimer.blockId("0f8fad5b-d9cb", 1))
+        // A state stored before sessions had ids keeps a random one.
+        val old = WatchTimer.advance(state.copy(sessionId = ""), start + 25 * 60_000L, zone) { "random" }
+        assertEquals("random", old.completed?.id)
+    }
+
+    @Test
+    fun `the phone's session is run from where it is, and its breaks are not skipped here`() {
+        val now = 1_800_000_000_000L
+        val phone = PhoneSession(
+            sessionId = "0f8fad5b-d9cb", origin = "phone", phaseName = "SHORT_BREAK",
+            phaseEndsAt = now + 3 * 60_000L, completedFocus = 2, targetFocusBlocks = 4,
+            focusSeconds = 50 * 60, shortBreakSeconds = 10 * 60, longBreakSeconds = 20 * 60,
+            longBreakEvery = 4, lastFocusSeconds = 0, subject = "Maths"
+        )
+        val state = WatchTimer.follow(phone, now)!!
+        assertTrue(state.active && state.running && state.following)
+        assertEquals(WatchPhase.SHORT_BREAK, state.phase)
+        assertEquals(now + 3 * 60_000L, state.phaseEndsAt)
+        assertEquals(2, state.completedFocus)
+        assertEquals(WatchDurations(50, 10, 20), state.durations)
+        // No last-block length sent: an ordinary block.
+        assertEquals(50 * 60, state.lastFocusSeconds)
+        assertSame(state, WatchTimer.skipBreak(state, now))
+        // Its next block is named as the phone names it.
+        val focus = WatchTimer.advance(state, now + 3 * 60_000L, ZoneOffset.UTC).state
+        val done = WatchTimer.advance(focus, focus.phaseEndsAt, ZoneOffset.UTC)
+        assertEquals("0f8fad5b-d9cb-b3", done.completed?.id)
+
+        // Nothing to join: all but over, finished, or not a session at all.
+        assertNull(WatchTimer.follow(phone.copy(phaseEndsAt = now + 1_000L), now))
+        assertNull(WatchTimer.follow(phone.copy(completedFocus = 4), now))
+        assertNull(WatchTimer.follow(phone.copy(sessionId = "x"), now))
+        assertNull(WatchTimer.follow(phone.copy(phaseName = "NAP"), now))
+        // The watch's own session, handed back to it, is its own again.
+        assertFalse(WatchTimer.follow(phone.copy(origin = "watch"), now)!!.following)
+    }
 }

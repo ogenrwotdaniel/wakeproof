@@ -60,8 +60,19 @@ data class WatchTimerState(
      * block is trimmed or stretched so it ends with the event. Defaults to the
      * focus length, which is what every state stored before it means.
      */
-    val lastFocusSeconds: Int = durations.focusMinutes.coerceAtLeast(1) * 60
+    val lastFocusSeconds: Int = durations.focusMinutes.coerceAtLeast(1) * 60,
+    /**
+     * Names the session on every device that runs it (2026-11-11; the phone's
+     * `SharedSession.id`), and so its blocks ([WatchTimer.blockId]). Blank in a
+     * state stored before that.
+     */
+    val sessionId: String = "",
+    /** Where the session started: here, or on the phone whose session this watch joined. */
+    val origin: String = WatchTimer.ORIGIN_WATCH
 ) {
+    /** Running a session the phone started: the phone keeps the time, so no break is skipped here. */
+    val following: Boolean get() = origin != WatchTimer.ORIGIN_WATCH
+
     /** How long focus block [block] (1-based) runs; see [WatchTimer.focusSecondsForBlock]. */
     fun focusMillisOfBlock(block: Int): Long = 1_000L * WatchTimer.focusSecondsForBlock(
         block, targetFocusBlocks, (durations.millisOf(WatchPhase.FOCUS) / 1_000L).toInt(), lastFocusSeconds
@@ -107,6 +118,26 @@ data class Advance(
 )
 
 /**
+ * The phone's running session as it puts it on the timer item (2026-11-11), for
+ * the watch to run too. A hand-kept COPY of the phone's `SharedSession`; read by
+ * `TimerSnapshot`.
+ */
+data class PhoneSession(
+    val sessionId: String,
+    val origin: String,
+    val phaseName: String,
+    val phaseEndsAt: Long,
+    val completedFocus: Int,
+    val targetFocusBlocks: Int,
+    val focusSeconds: Int,
+    val shortBreakSeconds: Int,
+    val longBreakSeconds: Int,
+    val longBreakEvery: Int,
+    val lastFocusSeconds: Int,
+    val subject: String?
+)
+
+/**
  * The session lengths offered on the watch — the same four the phone offers.
  *
  * No free run, as on the phone (2026-10-27): a session has no pause and no stop
@@ -138,6 +169,51 @@ object WatchTimer {
 
     /** Same cadence as the phone: a long break after every fourth focus block. */
     const val FOCUS_BLOCKS_PER_LONG_BREAK = 4
+
+    /** A session started on this watch. MUST match the phone's `SharedSession.ORIGIN_WATCH`. */
+    const val ORIGIN_WATCH = "watch"
+
+    /**
+     * The id of focus block [block] (1-based) of session [sessionId]: the same on
+     * every device that ran the session, so a block finished on the watch and on
+     * the phone is one row. A COPY of the phone's `sharedBlockId`.
+     */
+    fun blockId(sessionId: String, block: Int): String = "$sessionId-b$block"
+
+    /**
+     * The phone's session, run here too from where it is ([PhoneSession], the
+     * watch's "Continue here"). Null when it cannot be: malformed, or its phase
+     * all but over. Minutes, as the phone's settings are.
+     */
+    fun follow(session: PhoneSession, now: Long): WatchTimerState? {
+        val phase = WatchPhase.entries.firstOrNull { it.name == session.phaseName } ?: return null
+        if (!SESSION_ID.matches(session.sessionId)) return null
+        if (session.targetFocusBlocks < 1 || session.completedFocus !in 0 until session.targetFocusBlocks) return null
+        if (session.focusSeconds < 60 || session.shortBreakSeconds < 60 || session.longBreakSeconds < 60) return null
+        if (session.phaseEndsAt - now < JOIN_MARGIN_MILLIS) return null
+        return WatchTimerState(
+            active = true,
+            running = true,
+            phase = phase,
+            phaseEndsAt = session.phaseEndsAt,
+            completedFocus = session.completedFocus,
+            // Not known, and only the record's start time: the block's minutes are its full length.
+            focusStartedAt = now,
+            durations = WatchDurations(
+                session.focusSeconds / 60, session.shortBreakSeconds / 60, session.longBreakSeconds / 60
+            ),
+            subject = session.subject,
+            targetFocusBlocks = session.targetFocusBlocks,
+            longBreakEvery = session.longBreakEvery.coerceAtLeast(1),
+            lastFocusSeconds = session.lastFocusSeconds.takeIf { it >= 60 } ?: session.focusSeconds,
+            sessionId = session.sessionId,
+            origin = session.origin.ifBlank { "phone" }
+        )
+    }
+
+    /** A COPY of the phone's `validSessionId` pattern and `JOIN_MARGIN_MILLIS`. */
+    private val SESSION_ID = Regex("[A-Za-z0-9-]{8,64}")
+    const val JOIN_MARGIN_MILLIS = 5_000L
 
     /** The 3-hour recipe's lengths. A COPY of the phone's `sessionPlan` — keep in step by hand. */
     val THREE_HOUR_DURATIONS = WatchDurations(25, 5, 15)
@@ -194,7 +270,12 @@ object WatchTimer {
      * An event session of exactly [totalMinutes], on the watch's own timer —
      * the same nuclear rules as any other: no pause, no stop.
      */
-    fun startExact(totalMinutes: Int, subject: String?, now: Long): WatchTimerState {
+    fun startExact(
+        totalMinutes: Int,
+        subject: String?,
+        now: Long,
+        sessionId: String = randomId()
+    ): WatchTimerState {
         val plan = exactSessionPlan(totalMinutes)
         val state = WatchTimerState(
             active = true,
@@ -205,7 +286,8 @@ object WatchTimer {
             subject = subject,
             targetFocusBlocks = plan.focusBlocks,
             longBreakEvery = Int.MAX_VALUE,
-            lastFocusSeconds = plan.lastFocusMinutes * 60
+            lastFocusSeconds = plan.lastFocusMinutes * 60,
+            sessionId = sessionId
         )
         return state.copy(phaseEndsAt = now + state.focusMillisOfBlock(1))
     }
@@ -214,7 +296,8 @@ object WatchTimer {
         durations: WatchDurations,
         subject: String?,
         now: Long,
-        session: WatchSession = WatchSession.ONE_HOUR
+        session: WatchSession = WatchSession.ONE_HOUR,
+        sessionId: String = randomId()
     ): WatchTimerState {
         val threeHours = session == WatchSession.THREE_HOURS
         val used = if (threeHours) THREE_HOUR_DURATIONS else durations
@@ -228,7 +311,8 @@ object WatchTimer {
             subject = subject,
             targetFocusBlocks = if (threeHours) THREE_HOUR_BLOCKS
             else focusBlocksForSession(session.minutes, used.focusMinutes, used.shortBreakMinutes),
-            longBreakEvery = if (threeHours) THREE_HOUR_LONG_BREAK_EVERY else FOCUS_BLOCKS_PER_LONG_BREAK
+            longBreakEvery = if (threeHours) THREE_HOUR_LONG_BREAK_EVERY else FOCUS_BLOCKS_PER_LONG_BREAK,
+            sessionId = sessionId
         )
     }
 
@@ -262,9 +346,13 @@ object WatchTimer {
      */
     fun stop(): WatchTimerState = WatchTimerState()
 
-    /** Ends a break early and starts the next focus block. A focus block cannot be skipped. */
+    /**
+     * Ends a break early and starts the next focus block. A focus block cannot
+     * be skipped, and nor can a break of a session the phone started: the phone
+     * keeps that session's time, and the two would part.
+     */
     fun skipBreak(state: WatchTimerState, now: Long): WatchTimerState =
-        if (!state.active || state.phase == WatchPhase.FOCUS) state
+        if (!state.active || state.phase == WatchPhase.FOCUS || state.following) state
         else focusFrom(state, now)
 
     /**
@@ -282,7 +370,8 @@ object WatchTimer {
         val endedAt = state.phaseEndsAt
         val done = state.completedFocus + 1
         val block = FocusBlock(
-            id = newId(),
+            // A state stored before sessions had ids keeps a random one.
+            id = if (state.sessionId.isBlank()) newId() else blockId(state.sessionId, done),
             startedAt = state.focusStartedAt,
             endedAt = endedAt,
             minutes = (state.focusMillisOfBlock(done) / 60_000L).toInt(),

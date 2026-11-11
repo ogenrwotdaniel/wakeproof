@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
+import com.ogenrwotdaniel.wakeproof.pomodoro.SharedSession
+import com.ogenrwotdaniel.wakeproof.pomodoro.sharedFields
+import com.ogenrwotdaniel.wakeproof.pomodoro.sharedFromFields
 
 /**
  * A focus session on one device walls the others too (2026-10-28). The tablet
@@ -20,10 +23,13 @@ import kotlinx.coroutines.tasks.await
  * tablet, and every app on it was open.
  *
  * One document, `users/{uid}/live/focusSession`: when the session ends
- * ([ENDS_AT], wall clock) and which install started it. Sessions cannot be
- * stopped, so an end time is all a peer needs — it can wall until then without
- * hearing from the session's device again, which matters when that device is
- * in a bag with no signal. A device ignores its own document.
+ * ([ENDS_AT], wall clock) and which install wrote it. Sessions cannot be
+ * stopped, so an end time is all a peer needs to wall itself — it can wall
+ * until then without hearing from the session's device again, which matters
+ * when that device is in a bag with no signal. A device ignores its own document.
+ *
+ * Since 2026-11-11 the document also says where the session is
+ * ([SharedSession]), so the other device can show the countdown and join it.
  *
  * Best-effort, like the rest of the live layer: signed out, sync off, or no
  * Firebase, and each device only walls itself.
@@ -42,9 +48,17 @@ class LiveFocusSession @Inject constructor(
     /** The paired watch's session end, relayed by this phone; 0 = none. */
     @Volatile private var watchEndsAt = 0L
 
-    /** Announces a session on this device running until [endsAtMillis]; 0 = ended. */
-    suspend fun publish(endsAtMillis: Long) {
+    /** This device's own session, and the watch's as last heard; null = none. */
+    @Volatile private var ownShared: SharedSession? = null
+    @Volatile private var watchShared: SharedSession? = null
+
+    /**
+     * Announces a session on this device running until [endsAtMillis] (0 =
+     * ended), at [shared] now.
+     */
+    suspend fun publish(endsAtMillis: Long, shared: SharedSession?) {
         ownEndsAt = endsAtMillis
+        ownShared = shared
         write()
     }
 
@@ -55,9 +69,10 @@ class LiveFocusSession @Inject constructor(
      * is what the peers wall until — the phone's own session ending must not
      * release the tablet while the watch's still runs.
      */
-    suspend fun relayWatch(endsAtMillis: Long) {
-        if (watchEndsAt == endsAtMillis) return
+    suspend fun relayWatch(endsAtMillis: Long, shared: SharedSession?) {
+        if (watchEndsAt == endsAtMillis && watchShared == shared) return
         watchEndsAt = endsAtMillis
+        watchShared = shared
         write()
     }
 
@@ -75,7 +90,7 @@ class LiveFocusSession @Inject constructor(
             val doc = db.collection(USERS).document(uid).collection(LIVE).document(FOCUS_SESSION).get().await()
             val from = doc.getString(INSTALL_ID)
             val endsAt = doc.getLong(ENDS_AT) ?: 0L
-            if (from == preferences.installId() && endsAt > System.currentTimeMillis()) publish(0L)
+            if (from == preferences.installId() && endsAt > System.currentTimeMillis()) publish(0L, null)
         }.onFailure { Log.w(TAG, "Stale focus session release failed", it) }
     }
 
@@ -86,22 +101,30 @@ class LiveFocusSession @Inject constructor(
         val uid = accounts.currentUid() ?: return
         if (!preferences.isEnabled()) return
         runCatching {
+            val self = preferences.installId()
+            // Our own session first; else the watch's, passed on for the tablet.
+            val shared = (ownShared ?: watchShared?.takeIf { watchEndsAt > now })?.let {
+                if (it.origin == SharedSession.ORIGIN_SELF) it.copy(origin = self) else it
+            }
             db.collection(USERS).document(uid).collection(LIVE).document(FOCUS_SESSION)
                 .set(
                     mapOf(
                         ENDS_AT to endsAtMillis,
-                        INSTALL_ID to preferences.installId(),
+                        INSTALL_ID to self,
                         SERVER_UPDATED_AT to FieldValue.serverTimestamp()
-                    )
+                    ) + shared?.let(::sharedFields).orEmpty()
                 ).await()
         }.onFailure { Log.w(TAG, "Focus session publish failed", it) }
     }
 
+    /** Another device's session: when its wall ends, and the session itself when it can be joined. */
+    data class Peer(val endsAtMillis: Long, val shared: SharedSession?)
+
     /**
-     * When another device's session ends (wall clock), or null when none is
-     * known. Emits again on every change; the reader compares with the clock.
+     * Another device's session, or null when none is known. Emits again on
+     * every change; the reader compares with the clock.
      */
-    fun peerSessionEndsAt(): Flow<Long?> =
+    fun peerSession(): Flow<Peer?> =
         combine(accounts.account, preferences.enabled) { account, enabled ->
             (account as? SyncAccount.SignedIn)?.uid?.takeIf { enabled }
         }.flatMapLatest { uid ->
@@ -117,7 +140,12 @@ class LiveFocusSession @Inject constructor(
                             return@addSnapshotListener
                         }
                         val from = snapshot?.getString(INSTALL_ID)
-                        trySend(snapshot?.getLong(ENDS_AT)?.takeIf { from != null && from != self })
+                        val endsAt = snapshot?.getLong(ENDS_AT)?.takeIf { from != null && from != self }
+                        trySend(
+                            endsAt?.let {
+                                Peer(it, snapshot.data?.let { fields -> sharedFromFields(fields, writer = from!!) })
+                            }
+                        )
                     }
                 awaitClose { registration.remove() }
             }

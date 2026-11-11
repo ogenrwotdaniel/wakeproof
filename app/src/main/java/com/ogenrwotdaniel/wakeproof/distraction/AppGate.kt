@@ -10,11 +10,11 @@ import com.ogenrwotdaniel.wakeproof.BuildConfig
 /**
  * Social, video, messaging and feed apps — and browsers, while
  * [WallRule.GATE_BROWSERS] is on — are walled by [AppBlockService] outside the
- * Monday–Thursday 08:10–08:50 open window and all day Friday through Sunday.
+ * Monday–Thursday 08:20–08:50 open window and all day Friday through Sunday.
  *
- * Inside that 40-minute window on Monday–Thursday they open directly with no
+ * Inside that 30-minute window on Monday–Thursday they open directly with no
  * countdown wait and no separate 25-minute budget (2026-11-06, user's choice:
- * only 40 minutes exist in the window anyway). Outside it they are
+ * the window is short enough already). Outside it they are
  * covered by [BlockedActivity].
  */
 object AppGate {
@@ -44,12 +44,9 @@ object AppGate {
     const val PLAY_STORE = "com.android.vending"
 
     /**
-     * Chrome, the one browser left ungated (2026-11-09, user's request): it is
-     * where assignments are submitted, and a deadline does not wait for the
-     * 08:10 window. Only the stable package; Beta, Samsung Internet and every
-     * other browser stay gated. Chrome keeps hours of its own instead
-     * ([chromeHoursShut], [CHROME_DAILY_CAP_MINUTES]), and is still behind the
-     * sleep, focus, clock and quarantine walls.
+     * Chrome: gated like every other browser again (2026-11-11, user's choice).
+     * From 2026-11-09 it had hours of its own (weekdays 08:40–16:00, an hour a
+     * day, a deadline pass); coursework goes through the Blackboard screen.
      */
     const val CHROME = "com.android.chrome"
 
@@ -95,9 +92,7 @@ object AppGate {
      * trampoline) hosted inside [GOOGLE_APP] to [GEMINI_APP], while leaving
      * Google Discover (`GoogleAppActivity`, `ContentViewerActivity`), Search
      * (`SearchActivity`), and the in-app web viewer (`SilkPaneActivity`) under
-     * [GOOGLE_APP] so they remain gated. A site installed from Chrome as an app
-     * has a small launcher package of its own ([WEBAPK_PREFIX]) but its screens
-     * are Chrome's, so they stay [CHROME] and share its weekday hours and hour.
+     * [GOOGLE_APP] so they remain gated.
      */
     fun effectivePackage(packageName: String, className: String): String =
         if (packageName == GOOGLE_APP &&
@@ -110,9 +105,8 @@ object AppGate {
 
     /**
      * The launcher shells Chrome installs for sites saved as apps. Their screens
-     * run in Chrome; their notifications follow Chrome's hours
-     * ([notificationHoursFor]). Not exempt from [NewAppQuarantine]: a package
-     * name is no proof, and Blackboard has its own screen.
+     * run in Chrome and meet its walls; the shells are gated as browsers too
+     * ([isGated]), so the web pushes they post are removed with Chrome's.
      */
     const val WEBAPK_PREFIX = "org.chromium.webapk."
 
@@ -159,7 +153,7 @@ object AppGate {
      *
      * Browsers are gated when [gateBrowsers]: otherwise instagram.com and
      * youtube.com in a browser skip every wall the apps themselves are behind.
-     * [CHROME] is the exception, kept open for coursework.
+     * A site saved from Chrome as an app ([WEBAPK_PREFIX]) counts as one.
      */
     fun isGated(
         packageName: String,
@@ -172,7 +166,7 @@ object AppGate {
             packageName != defaultSmsPackage && (
                 category == ApplicationInfo.CATEGORY_SOCIAL ||
                     category == ApplicationInfo.CATEGORY_VIDEO ||
-                    (gateBrowsers && isBrowser && packageName != CHROME)
+                    (gateBrowsers && (isBrowser || packageName.startsWith(WEBAPK_PREFIX)))
                 )
             )
 
@@ -232,8 +226,6 @@ enum class GateVerdict {
     HISTORY_WALL,
     /** Settings' screen that would switch the uninstall lock off; see [com.ogenrwotdaniel.wakeproof.admin.UninstallLock]. */
     ADMIN_LOCK_WALL,
-    /** An app with fixed hours ([AppHours], Chrome) outside them; see [chromeHoursShut]. */
-    APP_HOURS_WALL,
     /** A gated app during exam week; see [examWeekHeld]. */
     EXAM_WALL
 }
@@ -259,8 +251,7 @@ enum class GateVerdict {
  * 5. An app in its first week ([quarantined]).
  * 6. Outside a session, gated and [capped] apps while Notification History is on.
  * 7. An app whose daily cap is spent is walled until midnight (or next open window).
- * 8. An app with fixed hours outside them ([GateVerdict.APP_HOURS_WALL]); a gated
- *    app in exam week ([GateVerdict.EXAM_WALL]); otherwise shut outside the
+ * 8. A gated app in exam week ([GateVerdict.EXAM_WALL]); otherwise shut outside the
  *    Monday–Thursday open window or all day Friday–Sunday ([GateVerdict.WINDOW_WALL]).
  *    The caller scopes [examWeek] and [outsideWindow] to gated apps. Each has its
  *    own verdict so the wall says why without working it out again.
@@ -275,7 +266,6 @@ fun gateVerdict(
     gated: Boolean,
     outsideWindow: Boolean = false,
     bedtime: Boolean = false,
-    appHoursShut: Boolean = false,
     examWeek: Boolean = false,
     sleeping: Boolean = false,
     quarantined: Boolean = false,
@@ -299,7 +289,6 @@ fun gateVerdict(
     quarantined -> GateVerdict.QUARANTINE_WALL
     historyOn && !focusSessionActive && (gated || capped) -> GateVerdict.HISTORY_WALL
     capSpent -> GateVerdict.CAP_WALL
-    appHoursShut -> GateVerdict.APP_HOURS_WALL
     examWeek -> GateVerdict.EXAM_WALL
     outsideWindow -> GateVerdict.WINDOW_WALL
     !gated -> GateVerdict.ALLOW

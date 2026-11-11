@@ -45,6 +45,10 @@ interface CompletionLogDao : SyncDao<CompletionLog> {
     @Insert
     suspend fun insert(log: CompletionLog)
 
+    /** For a shared block another device finished first; see `CompletionRepository.logFocusBlock`. */
+    @androidx.room.Update
+    suspend fun update(log: CompletionLog)
+
     @Query(
         "SELECT * FROM completion_logs WHERE epochDay >= :fromEpochDay AND deleted = 0 " +
             "ORDER BY epochDay"

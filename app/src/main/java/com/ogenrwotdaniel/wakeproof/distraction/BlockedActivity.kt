@@ -123,7 +123,7 @@ class BlockedActivity : ComponentActivity() {
 
         /**
          * [reopensAt] describes when the app next opens after today (e.g.
-         * `"tomorrow at 08:10"` or `"Monday at 08:10"`) when the open window or
+         * `"tomorrow at 08:20"` or `"Monday at 08:20"`) when the open window or
          * Friday–Sunday shutdown outlasts midnight; null counts down to midnight.
          */
         fun intent(

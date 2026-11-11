@@ -24,6 +24,10 @@ object BuzzPattern {
     /** A timed session's last block ended. ~10 s of slow, heavy pulses. */
     val SESSION_DONE = pulses(totalMillis = 10_000, onMillis = 1_500, offMillis = 500)
 
+    /** The phone's session changed phase, or ended: an echo of the phone's own ring. */
+    val PEER_PHASE = longArrayOf(0, 500, 200, 500, 200, 500)
+    val PEER_DONE = longArrayOf(0, 900, 300, 900)
+
     /** Confirms a tap the user just made (Skip break): no need to announce it. */
     val TAP = longArrayOf(0, 300, 150, 300)
 

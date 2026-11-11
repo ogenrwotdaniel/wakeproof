@@ -36,10 +36,10 @@ enum class WallRule(val key: String, val default: Int) {
 
     /**
      * Minute of the day the bedtime wall starts. It lasts until
-     * [BEDTIME_END_MINUTES] (16:00 to 08:40 since 2026-11-08, was 17:00 until
-     * the morning alarm).
+     * [BEDTIME_END_MINUTES] (15:00 to 08:20 since 2026-11-11; 16:00 to 08:40
+     * before that).
      */
-    BEDTIME_START_MINUTES("bedtime_start_minutes", 16 * 60),
+    BEDTIME_START_MINUTES("bedtime_start_minutes", 15 * 60),
 
     /** Do Not Disturb for the whole of a focus session. */
     SESSION_DND("session_dnd", RULE_ON),
@@ -47,10 +47,11 @@ enum class WallRule(val key: String, val default: Int) {
     /**
      * Minute of the day the gated apps' open window starts, Monday to Thursday
      * ([WEEKEND_SHUT] keeps Friday–Sunday shut). Covers social, video,
-     * messaging, the Google app, Play Store and browsers. 08:10–08:50 since
-     * 2026-11-01: 40 minutes, with no 5-minute wait or 25-minute budget.
+     * messaging, the Google app, Play Store and browsers. 08:20–08:50 since
+     * 2026-11-11 (the user leaves home at 08:20): 30 minutes, with no wait and
+     * no budget.
      */
-    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 8 * 60 + 10),
+    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 8 * 60 + 20),
 
     /** Minute of the day the open window closes (exclusive). */
     OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 8 * 60 + 50);
@@ -119,7 +120,7 @@ class WallRulesRepository @Inject constructor(@ApplicationContext private val co
 /**
  * Pure: the rules in force given what was [stored] per rule. A stored window
  * that no longer leaves any minute open (one narrowed back when bedtime lifted
- * at 07:00 now sits under the 08:40 end) falls back to the fixed window: with
+ * at 07:00 now sits under the 08:20 end) falls back to the fixed window: with
  * nothing left to edit, it would otherwise shut gated apps for good.
  */
 fun fixedRules(stored: (WallRule) -> Int?): WallRules {
@@ -134,9 +135,9 @@ fun fixedRules(stored: (WallRule) -> Int?): WallRules {
 
 /**
  * Pure: the minutes gated apps are really open on a window day, `[start, end)`:
- * the open window less what the bedtime wall covers (until 08:40, and from its
+ * the open window less what the bedtime wall covers (until 08:20, and from its
  * start). Null when the window is off; start >= end when nothing is left. Wall
- * copy uses it, so no screen promises 08:10 for apps that open at 08:40.
+ * copy uses it, so no screen promises an hour the bedtime wall still covers.
  */
 fun gatedOpenWindow(rules: WallRules): Pair<Int, Int>? {
     val start = rules.openWindowStartMinutes
@@ -149,10 +150,10 @@ fun gatedOpenWindow(rules: WallRules): Pair<Int, Int>? {
 
 /**
  * The bedtime wall lifts at this minute of the day, alarm or not (user's choice,
- * 2026-11-08). It falls inside the 08:10–08:50 open window on purpose, leaving
- * gated apps 08:40–08:50 Monday to Thursday.
+ * 2026-11-08). Since 2026-11-11 it is the minute the open window starts, so
+ * gated apps have the whole of 08:20–08:50 Monday to Thursday.
  */
-const val BEDTIME_END_MINUTES = 8 * 60 + 40
+const val BEDTIME_END_MINUTES = 8 * 60 + 20
 
 /**
  * Pure: whether the bedtime wall is up at [minuteOfDay]. It starts at
@@ -194,7 +195,7 @@ fun windowShutActive(
 /**
  * Pure: when an app whose daily cap is spent on [today] can actually be used
  * again after today. Null means midnight tonight (ordinary countdown); otherwise
- * a concrete phrase such as `"tomorrow at 08:10"`, `"Monday at 08:10"`, or
+ * a concrete phrase such as `"tomorrow at 08:20"`, `"Monday at 08:20"`, or
  * `"Monday"`. An empty window (`endMinutes <= startMinutes` with a non-negative
  * start) returns null rather than promising an opening that will not happen.
  */

@@ -14,6 +14,9 @@ import com.ogenrwotdaniel.wakeproof.R
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimerRules
 import com.ogenrwotdaniel.wakeproof.data.sync.WatchSessionDisplay
+import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
+import com.ogenrwotdaniel.wakeproof.pomodoro.SharedSession
+import com.ogenrwotdaniel.wakeproof.pomodoro.joinableAt
 
 /**
  * "Focus on your watch" as an ongoing notification on this device (2026-11-05),
@@ -34,10 +37,20 @@ object WatchSessionNotifier {
     /** What was last posted, so an unchanged state costs nothing. */
     @Volatile private var lastKey: String? = null
 
+    /** The timer last given, for [refresh]. */
+    @Volatile private var lastTimer: LiveWatchTimer? = null
+
+    /** Judges the last timer again: this device has just joined the session, or its own ended. */
+    fun refresh(context: Context) = update(context, lastTimer)
+
     /** Posts, updates or clears the notification for [timer] as of [now]. */
     fun update(context: Context, timer: LiveWatchTimer?, now: Long = System.currentTimeMillis()) {
-        val display = LiveWatchTimerRules.display(timer, now)
-        val key = display?.let { contentKey(timer!!, it) }
+        lastTimer = timer
+        // Joined here: this device's own timer notification already shows the session.
+        val joinedHere = timer != null && timer.sessionId.isNotBlank() &&
+            timer.sessionId == PomodoroTimerService.runningSessionId
+        val display = if (joinedHere) null else LiveWatchTimerRules.display(timer, now)
+        val key = display?.let { contentKey(timer!!, it) + "|" + (joinable(timer, now) != null) }
         if (key == lastKey) return
         Log.i(TAG, "watch session: ${key ?: "none"} (from ${timer?.let { "active=${it.active}" } ?: "no timer"})")
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -61,11 +74,20 @@ object WatchSessionNotifier {
                     setBypassDnd(true)
                 }
         )
-        manager.notify(NOTIFICATION_ID, build(context, timer, display))
+        manager.notify(NOTIFICATION_ID, build(context, timer, display, joinable(timer, now)))
         lastKey = key
     }
 
-    private fun build(context: Context, timer: LiveWatchTimer, display: WatchSessionDisplay): Notification {
+    /** The watch's session when this device could run it too right now. */
+    private fun joinable(timer: LiveWatchTimer, now: Long): SharedSession? =
+        timer.toShared()?.takeIf { it.joinableAt(now) && !PomodoroTimerService.state.value.active }
+
+    private fun build(
+        context: Context,
+        timer: LiveWatchTimer,
+        display: WatchSessionDisplay,
+        joinable: SharedSession?
+    ): Notification {
         val title = "${display.phaseLabel} on your watch" + if (display.running) "" else " (paused)"
         val detail = listOfNotNull(
             if (display.awaitingWatch) "Waiting for the watch…" else display.blockLabel,
@@ -84,6 +106,20 @@ object WatchSessionNotifier {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
+        // The same session on this device, with its ring, sound and tree. The intent
+        // names this phase's end; the notification is posted again at every phase.
+        joinable?.let { shared ->
+            builder.addAction(
+                Notification.Action.Builder(
+                    null,
+                    "Continue here",
+                    PendingIntent.getForegroundService(
+                        context, 46, PomodoroTimerService.joinIntent(context, shared),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                ).build()
+            )
+        }
         if (display.running && !display.awaitingWatch) {
             builder.setWhen(timer.phaseEndsAt).setShowWhen(true)
                 .setUsesChronometer(true).setChronometerCountDown(true)

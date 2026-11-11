@@ -35,6 +35,16 @@ internal object WatchSessionContract {
     const val KEY_TARGET = "ws_target"
     const val KEY_SUBJECT = "ws_subject"
     const val KEY_UPDATED_AT = "ws_updated_at"
+
+    // The rest of the session (2026-11-11), so the phone can run it too
+    // ("Continue here"): app `WearContract.KEY_WS_*`, read into `SharedSession`.
+    const val KEY_SESSION_ID = "ws_session_id"
+    const val KEY_ORIGIN = "ws_origin"
+    const val KEY_FOCUS_MIN = "ws_focus_min"
+    const val KEY_SHORT_MIN = "ws_short_min"
+    const val KEY_LONG_MIN = "ws_long_min"
+    const val KEY_LONG_EVERY = "ws_long_every"
+    const val KEY_LAST_FOCUS_SEC = "ws_last_focus_sec"
 }
 
 object WatchSessionBeacon {
@@ -54,6 +64,13 @@ object WatchSessionBeacon {
             dataMap.putInt(WatchSessionContract.KEY_TARGET, state.targetFocusBlocks)
             dataMap.putString(WatchSessionContract.KEY_SUBJECT, state.subject.orEmpty())
             dataMap.putLong(WatchSessionContract.KEY_UPDATED_AT, now)
+            dataMap.putString(WatchSessionContract.KEY_SESSION_ID, state.sessionId)
+            dataMap.putString(WatchSessionContract.KEY_ORIGIN, state.origin)
+            dataMap.putInt(WatchSessionContract.KEY_FOCUS_MIN, state.durations.focusMinutes)
+            dataMap.putInt(WatchSessionContract.KEY_SHORT_MIN, state.durations.shortBreakMinutes)
+            dataMap.putInt(WatchSessionContract.KEY_LONG_MIN, state.durations.longBreakMinutes)
+            dataMap.putInt(WatchSessionContract.KEY_LONG_EVERY, state.longBreakEvery)
+            dataMap.putInt(WatchSessionContract.KEY_LAST_FOCUS_SEC, state.lastFocusSeconds)
         }.asPutDataRequest().setUrgent()
         runCatching { Wearable.getDataClient(context).putDataItem(request) }
             .onFailure { Log.w(TAG, "watch session publish failed", it) }

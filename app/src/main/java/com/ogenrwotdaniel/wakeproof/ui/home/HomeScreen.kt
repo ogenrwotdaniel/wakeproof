@@ -118,7 +118,18 @@ fun HomeScreen(
                     onOpen = onOpenPomodoro
                 )
             }
-            WatchSessionCard(watchTimer)
+            // A session on the watch or the other phone or tablet: one tap runs it
+            // here too. The plain watch card stays for what cannot be joined (a
+            // paused run, an older watch build).
+            val peer = com.ogenrwotdaniel.wakeproof.ui.pomodoro.rememberJoinablePeer()
+            if (peer != null) {
+                com.ogenrwotdaniel.wakeproof.ui.pomodoro.PeerSessionCard(peer)
+            } else if (!timer.active || watchTimer?.sessionId.isNullOrBlank() ||
+                watchTimer?.sessionId != com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService.runningSessionId
+            ) {
+                // Not for the session this device has joined: the card above shows it.
+                WatchSessionCard(watchTimer)
+            }
             MissingGrantsCard(missingGrants)
 
             // A companion device holds the whole schedule and arms none of it.
@@ -279,9 +290,9 @@ private fun RunningSessionCard(
 }
 
 /**
- * A session running on the watch, from the copy the watch publishes to the
- * cloud. Not tappable: there is nothing on this device to open — the watch owns
- * the timer, and this is a window onto it. Ticks locally from the watch's phase
+ * A session running on the watch that cannot be joined from here (paused, or
+ * from an older watch build); a joinable one gets `PeerSessionCard`. Not
+ * tappable: this is a window onto the watch's timer. Ticks locally from the watch's phase
  * end, like the watch does for the phone's timer; renders nothing when idle.
  */
 @Composable

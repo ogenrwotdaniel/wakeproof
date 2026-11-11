@@ -72,6 +72,12 @@ class StatsDataListenerService : WearableListenerService() {
         }
         if (refreshAgendaTile) AgendaSurfaces.refresh(this)
         if (timerChanged && !WatchTimerEngine.state(this).active) {
+            // The phone's phase end is felt on the wrist too (2026-11-11): the user
+            // may be at the tablet with the phone across the room.
+            val prefs = getSharedPreferences(PHONE_TIMER_PREFS, MODE_PRIVATE)
+            val key = phoneTimerKey(timer)
+            phoneTimerBuzz(prefs.getString(KEY_LAST_PHONE_TIMER, null), key)?.let { Buzzer.play(this, it) }
+            prefs.edit().putString(KEY_LAST_PHONE_TIMER, key).apply()
             TimerNotifier.update(this, timer)
         }
     }
@@ -80,4 +86,22 @@ class StatsDataListenerService : WearableListenerService() {
 /** Shared with [WearStatsReader]; the stats DataItem path. */
 internal object WearStatsPath {
     const val STATS = "/wakeproof/stats"
+}
+
+private const val PHONE_TIMER_PREFS = "phone_timer_seen"
+private const val KEY_LAST_PHONE_TIMER = "last"
+
+/** Pure: what of the phone's timer a buzz is keyed on: its phase while running, else nothing. */
+fun phoneTimerKey(timer: TimerSnapshot?): String? = timer?.takeIf { it.active && it.running }?.phase
+
+/**
+ * Pure: the buzz for the phone's timer going from [last] to [now] ([phoneTimerKey]),
+ * or null. The phone pushes the item again inside a phase (a realign, a restart),
+ * so only a change of phase counts. Short patterns: the phone rings for itself,
+ * this is the echo.
+ */
+fun phoneTimerBuzz(last: String?, now: String?): LongArray? = when {
+    last == now -> null
+    now == null -> BuzzPattern.PEER_DONE
+    else -> BuzzPattern.PEER_PHASE
 }

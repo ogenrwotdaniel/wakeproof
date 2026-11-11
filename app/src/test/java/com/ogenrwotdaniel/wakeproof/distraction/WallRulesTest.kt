@@ -16,14 +16,16 @@ class WallRulesTest {
     @Test
     fun `a stored value counts only when it is stricter than the fixed one`() {
         val bedtime = WallRule.BEDTIME_START_MINUTES
-        assertEquals(16 * 60, bedtime.fixedOrStricter(null))
-        assertEquals(16 * 60, bedtime.fixedOrStricter(21 * 60))
-        assertEquals(16 * 60, bedtime.fixedOrStricter(RULE_OFF_MINUTES))
+        assertEquals(15 * 60, bedtime.fixedOrStricter(null))
+        assertEquals(15 * 60, bedtime.fixedOrStricter(21 * 60))
+        // The 16:00 a device stored under the last build is looser now.
+        assertEquals(15 * 60, bedtime.fixedOrStricter(16 * 60))
+        assertEquals(15 * 60, bedtime.fixedOrStricter(RULE_OFF_MINUTES))
         assertEquals(14 * 60, bedtime.fixedOrStricter(14 * 60))
         val start = WallRule.OPEN_WINDOW_START_MINUTES
-        assertEquals(8 * 60 + 10, start.fixedOrStricter(8 * 60))
-        assertEquals(8 * 60 + 10, start.fixedOrStricter(RULE_OFF_MINUTES))
-        assertEquals(8 * 60 + 20, start.fixedOrStricter(8 * 60 + 20))
+        assertEquals(8 * 60 + 20, start.fixedOrStricter(8 * 60 + 10))
+        assertEquals(8 * 60 + 20, start.fixedOrStricter(RULE_OFF_MINUTES))
+        assertEquals(8 * 60 + 30, start.fixedOrStricter(8 * 60 + 30))
         val end = WallRule.OPEN_WINDOW_END_MINUTES
         assertEquals(8 * 60 + 50, end.fixedOrStricter(10 * 60))
         assertEquals(8 * 60 + 45, end.fixedOrStricter(8 * 60 + 45))
@@ -33,38 +35,41 @@ class WallRulesTest {
 
     @Test
     fun `a stored window the bedtime wall now covers falls back to the fixed one`() {
-        val rules = fixedRules { if (it == WallRule.OPEN_WINDOW_END_MINUTES) 8 * 60 + 30 else null }
-        assertEquals(8 * 60 + 40 to 8 * 60 + 50, gatedOpenWindow(rules))
+        val rules = fixedRules { if (it == WallRule.OPEN_WINDOW_END_MINUTES) 8 * 60 + 15 else null }
+        assertEquals(8 * 60 + 20 to 8 * 60 + 50, gatedOpenWindow(rules))
         val kept = fixedRules { if (it == WallRule.OPEN_WINDOW_END_MINUTES) 8 * 60 + 45 else null }
-        assertEquals(8 * 60 + 40 to 8 * 60 + 45, gatedOpenWindow(kept))
+        assertEquals(8 * 60 + 20 to 8 * 60 + 45, gatedOpenWindow(kept))
     }
 
     @Test
-    fun `gated apps really open from the end of bedtime, not the window's start`() {
-        assertEquals(8 * 60 + 40 to 8 * 60 + 50, gatedOpenWindow(WallRules()))
+    fun `gated apps open for the whole window, which starts as bedtime ends`() {
+        assertEquals(8 * 60 + 20 to 8 * 60 + 50, gatedOpenWindow(WallRules()))
+        // An earlier window would still wait for the bedtime wall.
+        val early = WallRules(mapOf(WallRule.OPEN_WINDOW_START_MINUTES to 8 * 60))
+        assertEquals(8 * 60 + 20 to 8 * 60 + 50, gatedOpenWindow(early))
         val noBedtime = WallRules(mapOf(WallRule.BEDTIME_START_MINUTES to RULE_OFF_MINUTES))
-        assertEquals(8 * 60 + 10 to 8 * 60 + 50, gatedOpenWindow(noBedtime))
+        assertEquals(8 * 60 + 20 to 8 * 60 + 50, gatedOpenWindow(noBedtime))
         assertNull(gatedOpenWindow(WallRules(mapOf(WallRule.OPEN_WINDOW_START_MINUTES to RULE_OFF_MINUTES))))
     }
 
     @Test
-    fun `every rule defaults to on, with weekend shut, 16 00 bedtime and 08 10 to 08 50 window`() {
+    fun `every rule defaults to on, with weekend shut, 15 00 bedtime and 08 20 to 08 50 window`() {
         val rules = WallRules()
         assertTrue(rules.gateBrowsers && rules.weekendShut && rules.sessionDnd)
-        assertEquals(16 * 60, rules.bedtimeStartMinutes)
-        assertEquals(8 * 60 + 10, rules.openWindowStartMinutes)
+        assertEquals(15 * 60, rules.bedtimeStartMinutes)
+        assertEquals(8 * 60 + 20, rules.openWindowStartMinutes)
         assertEquals(8 * 60 + 50, rules.openWindowEndMinutes)
     }
 
     @Test
-    fun `bedtime runs from 16 00 to 08 40, whatever the alarms did`() {
-        val start = 16 * 60
-        assertFalse(bedtimeActive(15 * 60 + 59, start))
-        assertTrue(bedtimeActive(16 * 60, start))
+    fun `bedtime runs from 15 00 to 08 20, whatever the alarms did`() {
+        val start = 15 * 60
+        assertFalse(bedtimeActive(14 * 60 + 59, start))
+        assertTrue(bedtimeActive(15 * 60, start))
         assertTrue(bedtimeActive(23 * 60, start))
         assertTrue(bedtimeActive(6 * 60 + 30, start))
-        assertTrue(bedtimeActive(8 * 60 + 39, start))
-        assertFalse(bedtimeActive(8 * 60 + 40, start))
+        assertTrue(bedtimeActive(8 * 60 + 19, start))
+        assertFalse(bedtimeActive(8 * 60 + 20, start))
         assertFalse(bedtimeActive(12 * 60, start))
         assertFalse(bedtimeActive(23 * 60, RULE_OFF_MINUTES))
     }
@@ -78,48 +83,13 @@ class WallRulesTest {
     }
 
     @Test
-    fun `chrome alone is never gated, but chrome beta is`() {
+    fun `chrome is gated like every browser, and so are the sites saved from it as apps`() {
         val other = ApplicationInfo.CATEGORY_UNDEFINED
-        assertFalse(AppGate.isGated(AppGate.CHROME, other, null, isBrowser = true, gateBrowsers = true))
+        assertTrue(AppGate.isGated(AppGate.CHROME, other, null, isBrowser = true, gateBrowsers = true))
         assertTrue(AppGate.isGated("com.chrome.beta", other, null, isBrowser = true, gateBrowsers = true))
-    }
-
-    @Test
-    fun `chrome opens 08 40 to 16 00 on weekdays and is shut otherwise`() {
-        val mon = DayOfWeek.MONDAY
-        assertTrue(chromeHoursShut(mon, 8 * 60 + 39))
-        assertFalse(chromeHoursShut(mon, 8 * 60 + 40))
-        assertFalse(chromeHoursShut(DayOfWeek.FRIDAY, 15 * 60 + 59))
-        assertTrue(chromeHoursShut(mon, 16 * 60))
-        assertTrue(chromeHoursShut(mon, 0))
-        assertTrue(chromeHoursShut(DayOfWeek.SATURDAY, 10 * 60))
-        assertTrue(chromeHoursShut(DayOfWeek.SUNDAY, 10 * 60))
-    }
-
-    @Test
-    fun `chrome always carries an hour block cap, tighter if one was stored`() {
-        val other = "com.example" to com.ogenrwotdaniel.wakeproof.data.AppLimit(30)
-        assertEquals(
-            com.ogenrwotdaniel.wakeproof.data.AppLimit(60, com.ogenrwotdaniel.wakeproof.data.LimitMode.BLOCK),
-            withFixedCaps(mapOf(other))[AppGate.CHROME]
-        )
-        assertEquals(other.second, withFixedCaps(mapOf(other))["com.example"])
-        val looser = AppGate.CHROME to com.ogenrwotdaniel.wakeproof.data.AppLimit(120)
-        assertEquals(60, withFixedCaps(mapOf(looser))[AppGate.CHROME]?.minutes)
-        val tighter = AppGate.CHROME to com.ogenrwotdaniel.wakeproof.data.AppLimit(20)
-        assertEquals(20, withFixedCaps(mapOf(tighter))[AppGate.CHROME]?.minutes)
-    }
-
-    @Test
-    fun `chrome's next opening`() {
-        val mon = DayOfWeek.MONDAY
-        assertEquals(ChromeOpening.TODAY, chromeNextOpening(mon, 7 * 60, afterToday = false))
-        assertEquals(ChromeOpening.TOMORROW, chromeNextOpening(mon, 17 * 60, afterToday = false))
-        assertEquals(ChromeOpening.TOMORROW, chromeNextOpening(mon, 7 * 60, afterToday = true))
-        assertEquals(ChromeOpening.MONDAY, chromeNextOpening(DayOfWeek.FRIDAY, 17 * 60, afterToday = false))
-        assertEquals(ChromeOpening.MONDAY, chromeNextOpening(DayOfWeek.FRIDAY, 7 * 60, afterToday = true))
-        assertEquals(ChromeOpening.MONDAY, chromeNextOpening(DayOfWeek.SATURDAY, 7 * 60, afterToday = false))
-        assertEquals(ChromeOpening.TOMORROW, chromeNextOpening(DayOfWeek.SUNDAY, 7 * 60, afterToday = false))
+        // A shell answers for no web link, so only its name marks it.
+        assertTrue(AppGate.isGated("org.chromium.webapk.a1b2c3", other, null, isBrowser = false, gateBrowsers = true))
+        assertFalse(AppGate.isGated("org.chromium.webapk.a1b2c3", other, null, isBrowser = false, gateBrowsers = false))
     }
 
     @Test

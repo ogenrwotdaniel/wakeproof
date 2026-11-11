@@ -222,7 +222,8 @@ class MainActivity : ComponentActivity() {
         if (!state.running) {
             addButton("Resume") { WatchTimerEngine.resume(applicationContext) }
         }
-        if (state.phase != WatchPhase.FOCUS) {
+        // Not for the phone's session run here: the phone keeps its time.
+        if (state.phase != WatchPhase.FOCUS && !state.following) {
             addButton("Skip break") { WatchTimerEngine.skipBreak(applicationContext) }
         }
         addTodayButton()
@@ -291,6 +292,11 @@ class MainActivity : ComponentActivity() {
         // would be two buttons that do nothing. Resume only rescues a session
         // paused by an older phone build.
         if (!timer.running) addPhoneButton("Resume", TimerCommands.RESUME)
+        // The same session on the wrist: it buzzes here at every phase even with
+        // the phone left behind, and a block finished on both is recorded once.
+        timer.session?.takeIf { timer.running }?.let { session ->
+            addButton("Continue here") { WatchTimerEngine.follow(applicationContext, session) }
+        }
         addTodayButton()
     }
 

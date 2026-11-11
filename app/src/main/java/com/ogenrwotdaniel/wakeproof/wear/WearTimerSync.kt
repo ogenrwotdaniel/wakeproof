@@ -25,7 +25,9 @@ class WearTimerSync @Inject constructor(
         running: Boolean,
         phaseLabel: String,
         remainingSeconds: Int,
-        finishAtMillis: Long
+        finishAtMillis: Long,
+        /** The session itself, for the watch to join; null when there is nothing to join. */
+        shared: com.ogenrwotdaniel.wakeproof.pomodoro.SharedSession? = null
     ) {
         val request = PutDataMapRequest.create(WearContract.TIMER_PATH).apply {
             dataMap.putBoolean(WearContract.KEY_TIMER_ACTIVE, active)
@@ -34,6 +36,19 @@ class WearTimerSync @Inject constructor(
             dataMap.putInt(WearContract.KEY_TIMER_REMAINING, remainingSeconds)
             dataMap.putLong(WearContract.KEY_TIMER_FINISH_AT, finishAtMillis)
             dataMap.putLong(WearContract.KEY_UPDATED, System.currentTimeMillis())
+            shared?.let { s ->
+                dataMap.putString(WearContract.KEY_TIMER_SESSION_ID, s.id)
+                dataMap.putString(WearContract.KEY_TIMER_ORIGIN, s.origin)
+                dataMap.putString(WearContract.KEY_TIMER_PHASE_NAME, s.phase.name)
+                dataMap.putInt(WearContract.KEY_TIMER_COMPLETED, s.completedFocus)
+                dataMap.putInt(WearContract.KEY_TIMER_TARGET, s.targetFocusBlocks)
+                dataMap.putInt(WearContract.KEY_TIMER_FOCUS_SEC, s.focusSeconds)
+                dataMap.putInt(WearContract.KEY_TIMER_SHORT_SEC, s.shortBreakSeconds)
+                dataMap.putInt(WearContract.KEY_TIMER_LONG_SEC, s.longBreakSeconds)
+                dataMap.putInt(WearContract.KEY_TIMER_LONG_EVERY, s.longBreakEvery)
+                dataMap.putInt(WearContract.KEY_TIMER_LAST_FOCUS_SEC, s.lastFocusSeconds)
+                dataMap.putString(WearContract.KEY_TIMER_SUBJECT, s.subject.orEmpty())
+            }
         }.asPutDataRequest().setUrgent()
         runCatching { dataClient.putDataItem(request).await() }
     }

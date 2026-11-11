@@ -9,16 +9,18 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
  * The LOCKED alarms (2026-11-04, the user's request: "my first alarm at 3am,
  * no way around, can't be turned off on the phone, surviving restart too like
  * focus timing"; a second at 05:30 the same night, and both at 25 pushups).
- * Now 04:00 and 06:05 at 10 pushups ([SLOTS], [REPS]; 2026-11-08).
+ * Now 03:00 and 05:40 at 10 pushups, and a fixed water alarm at 08:20
+ * ([SLOTS], [REPS]; 2026-11-11).
  *
- * Each of [SLOTS] pins one alarm on the ringing device to its time, pushups,
+ * Each of [SLOTS] pins one alarm on the ringing device to its time and kind,
  * every day, enabled. Nothing on the phone can change it — the Settings rows
  * refuse — and anything that does reach the row (an edit or delete synced from
  * the tablet, a restore) is written back by [strictAlarmFixed] at the next
  * reconcile, stamped newer so the correction syncs back out too.
  *
- * While one rings there is no snooze and no emergency dismiss: [REPS] pushups
- * is the only way to silence it. Should the camera be unusable (broken hardware
+ * While a pushup one ([Slot.hard]) rings there is no snooze and no emergency
+ * dismiss: [REPS] pushups is the only way to silence it. The water alarm is
+ * fixed in the schedule only and rings like any other. Should the camera be unusable (broken hardware
  * or a revoked permission), the way out is [MATH_FALLBACK_PROBLEMS] sums in a row,
  * never a free dismiss.
  * It rings with [toneUri] when a tone is bundled.
@@ -28,36 +30,55 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
  * process dying ([pendingRing]), like a focus session does.
  */
 object StrictAlarm {
-    /** One locked alarm's time. */
-    data class Slot(val hour: Int, val minute: Int) {
+    /**
+     * One locked alarm's time and kind. [hard]: no snooze, no emergency dismiss,
+     * held volume and resumed after a restart. The water alarm is not: its
+     * detector has only been measured on synthetic photographs, and a ring with
+     * no way out at the minute the user leaves home would be a trap.
+     */
+    data class Slot(
+        val hour: Int,
+        val minute: Int,
+        val type: AlarmType = AlarmType.PUSHUP,
+        val hard: Boolean = true
+    ) {
         val minuteOfDay: Int get() = hour * 60 + minute
     }
 
     /**
-     * In order; slot 0 keeps the storage keys from when there was only one.
-     * 04:00 and 06:05 since 2026-11-08 (were 03:00 and 05:30), with the night
-     * wall moved to 21:00–04:00 to match. Adopted rows follow by themselves:
-     * [strictAlarmFixed] rewrites their time at the next reconcile.
+     * In order; slot 0 keeps the storage keys from when there was only one, and
+     * an index is never reused for another kind. 03:00 and 05:40 since
+     * 2026-11-11 (the user wakes at 03:00 and leaves at 08:20; 05:40 is halfway),
+     * with the night wall moved to 20:00–03:00 to match, and water at 08:20.
+     * Adopted rows follow by themselves: [strictAlarmFixed] rewrites their time
+     * at the next reconcile.
      */
-    val SLOTS = listOf(Slot(4, 0), Slot(6, 5))
+    val SLOTS = listOf(Slot(3, 0), Slot(5, 40), Slot(8, 20, AlarmType.WATER, hard = false))
 
     /**
-     * Former [SLOTS]. Copies of the old locked pair that sync back (from before
-     * a reinstall) sit on these minutes, and only [strictAlarmDuplicates] kept
-     * them from ringing; without this they would start ringing at 03:00 and
-     * 05:30 with snooze and emergency dismiss the day the slots moved.
+     * Former pushup [SLOTS]. Copies of an old locked pair that sync back (from
+     * before a reinstall) sit on these minutes, and only [strictAlarmDuplicates]
+     * kept them from ringing; without this they would start ringing with snooze
+     * and emergency dismiss the day the slots moved.
      */
-    val RETIRED_SLOTS = listOf(Slot(3, 0), Slot(5, 30))
+    val RETIRED_SLOTS = listOf(Slot(5, 30), Slot(4, 0), Slot(6, 5))
 
-    /** Minutes of the day an unlocked pushup alarm is kept silent on: current and retired slots. */
-    val SILENT_MINUTES: Set<Int> = (SLOTS + RETIRED_SLOTS).map { it.minuteOfDay }.toSet()
+    /** Minutes of the day an unlocked alarm of [type] is kept silent on: current and retired slots. */
+    fun silentMinutes(type: AlarmType): Set<Int> =
+        (SLOTS + RETIRED_SLOTS).filter { it.type == type }.map { it.minuteOfDay }.toSet()
 
-    /** The last locked alarm's minute of the day: night quiet and the charge nag run until it. */
-    val lastSlotMinute: Int get() = SLOTS.maxOf { it.minuteOfDay }
+    /** Minutes of the day a locked alarm of [type] rings at. */
+    fun slotMinutes(type: AlarmType): Set<Int> =
+        SLOTS.filter { it.type == type }.map { it.minuteOfDay }.toSet()
+
+    /** The [Slot.hard] alarms' minutes, in order: what the watch backs up. */
+    val hardMinutes: List<Int> get() = SLOTS.filter { it.hard }.map { it.minuteOfDay }
+
+    /** The last hard alarm's minute of the day: night quiet and the charge nag run until it. */
+    val lastSlotMinute: Int get() = hardMinutes.max()
 
     const val REPS = com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
     const val MATH_FALLBACK_PROBLEMS = 10
-    val TYPE = AlarmType.PUSHUP
     const val DAYS_MASK = 127
 
     /** `res/raw/locked_alarm.*`, looked up by name so the build works without one. */
@@ -94,14 +115,22 @@ object StrictAlarm {
             .commit()
     }
 
+    /** [alarm] is pinned to a slot: its row cannot be edited, hard or not. */
     fun isStrict(context: Context, alarm: Alarm?): Boolean =
         alarm != null && alarm.syncId in syncIds(context)
 
-    /** By row id, for the ringing path, which may run before the first unlock. */
+    /** The slot [alarm] is pinned to on this device, if any. */
+    fun slotOf(context: Context, alarm: Alarm): Slot? =
+        SLOTS.withIndex().firstOrNull { (index, _) -> syncId(context, index) == alarm.syncId }?.value
+
+    /**
+     * A [Slot.hard] alarm, by row id: decides how the ring behaves. By id
+     * because the ringing path may run before the first unlock.
+     */
     fun isStrictId(context: Context, alarmId: Long): Boolean {
         if (alarmId == -1L) return false
         val prefs = prefs(context)
-        return SLOTS.indices.any { prefs.getLong(idKey(it), -1L) == alarmId }
+        return SLOTS.indices.any { SLOTS[it].hard && prefs.getLong(idKey(it), -1L) == alarmId }
     }
 
     /** The bundled alarm song (every alarm uses it), or null for the phone's alarm sound. */
@@ -156,7 +185,7 @@ fun strictAlarmFixed(alarm: Alarm, slot: StrictAlarm.Slot, now: Long): Alarm? {
         label = if (alarm.label in STRICT_LABELS) strictLabel(slot) else alarm.label,
         hour = slot.hour,
         minute = slot.minute,
-        type = StrictAlarm.TYPE,
+        type = slot.type,
         enabled = true,
         daysMask = StrictAlarm.DAYS_MASK,
         deleted = false
@@ -165,16 +194,23 @@ fun strictAlarmFixed(alarm: Alarm, slot: StrictAlarm.Slot, now: Long): Alarm? {
 }
 
 /**
- * Pure: which alarm a slot adopts when it has none yet — the earliest live
- * PUSHUP alarm not already locked ([taken] sync ids). Never another kind: that
- * would quietly turn the user's math or water alarm into pushups. Null = create.
+ * Pure: which alarm [slot] adopts when it has none yet. A hard slot takes the
+ * earliest live alarm of its kind not already locked ([taken] sync ids); the
+ * water slot only one already on its minute, so the user's other water alarms
+ * are not moved. Never another kind: that would quietly turn a math alarm into
+ * pushups. Null = create.
  */
-fun strictAlarmCandidate(alarms: List<Alarm>, taken: Set<String> = emptySet()): Alarm? =
-    alarms.filter { it.enabled && !it.deleted && it.type == StrictAlarm.TYPE && it.syncId !in taken }
+fun strictAlarmCandidate(
+    alarms: List<Alarm>,
+    slot: StrictAlarm.Slot,
+    taken: Set<String> = emptySet()
+): Alarm? =
+    alarms.filter { it.enabled && !it.deleted && it.type == slot.type && it.syncId !in taken }
+        .filter { slot.hard || it.hour * 60 + it.minute == slot.minuteOfDay }
         .minWithOrNull(compareBy<Alarm>({ it.hour }, { it.minute }))
 
 
-/** The label a created locked alarm carries, e.g. "Locked 4:00". */
+/** The label a created locked alarm carries, e.g. "Locked 3:00". */
 // Locale.ROOT: the label is compared with [STRICT_LABELS], so it must not take local digits.
 fun strictLabel(slot: StrictAlarm.Slot): String =
     String.format(java.util.Locale.ROOT, "Locked %d:%02d", slot.hour, slot.minute)
@@ -196,13 +232,14 @@ private val STRICT_LABELS: Set<String> =
 fun isStrictLabel(label: String): Boolean = label in STRICT_LABELS
 
 /**
- * Pure: unlocked pushup alarms standing on a locked slot's minute, current or
- * retired ([StrictAlarm.RETIRED_SLOTS]). None before a slot is locked.
+ * Pure: unlocked alarms standing on the minute of a locked slot of their own
+ * kind, current or retired ([StrictAlarm.RETIRED_SLOTS]). None before a slot is
+ * locked.
  */
 fun strictAlarmDuplicates(alarms: List<Alarm>, locked: Set<String>): List<Alarm> =
     if (locked.isEmpty()) emptyList() else alarms.filter { alarm ->
-        !alarm.deleted && alarm.type == StrictAlarm.TYPE && alarm.syncId !in locked &&
-            (alarm.hour * 60 + alarm.minute) in StrictAlarm.SILENT_MINUTES
+        !alarm.deleted && alarm.syncId !in locked &&
+            (alarm.hour * 60 + alarm.minute) in StrictAlarm.silentMinutes(alarm.type)
     }
 
 /** The share of the alarm stream's maximum a locked alarm rings at; see [strictStreamIndex]. */

@@ -30,6 +30,8 @@ internal object WatchTimerStore {
     private const val TARGET = "target_blocks"
     private const val LONG_EVERY = "long_break_every"
     private const val LAST_FOCUS_SEC = "last_focus_seconds"
+    private const val SESSION_ID = "session_id"
+    private const val ORIGIN = "origin"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -63,7 +65,10 @@ internal object WatchTimerStore {
             longBreakEvery = p.getInt(LONG_EVERY, WatchTimer.FOCUS_BLOCKS_PER_LONG_BREAK),
             // Absent in a state stored before event sessions: the last block
             // is an ordinary one.
-            lastFocusSeconds = p.getInt(LAST_FOCUS_SEC, lastFocusDefault(durations))
+            lastFocusSeconds = p.getInt(LAST_FOCUS_SEC, lastFocusDefault(durations)),
+            // Absent in a state stored before sessions were shared: its blocks keep random ids.
+            sessionId = p.getString(SESSION_ID, null).orEmpty(),
+            origin = p.getString(ORIGIN, null) ?: WatchTimer.ORIGIN_WATCH
         )
     }
 
@@ -85,6 +90,8 @@ internal object WatchTimerStore {
             putInt(TARGET, state.targetFocusBlocks)
             putInt(LONG_EVERY, state.longBreakEvery)
             putInt(LAST_FOCUS_SEC, state.lastFocusSeconds)
+            putString(SESSION_ID, state.sessionId)
+            putString(ORIGIN, state.origin)
         }
     }
 

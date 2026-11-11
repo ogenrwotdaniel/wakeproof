@@ -106,6 +106,13 @@ class PomodoroTimerService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
     /**
+     * One phase change at a time. A phase ends on the ticker, or early when the
+     * device this session started on has already moved on ([realign]); ending it
+     * writes to the database, and the other must not end the same phase again
+     * while that write is in flight.
+     */
+    private val phaseLock = kotlinx.coroutines.sync.Mutex()
+    /**
      * [SystemClock.elapsedRealtime] at which the running phase reaches zero.
      * The countdown is READ from this rather than decremented once per
      * `delay(1_000)`: each delay overshoots by a few ms, so a decrementing
@@ -122,6 +129,14 @@ class PomodoroTimerService : Service() {
     private var longBreakSeconds = 15 * 60
     /** A long break after every this-many focus blocks; set per session. */
     private var longBreakEvery = 4
+    /** This session's id on every device that runs it; see [SharedSession]. */
+    private var sessionId = ""
+        set(value) {
+            field = value
+            runningSessionId = value
+        }
+    /** Where this session started: here ([SharedSession.ORIGIN_SELF]), the watch or another install. */
+    private var sessionOrigin = SharedSession.ORIGIN_SELF
     private var musicPlayer: MediaPlayer? = null
     private var currentSound: FocusSound? = null
     /** Volume ramp in flight; cancelled whenever the target volume changes. */
@@ -192,6 +207,12 @@ class PomodoroTimerService : Service() {
                 .distinctUntilChanged()
                 .collect { if (_state.value.active) persistSession() }
         }
+        // The same session running where it started (the watch, the other phone or
+        // tablet) is the one to keep time with: a break skipped on the watch, or
+        // a phase its alarm ended late, moves this countdown too.
+        scope.launch {
+            PeerSessions.current.collect { shared -> if (shared != null) realign(shared) }
+        }
         // Floating countdown bubble: visible whenever a timer is active but the
         // app UI isn't. Runs on Main (scope's dispatcher), as WindowManager requires.
         scope.launch {
@@ -246,6 +267,12 @@ class PomodoroTimerService : Service() {
                     SessionEvent(key, intent.getStringExtra(EXTRA_EVENT_TITLE).orEmpty())
                 }
                 scope.launch {
+                    // A session already running on the watch or another device is
+                    // joined, not doubled: one session, the same countdown everywhere.
+                    PeerSessions.joinable()?.let { running ->
+                        join(running)
+                        return@launch
+                    }
                     val settings = settingsRepository.settings.first()
                     // A "1 h" session with 25+5 settings = 2 focus blocks; "2 h" = 4;
                     // "3 h" is its own fixed recipe. See sessionPlan. A calendar
@@ -261,6 +288,8 @@ class PomodoroTimerService : Service() {
                     shortBreakSeconds = plan.shortBreakMinutes * 60
                     longBreakSeconds = plan.longBreakMinutes * 60
                     longBreakEvery = plan.longBreakEvery
+                    sessionId = java.util.UUID.randomUUID().toString()
+                    sessionOrigin = SharedSession.ORIGIN_SELF
                     event = startedFor
                     SessionEventStore.save(this@PomodoroTimerService, startedFor)
                     val first = blockSeconds(1, plan.focusBlocks)
@@ -279,6 +308,21 @@ class PomodoroTimerService : Service() {
                     AppBlockService.sync(applicationContext)
                     onSessionUnderway()
                 }
+            }
+            ACTION_JOIN -> {
+                createChannel()
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(if (_state.value.active) "Session running" else "Joining…"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+                val shared = decodeShared(intent.getStringExtra(EXTRA_SHARED))
+                // Never over a different session: that would be a stop by another name.
+                if (shared == null || (_state.value.active && shared.id != sessionId)) {
+                    if (!_state.value.active) stopSelf()
+                    return START_NOT_STICKY
+                }
+                scope.launch { join(shared) }
             }
             ACTION_RESTORE -> {
                 createChannel()
@@ -345,6 +389,7 @@ class PomodoroTimerService : Service() {
         }
         chimePlayer = null
         _state.value = PomodoroState()
+        runningSessionId = ""
         super.onDestroy()
     }
 
@@ -574,9 +619,10 @@ class PomodoroTimerService : Service() {
         phaseDeadline = SystemClock.elapsedRealtime() + _state.value.remainingSeconds * 1_000L
     }
 
-    private fun startTicker() {
+    /** [rearm] false when [phaseDeadline] is already set exactly ([runFrom]). */
+    private fun startTicker(rearm: Boolean = true) {
         tickerJob?.cancel()
-        armDeadline()
+        if (rearm) armDeadline()
         tickerJob = scope.launch {
             while (_state.value.running) {
                 // Sleep to the next whole-second boundary of the deadline, so the
@@ -587,7 +633,17 @@ class PomodoroTimerService : Service() {
                 if (!current.running) break
                 val remaining = remainingSecondsAt(phaseDeadline, SystemClock.elapsedRealtime())
                 if (remaining <= 0) {
-                    onPhaseComplete()
+                    phaseLock.lock()
+                    try {
+                        // Looked at again: a realign may have ended this phase while this waited.
+                        if (_state.value.running &&
+                            remainingSecondsAt(phaseDeadline, SystemClock.elapsedRealtime()) <= 0
+                        ) {
+                            onPhaseComplete()
+                        }
+                    } finally {
+                        phaseLock.unlock()
+                    }
                 } else if (remaining != current.remainingSeconds) {
                     _state.update { it.copy(remainingSeconds = remaining) }
                     maybeFadeOutBeforePhaseEnd(_state.value, current.remainingSeconds)
@@ -603,13 +659,12 @@ class PomodoroTimerService : Service() {
         chime()
         if (current.phase == PomodoroPhase.FOCUS) {
             runCatching {
-                completionRepository.log(
-                    GoalKind.FOCUS,
+                logBlock(
+                    block = current.completedFocusSessions + 1,
                     // A withered block is still recorded, so the forest can show
                     // the dead tree, but SKIPPED keeps it out of focus time.
-                    if (current.treeWithered) CompletionStatus.SKIPPED else CompletionStatus.VERIFIED,
-                    amount = blockSeconds(current.completedFocusSessions + 1, current.targetFocusBlocks) / 60,
-                    subject = settingsRepository.settings.first().activeSubject
+                    status = if (current.treeWithered) CompletionStatus.SKIPPED else CompletionStatus.VERIFIED,
+                    minutes = blockSeconds(current.completedFocusSessions + 1, current.targetFocusBlocks) / 60
                 )
             }
             // The watch's focus total otherwise waits for the app's screen to
@@ -660,15 +715,48 @@ class PomodoroTimerService : Service() {
             armDeadline()
         }
         syncWatch()
+        publishSession()
     }
 
     /**
-     * What every session does once it is running, fresh or recovered: quiet the
-     * phone and tell the user's other devices how long the focus wall lasts.
+     * Records focus block [block]. Under the session's shared id when it has
+     * one, so the same block finished on the watch or the tablet too is one row.
      */
-    private suspend fun onSessionUnderway() {
-        if (wallRules.current().sessionDnd) SessionDnd.enter(this)
+    private suspend fun logBlock(block: Int, status: CompletionStatus, minutes: Int) {
+        val subject = settingsRepository.settings.first().activeSubject
+        if (sessionId.isBlank()) {
+            completionRepository.log(GoalKind.FOCUS, status, amount = minutes, subject = subject)
+        } else {
+            completionRepository.logFocusBlock(sharedBlockId(sessionId, block), status, minutes, subject)
+        }
+    }
+
+    /** This session as the other devices need it; null for one saved by a build without ids. */
+    private fun sharedNow(): SharedSession? {
         val s = _state.value
+        val id = validSessionId(sessionId) ?: return null
+        if (!s.active || !s.running) return null
+        return SharedSession(
+            id = id,
+            origin = sessionOrigin,
+            phase = s.phase,
+            phaseEndsAtMillis = System.currentTimeMillis() +
+                (phaseDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L),
+            completedFocus = s.completedFocusSessions,
+            targetFocusBlocks = s.targetFocusBlocks,
+            focusSeconds = focusSeconds,
+            shortBreakSeconds = shortBreakSeconds,
+            longBreakSeconds = longBreakSeconds,
+            longBreakEvery = longBreakEvery,
+            lastFocusSeconds = lastFocusSeconds,
+            subject = latestSettings.activeSubject
+        )
+    }
+
+    /** Tells the user's other devices where the session is and how long the focus wall lasts. */
+    private fun publishSession() {
+        val s = _state.value
+        if (!s.active) return
         val remaining = sessionRemainingSeconds(
             phase = s.phase,
             remainingSeconds = s.remainingSeconds,
@@ -680,7 +768,122 @@ class PomodoroTimerService : Service() {
             longBreakEvery = longBreakEvery,
             lastFocusSeconds = lastFocusSeconds
         )
-        runCatching { liveFocusSession.publish(System.currentTimeMillis() + remaining * 1_000L) }
+        val endsAt = System.currentTimeMillis() + remaining * 1_000L
+        val shared = sharedNow()
+        // Never awaited: the write waits for the server, and an offline phone must
+        // not hold the ticker (or a join) at a phase end until the network returns.
+        scope.launch { runCatching { liveFocusSession.publish(endsAt, shared) } }
+    }
+
+    /**
+     * Runs [shared], a session another device is running, from where it is now:
+     * the same phase, the same phase end. Called again for a session already
+     * joined, it only moves the countdown ([realignTo]).
+     */
+    private suspend fun join(shared: SharedSession) {
+        if (_state.value.active) {
+            realign(shared)
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (!shared.joinableAt(now)) {
+            stopSelf()
+            return
+        }
+        event = null
+        SessionEventStore.save(this, null)
+        runFrom(shared.toSaved(), now)
+        // "Focus on your watch" gives way to this device's own timer notification.
+        com.ogenrwotdaniel.wakeproof.wear.WatchSessionNotifier.refresh(applicationContext)
+        AppBlockService.sync(applicationContext)
+        onSessionUnderway()
+    }
+
+    /** Moves this countdown to [shared]'s when [realignTo] says so; a no-op otherwise. */
+    private suspend fun realign(shared: SharedSession) {
+        phaseLock.lock()
+        try {
+            val s = _state.value
+            if (!s.active || !s.running) return
+            val now = System.currentTimeMillis()
+            val position = sessionPosition(s.phase, s.completedFocusSessions)
+            val endsAt = now + (phaseDeadline - SystemClock.elapsedRealtime())
+            if (!realignTo(shared, sessionId, position, endsAt, now)) return
+            // The origin is one phase on (its clock a moment ahead, or a break skipped
+            // on the watch): this phase is ended here as it always is, so its block is
+            // recorded with this device's tree and the change is heard. Jumping over it
+            // would lose a withered tree.
+            if (shared.position == position + 1) {
+                onPhaseComplete()
+                // The session's last block: it is over, and the state only clears in onDestroy.
+                if (sessionId.isBlank()) return
+            } else if (shared.position > position && s.phase == PomodoroPhase.FOCUS && s.treeWithered) {
+                // Further on than that (copies missed): the block left behind is not run
+                // to its end here, but a tree withered in it still spoils it.
+                val block = s.completedFocusSessions + 1
+                runCatching {
+                    logBlock(block, CompletionStatus.SKIPPED, blockSeconds(block, s.targetFocusBlocks) / 60)
+                }
+            }
+            val after = _state.value
+            val samePhase = sessionPosition(after.phase, after.completedFocusSessions) == shared.position
+            // The same block keeps its tree, alive or withered; another starts fresh.
+            runFrom(
+                shared.toSaved().copy(treeWithered = after.treeWithered && samePhase),
+                System.currentTimeMillis()
+            )
+        } finally {
+            phaseLock.unlock()
+        }
+    }
+
+    /** Puts the timer at [session]'s phase and phase end, and starts counting. */
+    private fun runFrom(session: SavedSession, now: Long) {
+        focusSeconds = session.focusSeconds
+        lastFocusSeconds = session.lastFocusSeconds
+        shortBreakSeconds = session.shortBreakSeconds
+        longBreakSeconds = session.longBreakSeconds
+        longBreakEvery = session.longBreakEvery
+        sessionId = session.sessionId
+        sessionOrigin = session.origin
+        val msLeft = (session.phaseEndsAtMillis - now).coerceAtLeast(1L)
+        val left = ((msLeft + 999) / 1_000).toInt()
+        // To the millisecond, not the whole second: two devices on one session
+        // should flip their seconds together. Before the state: the collector
+        // that writes the session to disk reads it.
+        phaseDeadline = SystemClock.elapsedRealtime() + msLeft
+        _state.value = PomodoroState(
+            active = true,
+            running = true,
+            phase = session.phase,
+            remainingSeconds = left,
+            totalSeconds = if (session.phase == PomodoroPhase.FOCUS) {
+                focusSecondsForBlock(
+                    session.completedFocusSessions + 1, session.targetFocusBlocks, focusSeconds, lastFocusSeconds
+                )
+            } else if (session.phase == PomodoroPhase.LONG_BREAK) {
+                longBreakSeconds
+            } else {
+                shortBreakSeconds
+            },
+            completedFocusSessions = session.completedFocusSessions,
+            targetFocusBlocks = session.targetFocusBlocks,
+            treeWithered = session.treeWithered
+        )
+        startTicker(rearm = false)
+        // A realign inside one phase changes nothing the saving collector watches.
+        persistSession()
+        updateNotification()
+        syncWatch()
+    }
+
+    /**
+     * What every session does once it is running, fresh or recovered: quiet the
+     * phone and tell the user's other devices how long the focus wall lasts.
+     */
+    private suspend fun onSessionUnderway() {
+        if (wallRules.current().sessionDnd) SessionDnd.enter(this)
+        publishSession()
     }
 
     /**
@@ -693,7 +896,9 @@ class PomodoroTimerService : Service() {
         SessionEventStore.save(this, null)
         event = null
         SessionDnd.exit(this)
-        CoroutineScope(Dispatchers.IO).launch { runCatching { liveFocusSession.publish(0L) } }
+        sessionId = ""
+        sessionOrigin = SharedSession.ORIGIN_SELF
+        CoroutineScope(Dispatchers.IO).launch { runCatching { liveFocusSession.publish(0L, null) } }
     }
 
     private fun persistSession() {
@@ -712,7 +917,9 @@ class PomodoroTimerService : Service() {
                 phase = s.phase,
                 phaseEndsAtMillis = System.currentTimeMillis() + msLeft,
                 treeWithered = s.treeWithered,
-                lastFocusSeconds = lastFocusSeconds
+                lastFocusSeconds = lastFocusSeconds,
+                sessionId = sessionId,
+                origin = sessionOrigin
             )
         )
     }
@@ -722,15 +929,16 @@ class PomodoroTimerService : Service() {
         val now = System.currentTimeMillis()
         val outcome = recoverSession(saved, now)
         if (outcome.witheredBlock) {
+            // Before [runFrom] sets it: the block is named by the session it was part of.
+            sessionId = saved.sessionId
             runCatching {
-                completionRepository.log(
-                    GoalKind.FOCUS,
-                    CompletionStatus.SKIPPED,
-                    amount = focusSecondsForBlock(
+                logBlock(
+                    block = saved.completedFocusSessions + 1,
+                    status = CompletionStatus.SKIPPED,
+                    minutes = focusSecondsForBlock(
                         saved.completedFocusSessions + 1, saved.targetFocusBlocks,
                         saved.focusSeconds, saved.lastFocusSeconds
-                    ) / 60,
-                    subject = settingsRepository.settings.first().activeSubject
+                    ) / 60
                 )
             }
         }
@@ -740,30 +948,8 @@ class PomodoroTimerService : Service() {
             stopSelf()
             return
         }
-        focusSeconds = resume.focusSeconds
-        lastFocusSeconds = resume.lastFocusSeconds
         event = SessionEventStore.load(this)
-        shortBreakSeconds = resume.shortBreakSeconds
-        longBreakSeconds = resume.longBreakSeconds
-        longBreakEvery = resume.longBreakEvery
-        val left = ((resume.phaseEndsAtMillis - now + 999) / 1_000).toInt().coerceAtLeast(1)
-        _state.value = PomodoroState(
-            active = true,
-            running = true,
-            phase = resume.phase,
-            remainingSeconds = left,
-            totalSeconds = if (resume.phase == PomodoroPhase.FOCUS) {
-                blockSeconds(resume.completedFocusSessions + 1, resume.targetFocusBlocks)
-            } else {
-                durationOf(resume.phase)
-            },
-            completedFocusSessions = resume.completedFocusSessions,
-            targetFocusBlocks = resume.targetFocusBlocks,
-            treeWithered = resume.treeWithered
-        )
-        startTicker()
-        updateNotification()
-        syncWatch()
+        runFrom(resume, now)
         AppBlockService.sync(applicationContext)
         onSessionUnderway()
         // Only news is told: the timer screen already shows a session running on.
@@ -897,9 +1083,14 @@ class PomodoroTimerService : Service() {
         val finishAt = if (s.running) {
             System.currentTimeMillis() + (phaseDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
         } else 0L
+        // The watch tells its own session by the install id it was started on.
+        val shared = sharedNow()
         scope.launch {
             runCatching {
-                wearTimerSync.push(s.active, s.running, s.phase.label, s.remainingSeconds, finishAt)
+                wearTimerSync.push(
+                    s.active, s.running, s.phase.label, s.remainingSeconds, finishAt,
+                    shared?.let { if (it.origin == SharedSession.ORIGIN_SELF) it.copy(origin = ORIGIN_PHONE) else it }
+                )
             }
         }
     }
@@ -940,6 +1131,15 @@ class PomodoroTimerService : Service() {
         private const val ACTION_RESUME = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESUME"
         private const val ACTION_STOP = "com.ogenrwotdaniel.wakeproof.action.POMODORO_STOP"
         private const val ACTION_RESTORE = "com.ogenrwotdaniel.wakeproof.action.POMODORO_RESTORE"
+        private const val ACTION_JOIN = "com.ogenrwotdaniel.wakeproof.action.POMODORO_JOIN"
+        private const val EXTRA_SHARED = "shared_session"
+        /**
+         * What the watch is told a session started on this phone came from. Not
+         * the install id: the watch only needs "not mine". A watch that joins
+         * republishes it as the origin, so no reader takes that copy for the
+         * origin's own ([SharedSession.fromOrigin]) and none realigns to it.
+         */
+        const val ORIGIN_PHONE = "phone"
         private const val CHANNEL_ID = "wakeproof_pomodoro"
         /**
          * A channel's sound cannot be changed once created, so the soft chime
@@ -1012,6 +1212,21 @@ class PomodoroTimerService : Service() {
                     .putExtra(EXTRA_EVENT_KEY, eventKey)
                     .putExtra(EXTRA_EVENT_TITLE, eventTitle)
             )
+
+        /**
+         * Runs [shared], a session already running on the watch or another
+         * device, here too: the same countdown, with this device's ring, sound
+         * and tree. Ignored while a different session runs here.
+         */
+        fun join(context: Context, shared: SharedSession) = context.startForegroundService(joinIntent(context, shared))
+
+        /** [join] as an intent, for a notification action. */
+        fun joinIntent(context: Context, shared: SharedSession): Intent =
+            intent(context, ACTION_JOIN).putExtra(EXTRA_SHARED, encodeShared(shared))
+
+        /** The id of the session running here, or blank; a peer's copy of it is not offered to join. */
+        @Volatile var runningSessionId: String = ""
+            private set
 
         /** Refused while a session is active — kept for the watch's command path. */
         fun pause(context: Context) = context.startService(intent(context, ACTION_PAUSE))

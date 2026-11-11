@@ -56,7 +56,15 @@ object WatchSessionFeed {
             completedFocus = map.getInt(WearContract.KEY_WS_COMPLETED, 0),
             targetFocusBlocks = map.getInt(WearContract.KEY_WS_TARGET, 0),
             subject = map.getString(WearContract.KEY_WS_SUBJECT)?.takeIf { it.isNotBlank() },
-            serverUpdatedAtMillis = map.getLong(WearContract.KEY_WS_UPDATED_AT, 0L).takeIf { it > 0L }
+            serverUpdatedAtMillis = map.getLong(WearContract.KEY_WS_UPDATED_AT, 0L).takeIf { it > 0L },
+            sessionId = map.getString(WearContract.KEY_WS_SESSION_ID).orEmpty(),
+            origin = map.getString(WearContract.KEY_WS_ORIGIN)?.takeIf { it.isNotBlank() }
+                ?: com.ogenrwotdaniel.wakeproof.pomodoro.SharedSession.ORIGIN_WATCH,
+            focusMinutes = map.getInt(WearContract.KEY_WS_FOCUS_MIN, 0),
+            shortBreakMinutes = map.getInt(WearContract.KEY_WS_SHORT_MIN, 0),
+            longBreakMinutes = map.getInt(WearContract.KEY_WS_LONG_MIN, 0),
+            longBreakEvery = map.getInt(WearContract.KEY_WS_LONG_EVERY, 0),
+            lastFocusSeconds = map.getInt(WearContract.KEY_WS_LAST_FOCUS_SEC, 0)
         )
     }
 

@@ -21,7 +21,11 @@ data class SavedSession(
     val phaseEndsAtMillis: Long,
     val treeWithered: Boolean,
     /** The last focus block's length — shorter in an exact session ([exactSessionPlan]). */
-    val lastFocusSeconds: Int = focusSeconds
+    val lastFocusSeconds: Int = focusSeconds,
+    /** Names the session on every device ([SharedSession.id]); blank in a record from before 2026-11-11. */
+    val sessionId: String = "",
+    /** Where the session started ([SharedSession.origin]). */
+    val origin: String = SharedSession.ORIGIN_SELF
 )
 
 /** What picking a saved session back up comes to. */
@@ -134,14 +138,15 @@ object SessionStore {
 internal fun encodeSession(s: SavedSession): String = listOf(
     s.focusSeconds, s.shortBreakSeconds, s.longBreakSeconds, s.longBreakEvery,
     s.targetFocusBlocks, s.completedFocusSessions, s.phase.name, s.phaseEndsAtMillis,
-    if (s.treeWithered) 1 else 0, s.lastFocusSeconds
+    if (s.treeWithered) 1 else 0, s.lastFocusSeconds, s.sessionId, s.origin
 ).joinToString("|")
 
 /** Null for anything unreadable: a corrupt record cannot be resumed honestly. */
 internal fun decodeSession(stored: String?): SavedSession? {
     val p = stored?.split('|') ?: return null
-    // Nine fields predate the exact session's trimmed last block (2026-11-01).
-    if (p.size != 9 && p.size != 10) return null
+    // Nine fields predate the exact session's trimmed last block (2026-11-01),
+    // ten the session id and origin (2026-11-11).
+    if (p.size != 9 && p.size != 10 && p.size != 12) return null
     return runCatching {
         val focus = p[0].toInt()
         SavedSession(
@@ -154,7 +159,9 @@ internal fun decodeSession(stored: String?): SavedSession? {
             phase = PomodoroPhase.valueOf(p[6]),
             phaseEndsAtMillis = p[7].toLong(),
             treeWithered = p[8] == "1",
-            lastFocusSeconds = p.getOrNull(9)?.toInt() ?: focus
+            lastFocusSeconds = p.getOrNull(9)?.toInt() ?: focus,
+            sessionId = validSessionId(p.getOrNull(10)).orEmpty(),
+            origin = p.getOrNull(11)?.takeIf { it.isNotBlank() } ?: SharedSession.ORIGIN_SELF
         )
     }.getOrNull()
 }

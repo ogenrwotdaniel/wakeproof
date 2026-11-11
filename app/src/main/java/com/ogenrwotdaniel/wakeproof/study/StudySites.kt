@@ -6,7 +6,7 @@ import java.net.URI
  * The sites WakeProof's own study browser ([StudyBrowserActivity]) opens: UNIST's
  * Blackboard and what signing in to it passes through. It is open whenever the
  * phone is (outside the night's sleep wall), during focus sessions too, with no
- * daily hour, which Chrome could never be: Chrome reaches every site, this one
+ * daily hour, which a browser could never be: a browser reaches every site, this one
  * physically cannot reach a feed. Added 2026-11-09 at the user's request, because
  * Blackboard is where coursework lives.
  */

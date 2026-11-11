@@ -68,6 +68,23 @@ object WatchTimerEngine {
         return started
     }
 
+    /**
+     * Runs the phone's session here too (2026-11-11, "Continue here"): the same
+     * countdown, buzzing on the wrist at every phase with the phone out of
+     * reach. False when refused: a session already running here, or nothing
+     * left to join.
+     */
+    suspend fun follow(context: Context, session: PhoneSession): Boolean {
+        var joined = false
+        mutate(context) {
+            if (it.active) return@mutate it
+            val state = WatchTimer.follow(session, System.currentTimeMillis()) ?: return@mutate it
+            joined = true
+            state
+        }
+        return joined
+    }
+
     // A user action is an acknowledgement: whatever is still buzzing stops.
 
     suspend fun resume(context: Context) {

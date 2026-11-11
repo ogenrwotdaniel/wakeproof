@@ -41,7 +41,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -137,17 +136,13 @@ class UsageViewModel @Inject constructor(
     /** The account's other devices' reports for today (empty when not syncing). */
     private val _peerStudy = MutableStateFlow<List<DeviceStudyUsage>>(emptyList())
 
-    /** Packages marked as study apps, for the 📚 marker in the top-apps list. */
-    val studyPackages: StateFlow<Set<String>> = settingsRepository.settings
-        .map { it.studyApps + context.packageName }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
-
     /**
-     * Today's study time: the study apps (Settings → Study apps, plus WakeProof
-     * itself) measured on every synced device, plus any focus-timer time no
-     * screen measured, credited to the app focus is spent in. Shown as study
-     * rather than lumped into screen time — an evening in Samsung Notes is the
-     * opposite of the thing the screen-time number warns about.
+     * Today's study time: the study apps (Settings → Study apps) measured on
+     * every synced device, plus any focus-timer time no screen measured,
+     * credited to the app focus is spent in. Shown as study rather than lumped
+     * into screen time — an evening in Samsung Notes is the opposite of the
+     * thing the screen-time number warns about. WakeProof's own screens are
+     * neither: a session's minutes come from the timer, whichever device ran it.
      */
     val studyTime: StateFlow<StudyTimeSummary?> = combine(
         _localStudy, _peerStudy, statsRepository.observeToday(), settingsRepository.settings
@@ -158,7 +153,8 @@ class UsageViewModel @Inject constructor(
             localLabels = local.keys.associateWith(usageStatsRepository::appLabel),
             peers = peers,
             focusMinutes = today.focusMinutes.toLong(),
-            creditPackage = settings.focusCreditApp
+            creditPackage = settings.focusCreditApp,
+            ownPackage = context.packageName
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -229,17 +225,14 @@ class UsageViewModel @Inject constructor(
         val gated = withContext(Dispatchers.IO) {
             AppGate.gatedPackages(context, usageStatsRepository.installedApps().map { it.packageName }, gateBrowsers)
         }
-        // One walk of the week's events for both.
-        val (gatedWeek, chromeWeek) = usageStatsRepository.weekMinutesForGroups(listOf(gated, setOf(AppGate.CHROME)))
-        val minutes = gatedWeek.associate { it.epochDay to it.minutes }
-        val chrome = chromeWeek.associate { it.epochDay to it.minutes }
+        val minutes = usageStatsRepository.weekMinutesForGroups(listOf(gated)).first()
+            .associate { it.epochDay to it.minutes }
         val today = LocalDate.now().toEpochDay()
         val blackboard = com.ogenrwotdaniel.wakeproof.study.StudyBrowserTime.minutes(context, (today - 6)..today)
         return ((today - 6)..today).map { day ->
             WallDay(
                 epochDay = day,
                 waitingAppMinutes = minutes[day] ?: 0L,
-                chromeMinutes = chrome[day] ?: 0L,
                 blackboardMinutes = blackboard[day] ?: 0L
             )
         }
@@ -258,7 +251,7 @@ class UsageViewModel @Inject constructor(
         _hasAccess.value = usageStatsRepository.hasAccess()
         if (!_hasAccess.value) return
         viewModelScope.launch {
-            _snapshot.value = usageStatsRepository.snapshot()
+            _snapshot.value = usageStatsRepository.snapshot(settingsRepository.settings.first().studyApps)
             // Same event-based measurement the enforcer uses, so the number shown
             // next to a cap is the number the block actually acts on.
             val capped = limitRepository.currentLimits().keys

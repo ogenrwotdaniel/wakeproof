@@ -192,7 +192,12 @@ fun PomodoroScreen(
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            if (!timer.active) {
+            val peer = rememberJoinablePeer()
+            if (!timer.active && peer != null) {
+                // A session already runs on the watch or another device. Starting
+                // one here would join it anyway, so that is what is offered.
+                PeerSessionCard(peer)
+            } else if (!timer.active) {
                 // Every session is timed and stops itself — there is no Free:
                 // with no pause or stop, a session that never ends would never
                 // let go of the phone.

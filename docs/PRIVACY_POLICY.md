@@ -1,6 +1,6 @@
 # WakeProof Privacy Policy
 
-**Effective date:** 12 November 2026
+**Effective date:** 13 November 2026
 **Developer:** Ogenrwot Daniel
 **Contact:** ogenrwotdaniel@gmail.com
 
@@ -54,26 +54,28 @@ app:
 - **Pushup verification video.** The camera feed used to count pushups is
   processed entirely on-device (Google ML Kit pose detection). No video or
   image from pushup verification is stored or transmitted.
-- **Day-plan photos.** The day-plan alarm asks you to photograph the page you
-  wrote your day on. Each photo is saved in WakeProof's private storage on
-  that device, where the Day plans screen shows it and lets you delete it.
-  Only the newest 90 days of plans are kept; older photos are removed.
-  The photos are never uploaded, synced to your other devices or sent to any
-  AI service, and uninstalling the app removes them. WakeProof does not read
-  or analyse what is on the page.
-- **Evening reviews and recall notes.** What you enter at the evening review
-  (how much of the plan got done, tomorrow's top three) and the lines you
-  write after a focus block are kept in WakeProof's private storage on that
-  device. They are not synced. They are included in the JSON backup file
-  you can export yourself. A recall note is sent to Google Gemini only
-  if you tap "Draft with AI" on it.
+- **Session-summary photos.** After a focus session the timer asks
+  you to write down what you learnt and photograph the page. Each photo is
+  saved in WakeProof's private storage on that device, where the Session
+  summaries screen shows it and lets you delete it. Only the newest 90 days
+  of summaries are kept; older photos are removed. The photos are never
+  uploaded, synced to your other devices or sent to any AI service, and
+  uninstalling the app removes them. WakeProof does not read or analyse what
+  is on the page.
+- **Day-plan photos and evening reviews from an earlier version.** The
+  day-plan alarm and the evening review were removed on 13 November 2026. The
+  photos and reviews they had saved are deleted from the device the first time
+  the updated app is opened.
+- **Recall notes.** The lines you write after a focus block are kept in
+  WakeProof's private storage on that device. They are not synced. They are
+  included in the JSON backup file you can export yourself. A recall note is
+  sent to Google Gemini only if you tap "Draft with AI" on it.
 - **Night screen use.** For the sleep score WakeProof reads, from the same
   Usage access, when the screen was on between 20:00 and 03:00. It is worked
   out on the device each time and sent nowhere.
 - **Your Gemini API key**, stored encrypted (Android EncryptedSharedPreferences).
 - **Your paired watch.** If you install the WakeProof watch app, your phone
-  sends it a small snapshot — streak, focus minutes and goal, whether today's
-  day plan is done, today's agenda, and the current timer — over Google's on-device
+  sends it a small snapshot — streak, focus minutes and goal, today's agenda, and the current timer — over Google's on-device
   Wearable Data Layer. This travels between your own two devices and reaches no
   server of ours.
 
@@ -127,7 +129,7 @@ That is the whole list. In particular your **weekly report** and the
 numbers; no statistics, screen-time totals or app names are sent to Google
 Gemini, with or without a key.
 
-No alarm uses these features: pushup counting, the day-plan photo, flashcard
+No alarm uses these features: pushup counting, flashcard
 review and the sums all run on the device.
 
 WakeProof sends this data directly from your phone to Google's Gemini API; the
@@ -144,7 +146,7 @@ internet requests at all**.
 
 | Permission | Why WakeProof asks |
 |---|---|
-| Camera | Counting pushups (on-device), photographing your day plan (kept on the device), and scanning the WakeProof Clip pairing code |
+| Camera | Counting pushups (on-device), photographing your session summaries (kept on the device), and scanning the WakeProof Clip pairing code |
 | Notifications, exact alarms, full-screen alarms | Making the alarm ring reliably, including on the lock screen |
 | Usage access (special) | Showing you your own screen-time stats, applying the daily app limits you set (notify, or block for the rest of the day), enforcing your open-window and weekend walls on gated apps, and keeping apps outside your focus list shut during a focus session |
 | Display over other apps (special) | The floating Pomodoro timer bubble, the block and focus-session screens shown over other apps, opening the alarm screen while you use other apps, and covering an app left open in a pop-up window while it is walled |
@@ -184,6 +186,10 @@ personal information from children.
 ## Changes to this policy
 
 Material changes will be posted at this URL with an updated effective date.
+
+**13 November 2026** — added session-summary photos, taken after a
+focus session and stored on the device only; removed the day-plan alarm and
+its photo library, and the evening review.
 
 **12 November 2026** — removed water-drinking verification altogether, and
 with it the only case in which a photo taken at an alarm could be sent to

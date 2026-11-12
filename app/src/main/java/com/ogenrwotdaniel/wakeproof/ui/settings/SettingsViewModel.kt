@@ -57,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val alarmRepository: AlarmRepository,
     private val alarmScheduler: AlarmScheduler,
     private val alarmDevicePolicy: AlarmDevicePolicy,
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore,
     private val alarmInitializer: AlarmInitializer,
     private val settingsRepository: SettingsRepository,
     private val completionRepository: CompletionRepository,
@@ -335,6 +336,8 @@ class SettingsViewModel @Inject constructor(
             val current = settingsRepository.settings.first().studyApps
             val adding = packageName !in current
             if (adding && PomodoroTimerService.state.value.active) return@launch
+            // The summary after a session holds the same wall, on the same list.
+            if (adding && summaryStore.owed(summaryStore.load()) != null) return@launch
             settingsRepository.setStudyApps(
                 if (adding) current + packageName else current - packageName
             )

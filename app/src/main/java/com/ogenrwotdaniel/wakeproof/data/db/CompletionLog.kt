@@ -26,7 +26,7 @@ enum class CompletionStatus { VERIFIED, UNVERIFIED, SKIPPED }
 /**
  * One completed (or skipped) goal instance. [epochDay] is
  * [java.time.LocalDate.toEpochDay]; [amount] is reps for PUSHUP, minutes for
- * FOCUS, problems solved for MATH, photos for PLAN, cards for REVIEW, things written for tomorrow for SHUTDOWN.
+ * FOCUS, problems solved for MATH, photos for PLAN (retired 2026-11-13, old logs only), cards for REVIEW, things written for tomorrow for SHUTDOWN.
  */
 @Entity(
     tableName = "completion_logs",

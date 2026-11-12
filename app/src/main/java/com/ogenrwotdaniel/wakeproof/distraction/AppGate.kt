@@ -216,6 +216,11 @@ val SIDELOADED_BUILD = BuildConfig.DEBUG
 /** What [AppBlockService] does about the app on screen. */
 enum class GateVerdict {
     ALLOW, FOCUS_WALL, CAP_WALL, WINDOW_WALL, BEDTIME_WALL,
+    /**
+     * A session that ended still owes its summary: the focus list alone stays
+     * open. Its own verdict so the wall copy never works out the reason again.
+     */
+    SUMMARY_WALL,
     /** The night's sleep wall over every non-essential app; see [sleepWallActive]. */
     SLEEP_WALL,
     /** An app in its first week; see [NewAppQuarantine]. */
@@ -272,7 +277,14 @@ fun gateVerdict(
     clockUntrusted: Boolean = false,
     historyOn: Boolean = false,
     capped: Boolean = false,
-    adminOffSwitch: Boolean = false
+    adminOffSwitch: Boolean = false,
+    /**
+     * A session that ended here still owes its summary photo. It shuts what a
+     * focus session shuts ([GateVerdict.SUMMARY_WALL]) and nothing else: not a session, so the night, clock and
+     * history walls stand as usual and Settings stays open (the camera grant
+     * the photo needs is changed there).
+     */
+    summaryOwed: Boolean = false
 ): GateVerdict = when {
     adminOffSwitch -> GateVerdict.ADMIN_LOCK_WALL
     // A home or SMS app newly made the default keeps its first week, or choosing
@@ -286,6 +298,7 @@ fun gateVerdict(
     // Every app, gated or not; a focus session into the night keeps its list.
     sleeping && !(focusSessionActive && onFocusList) -> GateVerdict.SLEEP_WALL
     focusSessionActive && !onFocusList -> GateVerdict.FOCUS_WALL
+    summaryOwed && !onFocusList -> GateVerdict.SUMMARY_WALL
     quarantined -> GateVerdict.QUARANTINE_WALL
     historyOn && !focusSessionActive && (gated || capped) -> GateVerdict.HISTORY_WALL
     capSpent -> GateVerdict.CAP_WALL

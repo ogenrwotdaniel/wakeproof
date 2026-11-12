@@ -1,6 +1,8 @@
 package com.ogenrwotdaniel.wakeproof
 
 import android.app.ActivityManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -13,6 +15,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.glance.appwidget.updateAll
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncEngine
 import com.ogenrwotdaniel.wakeproof.data.sync.SyncResult
@@ -44,6 +48,14 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var syncEngine: SyncEngine
     @Inject lateinit var watchBlockImporter: WatchBlockImporter
 
+    /** Counts the asks to open the focus timer (the session-summary notification's tap). */
+    private val timerAsks = MutableStateFlow(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_TIMER, false)) timerAsks.update { it + 1 }
+    }
+
     override fun onStart() {
         super.onStart()
         AppForeground.set(true)
@@ -51,6 +63,8 @@ class MainActivity : ComponentActivity() {
         // grants. Done from a visible Activity, which is always allowed to start a
         // foreground service.
         lifecycleScope.launch { runCatching { AppBlockService.sync(applicationContext) } }
+        // The removed day plan's photos and the evening reviews are not kept.
+        lifecycleScope.launch { runCatching { com.ogenrwotdaniel.wakeproof.plan.deleteRetiredFiles(applicationContext) } }
         // A session lost to a force-stop comes back the moment the app opens.
         com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService.restore(applicationContext)
         com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm.resumeIfPending(applicationContext)
@@ -90,6 +104,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Not after a rotation: the restored back stack already holds the timer.
+        // Nor from Recents, which hands the notification's old intent over again.
+        val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromRecents && intent.getBooleanExtra(EXTRA_OPEN_TIMER, false)) {
+            timerAsks.value = 1
+        }
         // "Can't use the phone during a session": pin the app (lock task / screen
         // pinning) while a countdown runs — breaks included — and release it only
         // on pause/stop.
@@ -122,15 +142,30 @@ class MainActivity : ComponentActivity() {
             WakeProofTheme {
                 val onboardingComplete by viewModel.onboardingComplete.collectAsStateWithLifecycle()
                 val immersiveFocus by viewModel.immersiveFocusActive.collectAsStateWithLifecycle()
+                val openTimer by timerAsks.collectAsStateWithLifecycle()
                 when (onboardingComplete) {
                     null -> Unit // settings still loading; theme background shows
                     true -> WakeProofNavGraph(
                         startDestination = HomeRoute,
-                        immersiveFocus = immersiveFocus
+                        immersiveFocus = immersiveFocus,
+                        openTimer = openTimer
                     )
                     false -> WakeProofNavGraph(startDestination = OnboardingRoute)
                 }
             }
         }
+    }
+
+    companion object {
+        private const val EXTRA_OPEN_TIMER = "open_timer"
+
+        /**
+         * Opens the app on the focus timer, with Home under it. The running
+         * activity is reused: a second one on top would leave two back stacks.
+         */
+        fun timerIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_OPEN_TIMER, true)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }

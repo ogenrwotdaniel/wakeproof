@@ -166,8 +166,8 @@ fun SettingsScreen(
                 ) {
                     // AlarmScheduler never arms it; without this it looks on and stays silent.
                     Text(
-                        text = "Will not ring: a pushup alarm at a locked alarm's time " +
-                            "(now or a former one) is kept silent. Pick another time or type.",
+                        text = "Will not ring: this is the time of a locked alarm, now or a " +
+                            "former one, and alarms of its kind are kept silent there. Pick another time.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(start = 12.dp)
@@ -870,9 +870,7 @@ private fun SliderSetting(
 private val ADDABLE_TYPES = listOf(
     AlarmType.PUSHUP to "Pushups",
     AlarmType.MATH to "Math",
-    AlarmType.REVIEW to "Flashcards",
-    AlarmType.PLAN to "Day plan",
-    AlarmType.SHUTDOWN to "Evening review"
+    AlarmType.REVIEW to "Flashcards"
 )
 
 @OptIn(
@@ -996,9 +994,6 @@ private fun TimePickerDialog(
 @Composable
 private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
     val context = LocalContext.current
-    // The day-plan alarm is fixed in the schedule only; it rings like any other.
-    val slot = StrictAlarm.slotOf(context, alarm)
-    val hard = slot?.hard != false
     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp)) {
         Text(
             text = formatAlarmTime(context, alarm.hour, alarm.minute),
@@ -1006,18 +1001,13 @@ private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
         )
         Text(
             text = (if (isStrictLabel(alarm.label)) "" else alarm.label).ifBlank { "Locked" } +
-                (if (hard) " · ${StrictAlarm.REPS} pushups" else if (slot?.type == AlarmType.SHUTDOWN) " · evening review" else " · photo of your day plan") + " · every day",
+                " · ${StrictAlarm.REPS} pushups · every day",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = if (hard) {
-                "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
-                    "no emergency dismiss, and keeps ringing after a restart until it is done."
-            } else {
-                "Fixed. It cannot be changed, switched off or deleted. Snooze and the " +
-                    "emergency dismiss work as on any other alarm."
-            },
+            text = "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
+                "no emergency dismiss, and keeps ringing after a restart until it is done.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary
         )

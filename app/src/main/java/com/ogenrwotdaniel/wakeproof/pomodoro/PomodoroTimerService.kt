@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import com.ogenrwotdaniel.wakeproof.study.SUMMARY_HOLD_MILLIS
+import com.ogenrwotdaniel.wakeproof.study.SUMMARY_NOTIFICATION_ID
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -103,6 +105,9 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var wallRules: WallRulesRepository
     @Inject lateinit var liveFocusSession: LiveFocusSession
     @Inject lateinit var recallStore: com.ogenrwotdaniel.wakeproof.study.RecallStore
+    @Inject lateinit var summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
+    @Inject lateinit var liveSummaryHold: com.ogenrwotdaniel.wakeproof.data.sync.LiveSummaryHold
+    @Inject lateinit var alarmDevicePolicy: com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
@@ -268,6 +273,7 @@ class PomodoroTimerService : Service() {
                     SessionEvent(key, intent.getStringExtra(EXTRA_EVENT_TITLE).orEmpty())
                 }
                 scope.launch {
+                    if (refusedForSummary()) return@launch
                     // A session already running on the watch or another device is
                     // joined, not doubled: one session, the same countdown everywhere.
                     PeerSessions.joinable()?.let { running ->
@@ -323,7 +329,9 @@ class PomodoroTimerService : Service() {
                     if (!_state.value.active) stopSelf()
                     return START_NOT_STICKY
                 }
-                scope.launch { join(shared) }
+                // Its own session realigning is not a start.
+                val starting = !_state.value.active
+                scope.launch { if (!starting || !refusedForSummary()) join(shared) }
             }
             ACTION_RESTORE -> {
                 createChannel()
@@ -616,6 +624,70 @@ class PomodoroTimerService : Service() {
         if (!nextPhaseWantsSound) pauseMusic(fade)
     }
 
+    /**
+     * No session starts, from any door (the timer screen, Home, a calendar
+     * event, the watch, Continue here), while the last one's summary is owed:
+     * a new session would be the way to never write it. True when refused.
+     */
+    private suspend fun refusedForSummary(): Boolean {
+        val owed = runCatching { summaryStore.owed(summaryStore.load()) }.getOrNull()
+        if (owed == null) {
+            // The phone's summary holds the tablet's starts too.
+            val peerUntil = com.ogenrwotdaniel.wakeproof.data.sync.PeerSummaryHold.untilMillis
+            if (!com.ogenrwotdaniel.wakeproof.study.peerSummaryHolds(peerUntil, System.currentTimeMillis())) return false
+            android.widget.Toast.makeText(
+                this, "First the summary of your last session: photograph it on your phone.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            stopSelf()
+            return true
+        }
+        android.widget.Toast.makeText(
+            this, "First the summary of your last session: photograph it on the focus timer.",
+            android.widget.Toast.LENGTH_LONG
+        ).show()
+        postSummaryNotice(this, owed.askedAtMillis)
+        stopSelf()
+        return true
+    }
+
+    /**
+     * The session has fully ended on the phone: its summary is owed, ten more
+     * minutes of writing and then a photo, with the focus wall held meanwhile
+     * (see [SessionSummaryStore]). Asked on the ringing device only (the user's
+     * call: the phone is the timer), so a tablet following the session is let go.
+     * True when the summary is owed.
+     */
+    private suspend fun askSummary(endedAtMillis: Long = System.currentTimeMillis(), recovered: Boolean = false): Boolean {
+        if (!alarmDevicePolicy.ringsAlarms) return false
+        // A running session always has an id. Blank here means the end path ran
+        // twice (the ticker can come round once more before the service is
+        // destroyed), and a second ask under a made-up key would start the
+        // thirty minutes again.
+        if (sessionId.isBlank() && !recovered) return false
+        val now = System.currentTimeMillis()
+        // Counted from the session's end: one found over at the next start-up,
+        // hours later, owes nothing any more.
+        val endedAt = endedAtMillis.coerceAtMost(now)
+        if (now - endedAt >= SUMMARY_HOLD_MILLIS) return false
+        // A session saved by a build without ids is told apart by the minute it ended.
+        val key = sessionId.ifBlank { "end-${endedAt / 60_000L}" }
+        // Read, not [latestSettings]: after a restart that is still the default.
+        val subject = runCatching { settingsRepository.settings.first().activeSubject }
+            .getOrDefault(latestSettings.activeSubject)
+        val asked = runCatching { summaryStore.ask(key, subject, endedAt) }.getOrDefault(false)
+        if (asked) {
+            postSummaryNotice(this, endedAt)
+            // The tablet and the watch must hear it now: neither starts a session while this is owed.
+            liveSummaryHold.publish(endedAt + SUMMARY_HOLD_MILLIS)
+            // Launched, not awaited: the session's end (walls, Do Not Disturb)
+            // must not wait on a second stats push. Its own scope, because this
+            // service stops in the same breath.
+            CoroutineScope(Dispatchers.IO).launch { runCatching { wearStatsSync.push() } }
+        }
+        return asked
+    }
+
     private fun armDeadline() {
         phaseDeadline = SystemClock.elapsedRealtime() + _state.value.remainingSeconds * 1_000L
     }
@@ -683,15 +755,19 @@ class PomodoroTimerService : Service() {
             val done = current.completedFocusSessions + 1
             // Timed session finished: skip the trailing break and stop cleanly.
             if (current.targetFocusBlocks in 1..done) {
-                getSystemService(NotificationManager::class.java).notify(
-                    SESSION_DONE_NOTIFICATION_ID,
-                    Notification.Builder(this, ALERT_CHANNEL_ID)
-                        .setSmallIcon(R.drawable.ic_launcher_foreground)
-                        .setContentTitle("Session complete 🎉")
-                        .setContentText("$done pomodoros done — great work.")
-                        .setAutoCancel(true)
-                        .build()
-                )
+                // Blank id: the ticker came round once more after the end
+                // ([askSummary]); "great work" must not land on the summary notice.
+                if (!askSummary() && sessionId.isNotBlank()) {
+                    getSystemService(NotificationManager::class.java).notify(
+                        SESSION_DONE_NOTIFICATION_ID,
+                        Notification.Builder(this, ALERT_CHANNEL_ID)
+                            .setSmallIcon(R.drawable.ic_launcher_foreground)
+                            .setContentTitle("Session complete 🎉")
+                            .setContentText("$done pomodoros done — great work.")
+                            .setAutoCancel(true)
+                            .build()
+                    )
+                }
                 event?.let { com.ogenrwotdaniel.wakeproof.agenda.EventReminders.postCheckIn(this, it) }
                 runCatching { wearTimerSync.clear() }
                 endSession()
@@ -854,7 +930,9 @@ class PomodoroTimerService : Service() {
         shortBreakSeconds = session.shortBreakSeconds
         longBreakSeconds = session.longBreakSeconds
         longBreakEvery = session.longBreakEvery
-        sessionId = session.sessionId
+        // Never blank while a session runs: one saved by a build without ids
+        // must still owe its summary, and a blank id means "already ended".
+        sessionId = session.sessionId.ifBlank { java.util.UUID.randomUUID().toString() }
         sessionOrigin = session.origin
         val msLeft = (session.phaseEndsAtMillis - now).coerceAtLeast(1L)
         val left = ((msLeft + 999) / 1_000).toInt()
@@ -954,6 +1032,10 @@ class PomodoroTimerService : Service() {
         }
         val resume = outcome.resume
         if (resume == null) {
+            // Ended while the phone was off or the app was killed: the summary
+            // is owed all the same, or a restart would be the way past it.
+            sessionId = saved.sessionId
+            askSummary(endedAtMillis = saved.phaseEndsAtMillis, recovered = true)
             endSession()
             stopSelf()
             return
@@ -1150,6 +1232,43 @@ class PomodoroTimerService : Service() {
          * origin's own ([SharedSession.fromOrigin]) and none realigns to it.
          */
         const val ORIGIN_PHONE = "phone"
+
+        /**
+         * The notification that says the summary is owed. It stays until the
+         * summary is settled or the hold lapses, and a tap opens the focus
+         * timer, where the summary is written and photographed. Also posted by
+         * [com.ogenrwotdaniel.wakeproof.distraction.AppBlockService] after a
+         * restart, which removes every notification while the summary stays owed.
+         */
+        fun postSummaryNotice(context: Context, askedAtMillis: Long) {
+            val left = askedAtMillis + SUMMARY_HOLD_MILLIS - System.currentTimeMillis()
+            if (left <= 0) return
+            runCatching {
+                context.getSystemService(NotificationManager::class.java).notify(
+                    SUMMARY_NOTIFICATION_ID,
+                    Notification.Builder(context, ALERT_CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_launcher_foreground)
+                        .setContentTitle("Session complete: now the summary")
+                        .setContentText(
+                            "Ten minutes: write down everything you studied, then photograph " +
+                                "the page on the focus timer. Your apps stay shut until then."
+                        )
+                        .setOngoing(true)
+                        // Posted again on a refused start: shown, not rung a second time.
+                        .setOnlyAlertOnce(true)
+                        // Gone when the hold lapses: "your apps stay shut" must not outlive it.
+                        .setTimeoutAfter(left)
+                        .setContentIntent(
+                            PendingIntent.getActivity(
+                                context, SUMMARY_NOTIFICATION_ID,
+                                com.ogenrwotdaniel.wakeproof.MainActivity.timerIntent(context),
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                            )
+                        )
+                        .build()
+                )
+            }
+        }
         private const val CHANNEL_ID = "wakeproof_pomodoro"
         /**
          * A channel's sound cannot be changed once created, so the soft chime

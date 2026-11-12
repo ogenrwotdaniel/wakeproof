@@ -2,6 +2,8 @@ package com.ogenrwotdaniel.wakeproof.ui.pomodoro
 
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.ogenrwotdaniel.wakeproof.study.recallDue
+import com.ogenrwotdaniel.wakeproof.study.summaryDue
+import com.ogenrwotdaniel.wakeproof.study.summaryWriteLeftMillis
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -81,6 +83,8 @@ import java.util.Calendar
 @Composable
 fun PomodoroScreen(
     onBack: () -> Unit,
+    onPhotographSummary: () -> Unit,
+    onOpenSummaries: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PomodoroViewModel = hiltViewModel()
 ) {
@@ -93,6 +97,15 @@ fun PomodoroScreen(
         FocusQuotes.forBlock(java.time.LocalDate.now().toEpochDay(), timer.completedFocusSessions)
     }
     val context = LocalContext.current
+    val summaryState by viewModel.summary.collectAsStateWithLifecycle()
+    val summaryNow = rememberSummaryNow(summaryState)
+    // Read once: the boot count cannot change while the app runs, and a
+    // settings lookup on every tick of the countdown would be waste.
+    val bootCount = remember { com.ogenrwotdaniel.wakeproof.study.steadyClock(context).bootCount }
+    val summary = summaryDue(
+        summaryState, summaryNow,
+        com.ogenrwotdaniel.wakeproof.study.SteadyClock(android.os.SystemClock.elapsedRealtime(), bootCount)
+    )
 
     val chatAllowed = viewModel.hasKimiKey && (!timer.active || !timer.running ||
         timer.phase != PomodoroPhase.FOCUS)
@@ -132,6 +145,14 @@ fun PomodoroScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (summary != null) {
+                SummaryPrompt(
+                    subject = summary.subject,
+                    writeLeftSeconds = ((summaryWriteLeftMillis(summary, summaryNow, com.ogenrwotdaniel.wakeproof.study.SteadyClock(android.os.SystemClock.elapsedRealtime(), bootCount)) + 999) / 1_000).toInt(),
+                    onPhotograph = onPhotographSummary
+                )
+                Spacer(Modifier.height(16.dp))
+            }
             // Asked in the break (or after the last block), never over a running
             // focus block. Read on each tick, so it leaves when it goes stale.
             val recallState by viewModel.recall.collectAsStateWithLifecycle()
@@ -208,7 +229,16 @@ fun PomodoroScreen(
                 Spacer(Modifier.height(8.dp))
             }
             val peer = rememberJoinablePeer()
-            if (!timer.active && peer != null) {
+            if (!timer.active && summary != null) {
+                // No next session until this one's summary is in: starting one
+                // would be the way to never write it.
+                Text(
+                    text = "The next session opens once the summary is photographed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            } else if (!timer.active && peer != null) {
                 // A session already runs on the watch or another device. Starting
                 // one here would join it anyway, so that is what is offered.
                 PeerSessionCard(peer)
@@ -309,9 +339,51 @@ fun PomodoroScreen(
             }
             Spacer(Modifier.height(16.dp))
 
+            OutlinedButton(onClick = onOpenSummaries, modifier = Modifier.fillMaxWidth()) {
+                Text("Session summaries")
+            }
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
                 Text("Back")
             }
+        }
+    }
+}
+
+/**
+ * After a session: everything it taught, written on a page from memory for at
+ * least ten minutes ([writeLeftSeconds] of them still to go), then
+ * photographed. There is no skip; the focus wall holds until the photo is kept.
+ */
+@Composable
+private fun SummaryPrompt(
+    subject: String,
+    writeLeftSeconds: Int,
+    onPhotograph: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.material3.Card(modifier = modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = "Session done. Now summarize it", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Ten minutes, on paper, from memory: everything you studied this session " +
+                    "($subject). Then photograph the page.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (writeLeftSeconds > 0) {
+                Text(
+                    text = "%d:%02d".format(writeLeftSeconds / 60, writeLeftSeconds % 60),
+                    style = MaterialTheme.typography.displaySmall
+                )
+            }
+            Button(onClick = onPhotograph, enabled = writeLeftSeconds <= 0, modifier = Modifier.fillMaxWidth()) {
+                Text(if (writeLeftSeconds > 0) "Keep writing" else "Photograph the summary")
+            }
+            Text(
+                text = "Your apps stay shut until the photo is kept, half an hour after the " +
+                    "session at most.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -936,3 +1008,29 @@ private fun RecallPrompt(subject: String, onSave: (String) -> Unit, onSkip: () -
         }
     }
 }
+
+/**
+ * The clock the "is a summary still owed" question is asked against, for the
+ * timer screen and Home alike, so the two cannot disagree. Its own clock: once
+ * a session has ended nothing else redraws the screen. Read afresh whenever
+ * the ask changes: against a reading taken before it, a new ask would look
+ * like one from the future and not be shown.
+ */
+@Composable
+fun rememberSummaryNow(state: com.ogenrwotdaniel.wakeproof.study.SummaryState): Long {
+    val now by androidx.compose.runtime.produceState(System.currentTimeMillis(), state) {
+        while (true) {
+            value = System.currentTimeMillis()
+            // By the second only while something is owed: a lapsed ask left in
+            // the file must not redraw the screen every second for ever.
+            kotlinx.coroutines.delay(
+                if (state.pending != null && kotlin.math.abs(value - state.pending.askedAtMillis) < SUMMARY_TICK_FOR_MILLIS) 1_000
+                else 30_000
+            )
+        }
+    }
+    return now
+}
+
+/** How long after an ask the summary clock ticks by the second: the hold, and room for a clock set wrong. */
+private const val SUMMARY_TICK_FOR_MILLIS = 3 * 60 * 60_000L

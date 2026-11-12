@@ -16,9 +16,8 @@ WakeProof is an Android alarm, deep-focus, spaced-repetition, and distraction-wa
 - **Reliable alarm delivery:** `AlarmManager.setAlarmClock()` + lock-screen full-screen intents + foreground `mediaPlayback` service + Direct-Boot mirror (`DirectBootAlarmStore` fires even before first post-reboot unlock) + weekly repeat bitmasks.
 - **Single-device ringing role:** Alarm schedules and daily goals sync across phone and tablet, while `AlarmDevicePolicy` keeps companion tablets silent by default.
 - **Push-up mission (100% on-device):** CameraX (front/back flippable) + ML Kit Pose Detection elbow-angle state machine (5–10 reps) with progressive ringtone ducking as reps complete. Zero images or video are stored or uploaded.
-- **Day-plan mission:** Write down everything the day holds and photograph the page. The photo is kept in an on-device library (Day plans, the newest 90 days) to look back on; nothing reads, judges or uploads it.
+- **Session summaries:** After every focus session the phone asks for ten minutes writing down what was studied and a photo of the page, with the focus wall held until it is kept (30 minutes at most). Photos stay in an on-device library (the newest 90 days); nothing reads, judges or uploads them.
 - **Flashcard review mission:** Up to 10 due SM-2 cards, each graded as on the Flashcards screen, so the alarm does the day's spaced repetition. With no card due it falls back to the sums.
-- **Evening review (19:30):** Shows the morning's plan photo, asks how much of it got done and takes tomorrow's top three, which Home shows the next day.
 - **Mental math mission:** Camera-free dark-room mode requiring 1–10 consecutive arithmetic problems; any mistake resets the run and draws a new problem.
 - **Locked strict morning alarms & watch backup:** Optional uneditable morning slots survive reboots with zero snooze and arm a `+2 min` backup alarm on a paired Wear OS watch.
 

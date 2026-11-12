@@ -5,8 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import com.ogenrwotdaniel.wakeproof.data.FocusGoalToday
-import com.ogenrwotdaniel.wakeproof.plan.DayReviewStore
-import com.ogenrwotdaniel.wakeproof.plan.topThreeFor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
@@ -56,8 +54,11 @@ class HomeViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     liveCloudFeed: LiveCloudFeed,
     wallRulesRepository: WallRulesRepository,
-    private val dayReviewStore: DayReviewStore
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
 ) : ViewModel() {
+
+    /** The session summary still owed its photo; the screen decides if it is still due. */
+    val summary: StateFlow<com.ogenrwotdaniel.wakeproof.study.SummaryState> = summaryStore.state
 
     private val grants = MutableStateFlow(readGrants())
 
@@ -139,13 +140,8 @@ class HomeViewModel @Inject constructor(
     val focusGoal: StateFlow<FocusGoalToday> = statsRepository.observeFocusGoal()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FocusGoalToday())
 
-    /** What last evening's review put first for today. */
-    val topThree: StateFlow<List<String>> = dayReviewStore.reviews
-        .map { topThreeFor(it, LocalDate.now().toEpochDay()) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     init {
-        viewModelScope.launch { dayReviewStore.load() }
+        viewModelScope.launch { summaryStore.load() }
     }
 
     val alarms: StateFlow<List<Alarm>> = repository.observeAlarms()

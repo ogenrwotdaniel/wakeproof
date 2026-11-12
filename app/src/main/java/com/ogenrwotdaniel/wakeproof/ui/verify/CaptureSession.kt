@@ -15,7 +15,7 @@ enum class CaptureFault {
 }
 
 /**
- * One photo at a time on a photo screen (the day plan), and when a run of failed photos means
+ * One photo at a time on a photo screen (the session summary), and when a run of failed photos means
  * the camera is broken (which opens the emergency dismiss).
  *
  * A camera closed by a flip, a rebind or the screen leaving the foreground is

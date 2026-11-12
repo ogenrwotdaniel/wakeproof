@@ -60,7 +60,8 @@ class SyncEngine @Inject constructor(
     private val scheduler: AlarmScheduler,
     private val alarmInitializer: com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer,
     private val settings: SettingsRepository,
-    private val studyUsage: StudyUsageSync
+    private val studyUsage: StudyUsageSync,
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
 ) {
 
     /** One pass at a time: the periodic worker and a "Sync now" tap can overlap. */
@@ -222,7 +223,11 @@ class SyncEngine @Inject constructor(
                 val apply = studyAppsToApply(
                     local = localApps,
                     remote = remoteApps!!,
-                    sessionActive = PomodoroTimerService.state.value.active
+                    // The summary after a session holds the same wall on the same
+                    // list: an app added on the tablet must not open it here.
+                    sessionActive = PomodoroTimerService.state.value.active || runCatching {
+                        summaryStore.owed(summaryStore.load()) != null
+                    }.getOrDefault(false)
                 )
                 if (apply == remoteApps) settings.applySyncedStudyApps(apply, remoteStamp!!)
                 else settings.applyStudyAppsUnstamped(apply)

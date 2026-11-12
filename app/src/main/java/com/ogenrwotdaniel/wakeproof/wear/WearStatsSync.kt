@@ -25,12 +25,11 @@ object WearContract {
     const val KEY_ASTERISK = "asterisk"
     const val KEY_FOCUS = "focus_minutes"
     const val KEY_FOCUS_GOAL = "focus_goal"
-    /** Day-plan photos saved today, and how many plan alarms ask for one. */
-    const val KEY_PLAN_COUNT = "plan_count"
-    const val KEY_PLAN_TARGET = "plan_target"
-    /** Evening reviews written today, and how many alarms ask for one. */
-    const val KEY_SHUTDOWN_COUNT = "shutdown_count"
-    const val KEY_SHUTDOWN_TARGET = "shutdown_target"
+    /**
+     * Wall-clock millis until which the phone's last session owes its summary
+     * (0 = nothing owed): the watch starts no session of its own before then.
+     */
+    const val KEY_SUMMARY_UNTIL = "summary_until"
     const val KEY_UPDATED = "updated_at"
     // Phase lengths and subject, so a pomodoro started ON THE WATCH (with no
     // phone around) runs the user's own lengths and logs under their subject.
@@ -170,7 +169,7 @@ object WearContract {
 }
 
 /**
- * Mirrors today's progress (streak, focus vs goal, day plan, evening review) onto the Wearable
+ * Mirrors today's progress (streak, focus vs goal) onto the Wearable
  * Data Layer so the Galaxy Watch tile can show it. A single persisted DataItem
  * at [WearContract.PATH]; the watch reads the last snapshot even while the phone
  * is asleep. No-ops gracefully when Play Services or a watch is unavailable.
@@ -180,7 +179,8 @@ class WearStatsSync @Inject constructor(
     @ApplicationContext private val context: Context,
     private val statsRepository: StatsRepository,
     private val settingsRepository: SettingsRepository,
-    private val completionRepository: CompletionRepository
+    private val completionRepository: CompletionRepository,
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
 ) {
     private val dataClient by lazy { Wearable.getDataClient(context) }
 
@@ -193,10 +193,13 @@ class WearStatsSync @Inject constructor(
             dataMap.putInt(WearContract.KEY_FOCUS, today.focusMinutes)
             // The goal the day is scored against: raised before an exam.
             dataMap.putInt(WearContract.KEY_FOCUS_GOAL, statsRepository.observeFocusGoal().first().minutes)
-            dataMap.putInt(WearContract.KEY_PLAN_COUNT, today.planCount)
-            dataMap.putInt(WearContract.KEY_PLAN_TARGET, today.planTarget)
-            dataMap.putInt(WearContract.KEY_SHUTDOWN_COUNT, today.shutdownCount)
-            dataMap.putInt(WearContract.KEY_SHUTDOWN_TARGET, today.shutdownTarget)
+            val owed = runCatching {
+                summaryStore.owed(summaryStore.load())
+            }.getOrNull()
+            dataMap.putLong(
+                WearContract.KEY_SUMMARY_UNTIL,
+                owed?.let { it.askedAtMillis + com.ogenrwotdaniel.wakeproof.study.SUMMARY_HOLD_MILLIS } ?: 0L
+            )
             dataMap.putInt(WearContract.KEY_FOCUS_LEN, settings.focusMinutes)
             dataMap.putInt(WearContract.KEY_SHORT_BREAK_LEN, settings.shortBreakMinutes)
             dataMap.putInt(WearContract.KEY_LONG_BREAK_LEN, settings.longBreakMinutes)

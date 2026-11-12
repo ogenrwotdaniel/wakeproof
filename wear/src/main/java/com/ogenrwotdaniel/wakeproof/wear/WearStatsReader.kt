@@ -19,10 +19,7 @@ private object WearContract {
     const val KEY_ASTERISK = "asterisk"
     const val KEY_FOCUS = "focus_minutes"
     const val KEY_FOCUS_GOAL = "focus_goal"
-    const val KEY_PLAN_COUNT = "plan_count"
-    const val KEY_PLAN_TARGET = "plan_target"
-    const val KEY_SHUTDOWN_COUNT = "shutdown_count"
-    const val KEY_SHUTDOWN_TARGET = "shutdown_target"
+    const val KEY_SUMMARY_UNTIL = "summary_until"
     const val KEY_UPDATED = "updated_at"
     const val KEY_FOCUS_LEN = "focus_len"
     const val KEY_SHORT_BREAK_LEN = "short_break_len"
@@ -36,12 +33,8 @@ data class WearStats(
     val asterisk: Boolean = false,
     val focusMinutes: Int = 0,
     val focusGoal: Int = 0,
-    /** Day-plan photos saved today, and how many the schedule asks for (0 = none). */
-    val planCount: Int = 0,
-    val planTarget: Int = 0,
-    /** Evening reviews written today, and how many the schedule asks for (0 = none). */
-    val shutdownCount: Int = 0,
-    val shutdownTarget: Int = 0,
+    /** Until when the phone's last session owes its summary; 0 = nothing owed. */
+    val summaryUntilMillis: Long = 0L,
     val present: Boolean = false,
     /** When the phone computed these numbers; 0 for a pre-1.6 phone that never said. */
     val updatedAtMillis: Long = 0L,
@@ -60,30 +53,20 @@ data class WearStats(
         else 0
 }
 
-/**
- * Pure: the one line about today's fixed alarms, or null on a day with none.
- * One line, not two: the tile has no room for both, and the day plan matters
- * until it is photographed, the evening review after that.
- */
-fun dayLine(stats: WearStats): String? {
-    val planAsked = stats.planTarget > 0
-    val planDone = planAsked && stats.planCount >= stats.planTarget
-    val reviewAsked = stats.shutdownTarget > 0
-    val reviewDone = reviewAsked && stats.shutdownCount >= stats.shutdownTarget
-    return when {
-        planAsked && !planDone -> "Day plan pending"
-        reviewAsked && !reviewDone -> if (planAsked) "Plan ✓ · review due" else "Evening review due"
-        planAsked && reviewAsked -> "Plan ✓ · review ✓"
-        planAsked -> "Day plan ✓"
-        reviewAsked -> "Evening review ✓"
-        else -> null
-    }
-}
+/** The longest the phone holds a summary; matches `SUMMARY_HOLD_MILLIS` in `:app`. */
+const val SUMMARY_HOLD_MAX_MILLIS = 30 * 60_000L
 
-/** Pure: whether [dayLine] has nothing left to ask today. */
-fun dayLineDone(stats: WearStats): Boolean =
-    (stats.planTarget == 0 || stats.planCount >= stats.planTarget) &&
-        (stats.shutdownTarget == 0 || stats.shutdownCount >= stats.shutdownTarget)
+/** Said when a start is refused because the phone's summary is owed. */
+const val SUMMARY_OWED_TEXT = "First photograph your session summary on the phone."
+
+/**
+ * Pure: the phone's last session still owes its summary at [now], so no
+ * session starts on the watch (a new one would be the way to never write it).
+ * An end further off than the hold can last is a wrong clock on one side and
+ * holds nothing, so the watch can never be locked out for long.
+ */
+fun summaryHolds(untilMillis: Long, now: Long): Boolean =
+    untilMillis - now in 1..SUMMARY_HOLD_MAX_MILLIS
 
 /** Reads the latest [WearStats] the phone pushed onto the Data Layer. */
 object WearStatsReader {
@@ -101,10 +84,7 @@ object WearStatsReader {
                 asterisk = map.getBoolean(WearContract.KEY_ASTERISK, false),
                 focusMinutes = map.getInt(WearContract.KEY_FOCUS, 0),
                 focusGoal = map.getInt(WearContract.KEY_FOCUS_GOAL, 0),
-                planCount = map.getInt(WearContract.KEY_PLAN_COUNT, 0),
-                planTarget = map.getInt(WearContract.KEY_PLAN_TARGET, 0),
-                shutdownCount = map.getInt(WearContract.KEY_SHUTDOWN_COUNT, 0),
-                shutdownTarget = map.getInt(WearContract.KEY_SHUTDOWN_TARGET, 0),
+                summaryUntilMillis = map.getLong(WearContract.KEY_SUMMARY_UNTIL, 0L),
                 present = true,
                 updatedAtMillis = map.getLong(WearContract.KEY_UPDATED, 0L),
                 durations = WatchDurations(

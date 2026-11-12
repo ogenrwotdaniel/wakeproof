@@ -233,7 +233,8 @@ class AgendaActivity : ComponentActivity() {
                 finish()
             } else {
                 val reason = (currentOffer(event) as? AgendaOffer.Refused)?.reason
-                status = reason?.let(::refusalText) ?: "Couldn't start."
+                status = reason?.let(::refusalText)
+                    ?: if (WatchTimerEngine.summaryOwed(applicationContext)) SUMMARY_OWED_TEXT else "Couldn't start."
                 if (reason != null) refuse(event, reason) else showList()
             }
         }

@@ -44,11 +44,17 @@ object WatchTimerEngine {
 
     fun state(context: Context): WatchTimerState = WatchTimerStore.read(context)
 
+    /** The phone's last session still owes its summary: nothing starts here until it is in. */
+    suspend fun summaryOwed(context: Context): Boolean =
+        summaryHolds(WearStatsReader.read(context).summaryUntilMillis, System.currentTimeMillis())
+
     suspend fun start(context: Context, session: WatchSession) = mutate(context) {
         // Never over a running session: starting again would reset it.
         if (it.active) return@mutate it
         val stats = WearStatsReader.read(context)
-        WatchTimer.start(stats.durations, stats.subject, System.currentTimeMillis(), session)
+        val now = System.currentTimeMillis()
+        if (summaryHolds(stats.summaryUntilMillis, now)) return@mutate it
+        WatchTimer.start(stats.durations, stats.subject, now, session)
     }
 
     /**
@@ -62,8 +68,10 @@ object WatchTimerEngine {
             if (it.active) return@mutate it
             val now = System.currentTimeMillis()
             val minutes = WatchTimer.eventFocusMinutes(beginMillis, endMillis, now) ?: return@mutate it
+            val stats = WearStatsReader.read(context)
+            if (summaryHolds(stats.summaryUntilMillis, now)) return@mutate it
             started = true
-            WatchTimer.startExact(minutes, WearStatsReader.read(context).subject, now)
+            WatchTimer.startExact(minutes, stats.subject, now)
         }
         return started
     }
@@ -78,6 +86,7 @@ object WatchTimerEngine {
         var joined = false
         mutate(context) {
             if (it.active) return@mutate it
+            if (summaryOwed(context)) return@mutate it
             val state = WatchTimer.follow(session, System.currentTimeMillis()) ?: return@mutate it
             joined = true
             state

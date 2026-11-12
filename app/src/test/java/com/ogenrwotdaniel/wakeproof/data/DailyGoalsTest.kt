@@ -42,14 +42,14 @@ class DailyGoalsTest {
         val goals = dailyGoalsFrom(
             listOf(
                 alarm(AlarmType.PUSHUP),
-                alarm(AlarmType.PLAN),
-                alarm(AlarmType.PLAN)
+                alarm(AlarmType.REVIEW),
+                alarm(AlarmType.REVIEW)
             ),
             DayOfWeek.MONDAY
         )
         // The bug this replaced: targets were hardcoded, so a day could ask for
         // a verification no alarm would ever ring for.
-        assertEquals(DailyGoals(pushupTarget = 1, planTarget = 2), goals)
+        assertEquals(DailyGoals(pushupTarget = 1, reviewTarget = 2), goals)
     }
 
     @Test
@@ -61,27 +61,28 @@ class DailyGoalsTest {
                 alarm(AlarmType.PUSHUP, hour = 3, minute = 0), alarm(AlarmType.PUSHUP, hour = 4, minute = 0),
                 alarm(AlarmType.PUSHUP, hour = 5, minute = 30), alarm(AlarmType.PUSHUP, hour = 6, minute = 5),
                 alarm(AlarmType.PUSHUP, hour = 7, minute = 0),
-                // The fixed plan alarm and a copy of it ring once between them.
-                alarm(AlarmType.PLAN, hour = 8, minute = 20), alarm(AlarmType.PLAN, hour = 8, minute = 20),
-                alarm(AlarmType.PLAN, hour = 12, minute = 0)
+                // A retired kind asks for nothing, wherever it stands.
+                alarm(AlarmType.PLAN, hour = 8, minute = 20), alarm(AlarmType.WATER, hour = 12, minute = 0),
+                alarm(AlarmType.SHUTDOWN, hour = 19, minute = 30), alarm(AlarmType.REVIEW, hour = 18, minute = 0)
             ),
             DayOfWeek.MONDAY
         )
-        assertEquals(3, goals.pushupTarget)
-        assertEquals(2, goals.planTarget)
+        // 03:00 and the user's own 07:00; the removed 05:40 slot asks for none any more.
+        assertEquals(2, goals.pushupTarget)
+        assertEquals(1, goals.reviewTarget)
     }
 
     @Test
     fun `disabled and deleted alarms ask for nothing`() {
         val goals = dailyGoalsFrom(
             listOf(
-                alarm(AlarmType.PLAN),
-                alarm(AlarmType.PLAN, enabled = false),
-                alarm(AlarmType.PLAN, deleted = true)
+                alarm(AlarmType.REVIEW),
+                alarm(AlarmType.REVIEW, enabled = false),
+                alarm(AlarmType.REVIEW, deleted = true)
             ),
             DayOfWeek.MONDAY
         )
-        assertEquals(1, goals.planTarget)
+        assertEquals(1, goals.reviewTarget)
     }
 
     @Test
@@ -115,7 +116,7 @@ class DailyGoalsTest {
             listOf(alarm(AlarmType.MATH), alarm(AlarmType.PUSHUP)),
             DayOfWeek.MONDAY
         )
-        assertEquals(DailyGoals(pushupTarget = 1, planTarget = 0, mathTarget = 1), goals)
+        assertEquals(DailyGoals(pushupTarget = 1, reviewTarget = 0, mathTarget = 1), goals)
     }
 
     @Test
@@ -135,43 +136,43 @@ class DailyGoalsTest {
 
     @Test
     fun `a day meeting every goal is MET`() {
-        val goals = DailyGoals(pushupTarget = 1, planTarget = 2)
+        val goals = DailyGoals(pushupTarget = 1, reviewTarget = 2)
         val met = logs(
             log(GoalKind.PUSHUP),
-            log(GoalKind.PLAN),
-            log(GoalKind.PLAN)
+            log(GoalKind.REVIEW),
+            log(GoalKind.REVIEW)
         )
         assertEquals(DayOutcome.MET, dayOutcome(met, goals))
     }
 
     @Test
     fun `an unverified plan still counts toward the target`() {
-        val goals = DailyGoals(pushupTarget = 0, planTarget = 1)
-        val honor = logs(log(GoalKind.PLAN, CompletionStatus.UNVERIFIED))
+        val goals = DailyGoals(pushupTarget = 0, reviewTarget = 1)
+        val honor = logs(log(GoalKind.REVIEW, CompletionStatus.UNVERIFIED))
         assertEquals(DayOutcome.MET, dayOutcome(honor, goals))
     }
 
     @Test
     fun `an unverified pushup does not count`() {
-        val goals = DailyGoals(pushupTarget = 1, planTarget = 0)
+        val goals = DailyGoals(pushupTarget = 1, reviewTarget = 0)
         val honor = logs(log(GoalKind.PUSHUP, CompletionStatus.UNVERIFIED))
         assertEquals(DayOutcome.MISSED, dayOutcome(honor, goals))
     }
 
     @Test
     fun `an emergency dismiss anywhere in the day misses it`() {
-        val goals = DailyGoals(pushupTarget = 1, planTarget = 1)
+        val goals = DailyGoals(pushupTarget = 1, reviewTarget = 1)
         val skipped = logs(
             log(GoalKind.PUSHUP),
-            log(GoalKind.PLAN),
-            log(GoalKind.PLAN, CompletionStatus.SKIPPED)
+            log(GoalKind.REVIEW),
+            log(GoalKind.REVIEW, CompletionStatus.SKIPPED)
         )
         assertEquals(DayOutcome.MISSED, dayOutcome(skipped, goals))
     }
 
     @Test
     fun `a math target is met by a solved run`() {
-        val goals = DailyGoals(pushupTarget = 0, planTarget = 0, mathTarget = 1)
+        val goals = DailyGoals(pushupTarget = 0, reviewTarget = 0, mathTarget = 1)
         assertEquals(DayOutcome.MET, dayOutcome(logs(log(GoalKind.MATH)), goals))
         assertEquals(DayOutcome.MISSED, dayOutcome(emptyList(), goals))
     }
@@ -183,8 +184,8 @@ class DailyGoalsTest {
 
     @Test
     fun `extra completions beyond the target still count as met`() {
-        val goals = DailyGoals(pushupTarget = 0, planTarget = 1)
-        val plenty = logs(log(GoalKind.PLAN), log(GoalKind.PLAN), log(GoalKind.PLAN))
+        val goals = DailyGoals(pushupTarget = 0, reviewTarget = 1)
+        val plenty = logs(log(GoalKind.REVIEW), log(GoalKind.REVIEW), log(GoalKind.REVIEW))
         assertEquals(DayOutcome.MET, dayOutcome(plenty, goals))
     }
 

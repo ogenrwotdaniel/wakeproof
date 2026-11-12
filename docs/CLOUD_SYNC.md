@@ -50,6 +50,12 @@ phone over the Data Layer, and the phone syncs them.
   its server stamp passes this device's cursor — so new blocks appear within
   seconds, through the one code path that writes downloaded rows.
 
+* **Summary hold.** `live/summaryHold` (written by the phone, `LiveSummaryHold`):
+  `until` (wall-clock millis, 0 = settled) and `installId`. While the phone
+  owes a session summary the tablet starts no session. Its own document,
+  because a tablet following the session rewrites `live/focusSession` at the
+  session's end.
+
 The rules need no change: `live/watchTimer` and `completion_logs` both sit under
 `users/{uid}/{collection}/{docId}`.
 

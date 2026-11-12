@@ -14,14 +14,10 @@ import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import com.ogenrwotdaniel.wakeproof.ui.navigation.AlarmRingingRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.MathVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.PushupVerifyRoute
-import com.ogenrwotdaniel.wakeproof.ui.navigation.PlanVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.ReviewVerifyRoute
-import com.ogenrwotdaniel.wakeproof.ui.navigation.ShutdownVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.verify.MathVerifyScreen
 import com.ogenrwotdaniel.wakeproof.ui.verify.PushupVerifyScreen
-import com.ogenrwotdaniel.wakeproof.ui.verify.PlanVerifyScreen
 import com.ogenrwotdaniel.wakeproof.ui.verify.ReviewVerifyScreen
-import com.ogenrwotdaniel.wakeproof.ui.verify.ShutdownVerifyScreen
 
 /**
  * Navigation for the lock-screen alarm flow: ringing → the verification screen
@@ -54,9 +50,7 @@ fun AlarmFlowNavGraph(
                 alarm = alarm,
                 onStartVerification = { type ->
                     when (type) {
-                        AlarmType.PLAN -> navController.navigate(PlanVerifyRoute)
                         AlarmType.REVIEW -> navController.navigate(ReviewVerifyRoute)
-                        AlarmType.SHUTDOWN -> navController.navigate(ShutdownVerifyRoute)
                         AlarmType.MATH -> {
                             reviewStandInFor = NO_STAND_IN
                             navController.navigate(MathVerifyRoute)
@@ -89,24 +83,6 @@ fun AlarmFlowNavGraph(
                 onSnooze = { viewModel.snooze(onSnooze) },
                 strict = strict,
                 goalKind = if (reviewStandInFor == alarmId) GoalKind.REVIEW else GoalKind.MATH
-            )
-        }
-        composable<PlanVerifyRoute> {
-            PlanVerifyScreen(
-                onVerified = onVerified,
-                onFinish = onFinish,
-                onEmergencyDismiss = onEmergencyDismiss,
-                snoozesLeft = snoozesLeft,
-                onSnooze = { viewModel.snooze(onSnooze) }
-            )
-        }
-        composable<ShutdownVerifyRoute> {
-            ShutdownVerifyScreen(
-                onVerified = onVerified,
-                onFinish = onFinish,
-                onEmergencyDismiss = onEmergencyDismiss,
-                snoozesLeft = snoozesLeft,
-                onSnooze = { viewModel.snooze(onSnooze) }
             )
         }
         composable<ReviewVerifyRoute> {

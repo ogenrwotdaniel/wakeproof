@@ -1,12 +1,5 @@
 package com.ogenrwotdaniel.wakeproof.study
 
-import com.ogenrwotdaniel.wakeproof.plan.DayReview
-import com.ogenrwotdaniel.wakeproof.plan.DayReviews
-import com.ogenrwotdaniel.wakeproof.plan.PlanDone
-import com.ogenrwotdaniel.wakeproof.plan.cleanTopThree
-import com.ogenrwotdaniel.wakeproof.plan.topThreeFor
-import com.ogenrwotdaniel.wakeproof.plan.withRestoredReviews
-import com.ogenrwotdaniel.wakeproof.plan.withReview
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -44,34 +37,7 @@ class RecallStoreTest {
     }
 
     @Test
-    fun `tomorrow's top three is trimmed, without blanks, at most three`() {
-        assertEquals(listOf("Lab report", "Ch. 4"), cleanTopThree(listOf(" Lab report ", "", "Ch. 4")))
-        assertEquals(3, cleanTopThree(listOf("a", "b", "c", "d")).size)
-    }
-
-    @Test
-    fun `a day's review replaces an earlier one, and today's top three is yesterday evening's`() {
-        var all = withReview(DayReviews(), DayReview(100, PlanDone.SOME, listOf("old")))
-        all = withReview(all, DayReview(99, PlanDone.ALL, listOf("x")))
-        all = withReview(all, DayReview(100, PlanDone.MOST, listOf("Lab report", "Ch. 4")))
-        assertEquals(listOf(100L, 99L), all.reviews.map { it.epochDay })
-        assertEquals(PlanDone.MOST, all.reviews.first().done)
-        assertEquals(listOf("Lab report", "Ch. 4"), topThreeFor(all, day = 101))
-        assertTrue(topThreeFor(all, day = 103).isEmpty())
-    }
-
-    @Test
-    fun `a restored backup wins the days and notes it holds and leaves the rest`() {
-        val here = DayReviews(
-            listOf(DayReview(11, PlanDone.SOME, listOf("kept")), DayReview(10, PlanDone.NONE, listOf("old")))
-        )
-        val merged = withRestoredReviews(
-            here, listOf(DayReview(10, PlanDone.ALL, listOf("from backup")), DayReview(9, PlanDone.MOST))
-        )
-        assertEquals(listOf(11L, 10L, 9L), merged.reviews.map { it.epochDay })
-        assertEquals(listOf("from backup"), merged.reviews.first { it.epochDay == 10L }.topThree)
-        assertEquals(listOf("kept"), merged.reviews.first { it.epochDay == 11L }.topThree)
-
+    fun `a restored backup wins the notes it holds and leaves the rest`() {
         fun note(id: String, text: String, at: Long) = RecallNote(id, text, "Physics", 20_000L, at)
         val state = RecallState(pending = asked.pending, notes = listOf(note("a", "here", 5), note("b", "mine", 9)))
         val notes = withRestoredNotes(state, listOf(note("a", "backup", 5), note("c", "older", 1)))

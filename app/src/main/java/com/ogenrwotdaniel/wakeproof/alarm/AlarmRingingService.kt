@@ -268,11 +268,9 @@ class AlarmRingingService : Service() {
 
     private fun contentTextFor(alarm: Alarm) = when (alarm.type) {
         AlarmType.PUSHUP -> "Pushups to silence it. No shortcuts."
-        AlarmType.PLAN -> "Write today's plan and photograph it."
         AlarmType.REVIEW -> "Answer your due flashcards to silence it."
-        AlarmType.SHUTDOWN -> "Review today's plan and write tomorrow's top three."
         AlarmType.MATH -> "Solve the sums to silence it."
-        AlarmType.CUSTOM, AlarmType.WATER -> "Complete your verification."
+        AlarmType.CUSTOM, AlarmType.WATER, AlarmType.PLAN, AlarmType.SHUTDOWN -> "Complete your verification."
     }
 
     companion object {

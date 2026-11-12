@@ -16,10 +16,6 @@ data class AlarmRingingRoute(val alarmId: Long = -1L)
 @Serializable
 data object PushupVerifyRoute
 
-/** The day-plan alarm: photograph today's handwritten plan. */
-@Serializable
-data object PlanVerifyRoute
-
 /** The review alarm: a run of due flashcards. */
 @Serializable
 data object ReviewVerifyRoute
@@ -45,18 +41,11 @@ data object FlashcardsRoute
 @Serializable
 data object ForestRoute
 
-/** The evening review alarm: the day's plan judged, tomorrow's top three written. */
+/** Photographing the summary a focus session asks for at its end. */
 @Serializable
-data object ShutdownVerifyRoute
+data object SummaryCaptureRoute
 
-/** The evening review opened from the library, outside an alarm. */
+/** The library of session-summary photos. */
 @Serializable
-data object ShutdownNowRoute
+data object SessionSummariesRoute
 
-/** The library of day-plan photos. */
-@Serializable
-data object DayPlansRoute
-
-/** Photographing a plan from the library, outside an alarm. */
-@Serializable
-data object PlanCaptureRoute

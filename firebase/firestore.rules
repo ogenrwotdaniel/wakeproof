@@ -13,7 +13,7 @@ service cloud.firestore {
 
     // Only the collections the phone, tablet, watch and laptop write, so a bug or
     // a stolen token cannot grow the tree into new places. Keep in step with
-    // SyncTable.kt, SyncEngine, LiveFocusSession, LiveCloudFeed, StudyUsageSync,
+    // SyncTable.kt, SyncEngine, LiveFocusSession, LiveSummaryHold, LiveCloudFeed, StudyUsageSync,
     // ClipCloud, wear/CloudDocuments.kt and tools/clip/clipsync/cloud.py.
     function owner(userId) {
       return request.auth != null && request.auth.uid == userId;

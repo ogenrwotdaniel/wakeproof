@@ -45,15 +45,6 @@ class NightRulesTest {
     }
 
     @Test
-    fun `wind-down once, in its half hour before the wall`() {
-        assertTrue(windDownDue(hm(19, 30), sentOnDay = 9, today = 10))
-        assertTrue(windDownDue(hm(19, 59), sentOnDay = 9, today = 10))
-        assertFalse(windDownDue(hm(19, 45), sentOnDay = 10, today = 10))
-        assertFalse(windDownDue(hm(19, 29), sentOnDay = 9, today = 10))
-        assertFalse(windDownDue(hm(20, 0), sentOnDay = 9, today = 10))
-    }
-
-    @Test
     fun `lights out once, from 20 00`() {
         assertTrue(lightsOutDue(hm(20, 0), sentOnDay = 9, today = 10))
         assertTrue(lightsOutDue(hm(20, 29), sentOnDay = 9, today = 10))

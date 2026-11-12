@@ -45,18 +45,33 @@ class AlarmInitializer @Inject constructor(
      * deletes alarms of a retired kind ([retiredAlarms]).
      */
     suspend fun enforceStrict() {
+        dropRemovedSlots()
         pinSlots()
-        // After the locked slots, so the old 08:20 water row has already become
-        // the day plan. Here rather than in [initialize] because a sync pull
-        // calls only this, and water alarms arrive by sync.
-        retiredAlarms(repository.getAllAlarmsIncludingDeleted(), StrictAlarm.syncIds(context))
+        // Here rather than in [initialize] because a sync pull calls only this,
+        // and water and day-plan alarms arrive by sync.
+        retiredAlarms(repository.getAllAlarmsIncludingDeleted())
             .forEach { repository.deleteAlarm(it) }
+    }
+
+    /**
+     * Deletes the rows this device locked for slots that no longer exist
+     * ([StrictAlarm.DROPPED_KEYS]). Before [pinSlots], and on any device that
+     * holds one, ringing or not. The keys are forgotten only once every row is
+     * gone, so a delete that failed is tried again at the next reconcile.
+     */
+    private suspend fun dropRemovedSlots() {
+        val dropped = StrictAlarm.droppedSyncIds(context)
+        if (dropped.isEmpty()) return
+        repository.getAllAlarmsIncludingDeleted()
+            .filter { it.syncId in dropped && !it.deleted }
+            .forEach { repository.deleteAlarm(it) }
+        StrictAlarm.forgetDropped(context)
     }
 
     private suspend fun pinSlots() {
         if (!devicePolicy.ringsAlarms) return
         WearAlarmSync.pushSchedule(context, StrictAlarm.hardMinutes)
-        StrictAlarm.SLOTS.forEachIndexed { index, slot ->
+        StrictAlarm.PINNED.forEach { (index, slot) ->
             val all = repository.getAllAlarmsIncludingDeleted()
             val syncId = StrictAlarm.syncId(context, index)
             var row = all.firstOrNull { it.syncId == syncId }
@@ -64,10 +79,10 @@ class AlarmInitializer @Inject constructor(
                 row = strictAlarmCandidate(all, slot, taken = StrictAlarm.syncIds(context)) ?: run {
                     repository.addAlarm(slot.type, slot.hour, slot.minute, strictLabel(slot))
                     repository.getAllAlarmsIncludingDeleted().maxByOrNull { it.id }
-                } ?: return@forEachIndexed
+                } ?: return@forEach
             }
             StrictAlarm.adopt(context, index, row)
-            val fixed = strictAlarmFixed(row, slot, System.currentTimeMillis()) ?: return@forEachIndexed
+            val fixed = strictAlarmFixed(row, slot, System.currentTimeMillis()) ?: return@forEach
             repository.updateAlarm(fixed)
             scheduler.schedule(fixed)
         }

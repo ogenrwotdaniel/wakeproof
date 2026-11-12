@@ -19,15 +19,17 @@ import java.util.UUID
  * bottle). The name stays only so rows, cloud documents and backups written
  * before then still load; such an alarm is never armed and is removed at the
  * next reconcile ([com.ogenrwotdaniel.wakeproof.alarm.retiredAlarms]).
- * [PLAN] is a photo of the day's handwritten plan, [REVIEW] a run of due
- * flashcards, [SHUTDOWN] the evening review of that plan.
+ * [PLAN] (a photo of the day's handwritten plan) is retired the same way
+ * since 2026-11-13: the user writes a summary after every focus session
+ * instead, and so is [SHUTDOWN] (the evening review). [REVIEW] is a run of due
+ * flashcards.
  */
 @Serializable
 enum class AlarmType {
     PUSHUP, WATER, CUSTOM, MATH, PLAN, REVIEW, SHUTDOWN;
 
     /** No longer offered, armed or counted. */
-    val retired: Boolean get() = this == WATER
+    val retired: Boolean get() = this == WATER || this == PLAN || this == SHUTDOWN
 }
 
 /**

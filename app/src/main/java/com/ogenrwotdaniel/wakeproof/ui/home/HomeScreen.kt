@@ -65,7 +65,7 @@ fun HomeScreen(
     onOpenAgenda: () -> Unit,
     onOpenFlashcards: () -> Unit,
     onOpenForest: () -> Unit,
-    onOpenPlans: () -> Unit,
+    onOpenSummaries: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -76,7 +76,6 @@ fun HomeScreen(
     val nextMath by viewModel.nextMathAlarm.collectAsStateWithLifecycle()
     val focusGoal by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
     val goalToday by viewModel.focusGoal.collectAsStateWithLifecycle()
-    val topThree by viewModel.topThree.collectAsStateWithLifecycle()
     val exams by viewModel.exams.collectAsStateWithLifecycle()
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     val timer by viewModel.timer.collectAsStateWithLifecycle()
@@ -109,6 +108,34 @@ fun HomeScreen(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
+
+            // A finished session still owes its summary: said where the app
+            // opens too, because the walls are up and Back from the timer lands here.
+            val summaryState by viewModel.summary.collectAsStateWithLifecycle()
+            val summaryNow = com.ogenrwotdaniel.wakeproof.ui.pomodoro.rememberSummaryNow(summaryState)
+            val summaryContext = androidx.compose.ui.platform.LocalContext.current
+            val bootCount = androidx.compose.runtime.remember {
+                com.ogenrwotdaniel.wakeproof.study.steadyClock(summaryContext).bootCount
+            }
+            if (com.ogenrwotdaniel.wakeproof.study.summaryDue(
+                    summaryState, summaryNow,
+                    com.ogenrwotdaniel.wakeproof.study.SteadyClock(android.os.SystemClock.elapsedRealtime(), bootCount)
+                ) != null
+            ) {
+                androidx.compose.material3.Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Session summary owed", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "Write down everything you studied, then photograph the page. " +
+                                "Your apps stay shut until the photo is kept.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Button(onClick = onOpenPomodoro, modifier = Modifier.fillMaxWidth()) {
+                            Text("Open the focus timer")
+                        }
+                    }
+                }
+            }
 
             // A countdown running in the foreground service, surfaced where the
             // app opens. Above the goal cards because it is the only thing on
@@ -164,22 +191,6 @@ fun HomeScreen(
             // alone, so this is the card the day is actually won on.
             FocusGoalCard(focusMinutes = today.focusMinutes, goalMinutes = focusGoal)
             ExamTargetNote(goalToday)
-            if (topThree.isNotEmpty()) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(text = "Today's top three", style = MaterialTheme.typography.titleMedium)
-                        topThree.forEachIndexed { index, item ->
-                            Text(text = "${index + 1}. $item", style = MaterialTheme.typography.bodyLarge)
-                        }
-                        Text(
-                            text = "From last evening's review",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
             StatusCard(
                 title = "Pushups",
                 value = when {
@@ -194,27 +205,6 @@ fun HomeScreen(
                 },
                 highlight = today.pushupDone
             )
-            // A plan photographed from the library counts too, so the card shows
-            // one even on a device or a day with no plan alarm.
-            if (today.planTarget > 0 || today.planCount > 0) {
-                StatusCard(
-                    title = "Day plan",
-                    value = if (today.planCount > 0) "Done ✓" else "Pending",
-                    // The log syncs, the photo does not: no promise about where it is.
-                    detail = if (today.planCount > 0) "Written and photographed today"
-                    else "Write it down and photograph it",
-                    highlight = today.planCount > 0
-                )
-            }
-            if (today.shutdownTarget > 0 || today.shutdownCount > 0) {
-                StatusCard(
-                    title = "Evening review",
-                    value = if (today.shutdownCount > 0) "Done ✓" else "Pending",
-                    detail = if (today.shutdownCount > 0) "Day closed, tomorrow planned"
-                    else "What got done, and tomorrow's top three",
-                    highlight = today.shutdownCount > 0
-                )
-            }
             if (today.reviewTarget > 0 || today.reviewCount > 0) {
                 StatusCard(
                     title = "Flashcard review",
@@ -270,7 +260,7 @@ fun HomeScreen(
             NavigationRow("Forest", "A tree for every focus block", onOpenForest)
             NavigationRow("Flashcards", "Review what's due today", onOpenFlashcards)
             NavigationRow("Agenda", "Today's calendar events", onOpenAgenda)
-            NavigationRow("Day plans", "Photos of each day's written plan", onOpenPlans)
+            NavigationRow("Session summaries", "The page written after each focus session", onOpenSummaries)
             NavigationRow("Screen time", "Usage and daily app limits", onOpenUsage)
             NavigationRow("Settings", "Alarms, focus, sync, data", onOpenSettings)
             NavigationRow("Setup check", "Permissions and reliability", onOpenOnboarding)

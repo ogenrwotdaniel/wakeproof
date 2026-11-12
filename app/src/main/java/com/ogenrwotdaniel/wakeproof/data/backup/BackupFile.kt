@@ -5,7 +5,6 @@ import com.ogenrwotdaniel.wakeproof.data.db.CompletionLog
 import com.ogenrwotdaniel.wakeproof.data.db.Exam
 import com.ogenrwotdaniel.wakeproof.data.db.Flashcard
 import com.ogenrwotdaniel.wakeproof.data.db.ParkedThought
-import com.ogenrwotdaniel.wakeproof.plan.DayReview
 import com.ogenrwotdaniel.wakeproof.study.RecallNote
 import kotlinx.serialization.Serializable
 
@@ -43,16 +42,17 @@ data class BackupFile(
     val exams: List<Exam> = emptyList(),
     val parkedThoughts: List<ParkedThought> = emptyList(),
     /**
-     * The evening reviews and focus-block recall notes: small files on one
-     * device that sync never carries, so without the backup a reinstall loses
-     * them. The day-plan photos are not here; they stay on the device.
+     * The focus-block recall notes: a small file on one device that sync never
+     * carries, so without the backup a reinstall loses them. The
+     * session-summary photos are not here; they stay on the device. (A file
+     * from before 2026-11-13 may also hold `dayReviews`, the evening reviews
+     * removed that day: read past and dropped.)
      */
-    val dayReviews: List<DayReview> = emptyList(),
     val recallNotes: List<RecallNote> = emptyList()
 ) {
     val totalRows: Int
         get() = alarms.size + completionLogs.size + flashcards.size +
-            exams.size + parkedThoughts.size + dayReviews.size + recallNotes.size
+            exams.size + parkedThoughts.size + recallNotes.size
 }
 
 /**

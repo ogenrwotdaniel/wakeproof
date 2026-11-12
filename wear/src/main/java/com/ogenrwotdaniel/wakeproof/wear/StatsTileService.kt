@@ -27,8 +27,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.guava.future
 
 /**
- * A Wear OS Tile showing today's WakeProof progress — streak, focus vs goal,
- * the day plan and the evening review, read from the snapshot the phone mirrors onto the Data Layer,
+ * A Wear OS Tile showing today's WakeProof progress — streak and focus vs goal,
+ * read from the snapshot the phone mirrors onto the Data Layer,
  * with focus blocks finished on the watch but not yet synced added on top.
  *
  * While the watch's own timer runs, the tile shows the phase and the wall-clock
@@ -119,20 +119,6 @@ class StatsTileService : TileService() {
                     if (focusDone) COLOR_GOOD else COLOR_TEXT
                 )
             )
-            // Only on days an alarm asks for a plan or a review; a permanent line would be noise.
-            dayLine(stats)?.let { line ->
-                column.addContent(spacer())
-                column.addContent(
-                    text(
-                        line,
-                        // The two-alarm line is longer than the row was sized
-                        // for; smaller type keeps it on one line of a round face.
-                        if (line.length > DAY_LINE_TITLE_CHARS) Typography.TYPOGRAPHY_CAPTION1
-                        else Typography.TYPOGRAPHY_TITLE3,
-                        if (dayLineDone(stats)) COLOR_GOOD else COLOR_TEXT
-                    )
-                )
-            }
         }
         if (today.unsyncedBlocks > 0) {
             column.addContent(spacer())
@@ -186,8 +172,6 @@ class StatsTileService : TileService() {
     private companion object {
         const val RESOURCES_VERSION = "1"
 
-        /** "Day plan pending", the longest line the title size was tried with. */
-        const val DAY_LINE_TITLE_CHARS = 16
         const val REFRESH_MS = 30 * 60 * 1000L
 
         const val COLOR_TEXT = 0xFFFFFFFF.toInt()

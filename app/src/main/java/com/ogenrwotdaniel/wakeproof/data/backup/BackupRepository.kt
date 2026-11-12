@@ -3,7 +3,6 @@ package com.ogenrwotdaniel.wakeproof.data.backup
 import androidx.room.withTransaction
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer
 import com.ogenrwotdaniel.wakeproof.data.db.WakeProofDatabase
-import com.ogenrwotdaniel.wakeproof.plan.DayReviewStore
 import com.ogenrwotdaniel.wakeproof.study.RecallStore
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,7 +18,6 @@ import kotlinx.serialization.json.Json
 class BackupRepository @Inject constructor(
     private val database: WakeProofDatabase,
     private val alarmInitializer: AlarmInitializer,
-    private val dayReviewStore: DayReviewStore,
     private val recallStore: RecallStore
 ) {
     private val json = Json {
@@ -41,7 +39,6 @@ class BackupRepository @Inject constructor(
                 flashcards = database.flashcardDao().backupAll(),
                 exams = database.examDao().backupAll(),
                 parkedThoughts = database.parkedThoughtDao().backupAll(),
-                dayReviews = dayReviewStore.load().reviews,
                 recallNotes = recallStore.load().notes
             )
             json.encodeToString(BackupFile.serializer(), backup)
@@ -80,8 +77,7 @@ class BackupRepository @Inject constructor(
             database.parkedThoughtDao().restoreAll(backup.parkedThoughts)
         }
         // After the database, so a file that fails there restores nothing at
-        // all. Merged like the rows: the backup wins a day or a note it holds.
-        dayReviewStore.restore(backup.dayReviews)
+        // all. Merged like the rows: the backup wins a note it holds.
         recallStore.restore(backup.recallNotes)
         alarmInitializer.initialize()
         backup

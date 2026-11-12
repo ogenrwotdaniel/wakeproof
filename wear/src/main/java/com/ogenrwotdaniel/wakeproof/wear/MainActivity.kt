@@ -295,7 +295,13 @@ class MainActivity : ComponentActivity() {
         // The same session on the wrist: it buzzes here at every phase even with
         // the phone left behind, and a block finished on both is recorded once.
         timer.session?.takeIf { timer.running }?.let { session ->
-            addButton("Continue here") { WatchTimerEngine.follow(applicationContext, session) }
+            addButton("Continue here") {
+                if (WatchTimerEngine.summaryOwed(applicationContext)) {
+                    android.widget.Toast.makeText(this, SUMMARY_OWED_TEXT, android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    WatchTimerEngine.follow(applicationContext, session)
+                }
+            }
         }
         addTodayButton()
     }
@@ -340,7 +346,13 @@ class MainActivity : ComponentActivity() {
     private fun showIdleControls() {
         buttons.removeAllViews()
         for (session in WatchSession.entries) {
-            addButton(session.label) { WatchTimerEngine.start(applicationContext, session) }
+            addButton(session.label) {
+                if (WatchTimerEngine.summaryOwed(applicationContext)) {
+                    android.widget.Toast.makeText(this, SUMMARY_OWED_TEXT, android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    WatchTimerEngine.start(applicationContext, session)
+                }
+            }
         }
         addTodayButton()
         addPhoneButton("Start on phone", TimerCommands.START)
@@ -385,7 +397,6 @@ class MainActivity : ComponentActivity() {
                 append("🔥 ${s.streak}-day streak\n\n")
                 append("Focus ${formatFocusMinutes(today.minutes)}")
                 if (s.focusGoal > 0) append(" / ${formatFocusMinutes(s.focusGoal)}")
-                dayLine(s)?.let { append("\n").append(it) }
             } else {
                 append("Focus today ${formatFocusMinutes(today.minutes)}")
             }
@@ -457,6 +468,13 @@ class MainActivity : ComponentActivity() {
         }
         button.setOnClickListener {
             scope.launch {
+                // The phone would refuse it with a message nobody at the watch sees.
+                if (command == TimerCommands.START && WatchTimerEngine.summaryOwed(applicationContext)) {
+                    android.widget.Toast.makeText(
+                        this@MainActivity, SUMMARY_OWED_TEXT, android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
                 setButtonsEnabled(false)
                 val delivered = TimerCommands.send(applicationContext, command)
                 if (!delivered) {

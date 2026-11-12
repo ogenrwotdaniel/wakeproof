@@ -109,6 +109,8 @@ class AppBlockService : Service() {
     @Inject lateinit var liveFocusSession: LiveFocusSession
     @Inject lateinit var liveCloudFeed: LiveCloudFeed
     @Inject lateinit var alarmDevicePolicy: com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
+    @Inject lateinit var summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
+    @Inject lateinit var liveSummaryHold: com.ogenrwotdaniel.wakeproof.data.sync.LiveSummaryHold
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -313,6 +315,8 @@ class AppBlockService : Service() {
         wallPrefs(this).edit().putBoolean(KEY_ARMED, true).apply()
         browsers = AppGate.browserPackages(this)
         StrictAlarm.resumeIfPending(this)
+        // A summary still owed when the process died goes on holding the wall.
+        reloadSummary()
         // WakeProof Clip: LAN server, mDNS, cloud listener, screenshots — all
         // self-contained, and idle unless the feature is on and paired.
         com.ogenrwotdaniel.wakeproof.clip.ClipRuntime.start(this, scope)
@@ -427,6 +431,12 @@ class AppBlockService : Service() {
                     examWeekHeld(emptyList(), held + listOfNotNull(examWeek?.takeIf { it.epochDay >= today }), today)
                 }
                 delay(EXAM_WEEK_REFRESH_MILLIS)
+            }
+        }
+        // The phone's owed summary, heard here so the tablet starts no session through it.
+        scope.launch {
+            liveSummaryHold.peerUntil().collect {
+                com.ogenrwotdaniel.wakeproof.data.sync.PeerSummaryHold.untilMillis = it
             }
         }
         scope.launch {
@@ -726,6 +736,37 @@ class AppBlockService : Service() {
     private fun anySessionActive(): Boolean =
         PomodoroTimerService.state.value.active || otherDeviceSessionActive()
 
+    /** The summary notice was looked for once since this service started. */
+    private var summaryNoticeChecked = false
+
+    /**
+     * Reads the owed summary. A restart removes every notification, so the
+     * first reading puts the notice back when the summary is still owed: once,
+     * or each screen-on would ring it again.
+     */
+    private fun reloadSummary() {
+        scope.launch {
+            runCatching {
+                val state = summaryStore.load()
+                if (summaryNoticeChecked) return@runCatching
+                summaryNoticeChecked = true
+                val owed = summaryStore.owed(state) ?: return@runCatching
+                val manager = getSystemService(android.app.NotificationManager::class.java)
+                if (manager.activeNotifications.none { it.id == com.ogenrwotdaniel.wakeproof.study.SUMMARY_NOTIFICATION_ID }) {
+                    PomodoroTimerService.postSummaryNotice(this@AppBlockService, owed.askedAtMillis)
+                }
+            }
+        }
+    }
+
+    /**
+     * A session that ended here still owes its summary photo: the focus wall
+     * holds through it ([gateVerdict]), or "mandatory" would mean ten minutes
+     * on a feed.
+     */
+    private fun summaryOwed(): Boolean =
+        summaryStore.owed() != null
+
     /** A session on one of the user's OTHER devices — what walls (and quiets) this one. */
     private fun otherDeviceSessionActive(): Boolean {
         val now = System.currentTimeMillis()
@@ -756,6 +797,9 @@ class AppBlockService : Service() {
             essential = current in untouchable &&
                 !(current in FOCUS_WALLED_ESSENTIALS && anySessionActive()),
             focusSessionActive = anySessionActive(),
+            // Never for a notification: a removed one is lost for good, and the
+            // summary shuts apps for half an hour, it does not cost a bank alert.
+            summaryOwed = !forNotification && summaryOwed(),
             onFocusList = current in focusList,
             capSpent = capSpent,
             gated = gated,
@@ -826,6 +870,12 @@ class AppBlockService : Service() {
                 "$label is shut right now. The phone and SMS always work."
             )
             GateVerdict.FOCUS_WALL -> BlockedActivity.focusIntent(this, label)
+            GateVerdict.SUMMARY_WALL -> BlockedActivity.ruleIntent(
+                this,
+                "Session summary",
+                "$label stays shut until your session summary is photographed on the focus " +
+                    "timer, or half an hour after the session ended. The phone always works."
+            )
             GateVerdict.CAP_WALL -> BlockedActivity.intent(
                 context = this,
                 label = label,
@@ -920,7 +970,8 @@ class AppBlockService : Service() {
         // judged safely, so it opens, and the tick walls it once they are in. The
         // first readings can take 10 s after boot, so only a session, which walls
         // nearly everything, is worth waiting for; any other tap opens at once.
-        if (!defaultsLoaded.isCompleted && !anySessionActive()) return null
+        // An owed summary shuts as much as a session and waits the same way.
+        if (!defaultsLoaded.isCompleted && !anySessionActive() && !summaryOwed()) return null
         withTimeoutOrNull(READY_TIMEOUT_MILLIS) { awaitReady() }
         if (!defaultsLoaded.isCompleted) return null
         val limit = blockedLimit(packageName)
@@ -1193,7 +1244,7 @@ class AppBlockService : Service() {
     private var wallDownAnnounced = false
 
     /**
-     * The wind-down reminder and the charging nag ([NightRules]). The nag only
+     * The lights-out notice and the charging nag ([NightRules]). The nag only
      * where alarms ring: the tablet going flat costs nothing at the alarm.
      */
     private fun nightReminders() {
@@ -1201,19 +1252,10 @@ class AppBlockService : Service() {
         val minuteOfDay = LocalTime.now().let { it.hour * 60 + it.minute }
         val today = LocalDate.now().toEpochDay()
         val prefs = nightPrefs
-        if (windDownDue(minuteOfDay, prefs.getLong(KEY_WIND_DOWN_DAY, -1L), today)) {
-            prefs.edit().putLong(KEY_WIND_DOWN_DAY, today).apply()
-            nightNotice(
-                WIND_DOWN_NOTIFICATION_ID,
-                "Wind down",
-                "Everything but calls and your alarms shuts at ${clock(SLEEP_START_MINUTES)}, " +
-                    "and that is bedtime too. Finish up and get ready."
-            )
-        }
         if (lightsOutDue(minuteOfDay, prefs.getLong(KEY_LIGHTS_OUT_DAY, -1L), today)) {
             prefs.edit().putLong(KEY_LIGHTS_OUT_DAY, today).apply()
             nightNotice(
-                WIND_DOWN_NOTIFICATION_ID,
+                LIGHTS_OUT_NOTIFICATION_ID,
                 "Lights out",
                 "It's ${clock(BEDTIME_MINUTES)}. Phone on charge, into bed. " +
                     "Your alarm is at ${clock(SLEEP_END_MINUTES)}."
@@ -1269,7 +1311,7 @@ class AppBlockService : Service() {
             quietChannel()
         } else {
             NotificationChannel(NIGHT_CHANNEL_ID, "Bedtime", NotificationManager.IMPORTANCE_HIGH)
-                .apply { description = "Wind-down and charging reminders before the morning alarm" }
+                .apply { description = "Lights-out and charging reminders before the morning alarm" }
         }
         manager.createNotificationChannel(channel)
         manager.notify(
@@ -1801,7 +1843,6 @@ class AppBlockService : Service() {
         private const val HOUSEKEEPING_EVERY_MILLIS = 5 * 60_000L
         private const val MEDIA_CHECK_MILLIS = 2_000L
         private const val NIGHT_PREFS = "night_reminders"
-        private const val KEY_WIND_DOWN_DAY = "wind_down_day"
         /** Often enough that a new exam or midnight takes hold within a few minutes. */
         private const val EXAM_WEEK_REFRESH_MILLIS = 5 * 60_000L
         private const val KEY_EXAMS_HELD = "exam_weeks_held"
@@ -1813,7 +1854,7 @@ class AppBlockService : Service() {
         private const val KEY_CAMERA_NAG_AT = "camera_nag_at"
         private const val NIGHT_CHANNEL_ID = "wakeproof_night"
         private const val NIGHT_QUIET_CHANNEL_ID = "wakeproof_night_quiet"
-        private const val WIND_DOWN_NOTIFICATION_ID = 71
+        private const val LIGHTS_OUT_NOTIFICATION_ID = 71
         private const val CHARGE_NOTIFICATION_ID = 72
         private const val CAMERA_NOTIFICATION_ID = 73
         private const val READY_TIMEOUT_MILLIS = 5_000L

@@ -5,8 +5,6 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionLog
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
-import com.ogenrwotdaniel.wakeproof.plan.DayReview
-import com.ogenrwotdaniel.wakeproof.plan.PlanDone
 import com.ogenrwotdaniel.wakeproof.study.RecallNote
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -77,17 +75,22 @@ class BackupFileTest {
     }
 
     @Test
-    fun `evening reviews and recall notes travel in the backup, and an older file has none`() {
+    fun `recall notes travel in the backup, and older files still load`() {
         val withNotes = backup.copy(
-            dayReviews = listOf(DayReview(20_000, PlanDone.MOST, listOf("Thermo problem set"))),
             recallNotes = listOf(RecallNote("n1", "Entropy never falls", "Physics", 20_000, 5L))
         )
         val text = json.encodeToString(BackupFile.serializer(), withNotes)
         assertEquals(withNotes, json.decodeFromString(BackupFile.serializer(), text))
-        assertEquals(5, withNotes.totalRows)
-        // A version 1 file predates both lists and must restore as before.
+        assertEquals(4, withNotes.totalRows)
+        // A version 1 file predates the notes and must restore as before.
         val old = json.decodeFromString(BackupFile.serializer(), """{"version":1,"alarms":[]}""")
-        assertTrue(old.dayReviews.isEmpty() && old.recallNotes.isEmpty())
+        assertTrue(old.recallNotes.isEmpty())
+        // A file from before the evening review was removed still carries its list: read past.
+        val withReviews = Json { ignoreUnknownKeys = true }.decodeFromString(
+            BackupFile.serializer(),
+            """{"version":2,"dayReviews":[{"epochDay":20000,"done":"MOST","topThree":["x"]}]}"""
+        )
+        assertEquals(0, withReviews.totalRows)
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.ogenrwotdaniel.wakeproof.ui.pomodoro
 
 import com.ogenrwotdaniel.wakeproof.study.RecallState
 import com.ogenrwotdaniel.wakeproof.study.RecallStore
+import com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
+import com.ogenrwotdaniel.wakeproof.study.SummaryState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.KimiRepository
@@ -34,6 +36,7 @@ class PomodoroViewModel @Inject constructor(
     private val parkedThoughtDao: ParkedThoughtDao,
     private val spotify: SpotifyController,
     private val recallStore: RecallStore,
+    private val summaryStore: SessionSummaryStore,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
@@ -44,8 +47,12 @@ class PomodoroViewModel @Inject constructor(
     /** The recall notes and the block still waiting for one; the screen decides if it is still due. */
     val recall: StateFlow<RecallState> = recallStore.state
 
+    /** The session summary still owed its photo; the screen decides if it is still due. */
+    val summary: StateFlow<SummaryState> = summaryStore.state
+
     init {
         viewModelScope.launch { recallStore.load() }
+        viewModelScope.launch { summaryStore.load() }
     }
 
     fun saveRecall(text: String) {
@@ -90,7 +97,17 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun setFocusSound(id: String) {
-        viewModelScope.launch { settingsRepository.setFocusSoundId(id) }
+        viewModelScope.launch {
+            // Choosing Spotify puts it on the focus list: not while a summary is
+            // owed, when the list may only shrink.
+            if (com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound.isSpotify(id) &&
+                !com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound.isSpotify(settings.value.focusSoundId) &&
+                summaryStore.owed(summaryStore.load()) != null
+            ) {
+                return@launch
+            }
+            settingsRepository.setFocusSoundId(id)
+        }
     }
 
     /** Whether to offer Spotify controls at all (false → the button installs it). */

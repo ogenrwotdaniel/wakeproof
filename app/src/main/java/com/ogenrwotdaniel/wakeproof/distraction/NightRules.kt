@@ -4,8 +4,6 @@ package com.ogenrwotdaniel.wakeproof.distraction
  * The night, as the first locked alarm needs it (2026-11-04, user's choice;
  * 20:00–03:00 since 2026-11-11, sleeping 20:00 to the 03:00 alarm):
  *
- * - **Wind-down** at [WIND_DOWN_MINUTES] (19:30): one reminder that the sleep
- *   wall is half an hour away.
  * - **Sleep wall** from [SLEEP_START_MINUTES] (20:00, "everything else off
  *   totally" — user's choice, 2026-11-04) to [SLEEP_END_MINUTES] (03:00, the
  *   first locked alarm), with bed at [BEDTIME_MINUTES] (the same 20:00, a
@@ -23,8 +21,7 @@ package com.ogenrwotdaniel.wakeproof.distraction
  * Fixed rather than settings: a bedtime that can be moved at 20:05 is not one.
  */
 const val SLEEP_START_MINUTES = 20 * 60
-const val WIND_DOWN_MINUTES = SLEEP_START_MINUTES - 30
-/** Bed is when the wall goes up; the wind-down copy says so. */
+/** Bed is when the wall goes up. */
 const val BEDTIME_MINUTES = SLEEP_START_MINUTES
 const val SLEEP_END_MINUTES = 3 * 60
 // Half an hour after lights-out, which already says "phone on charge": both at once was two alerts together.
@@ -36,14 +33,11 @@ const val CHARGE_NAG_EVERY_MILLIS = 30 * 60_000L
 fun sleepWallActive(minuteOfDay: Int): Boolean =
     minuteOfDay >= SLEEP_START_MINUTES || minuteOfDay < SLEEP_END_MINUTES
 
-/** Pure: the wind-down reminder is due — inside its half hour, not yet sent today. */
-fun windDownDue(minuteOfDay: Int, sentOnDay: Long, today: Long): Boolean =
-    minuteOfDay in WIND_DOWN_MINUTES until SLEEP_START_MINUTES && sentOnDay != today
-
 /**
  * Pure: the "lights out" reminder is due — in the half hour from bedtime, not
  * yet sent today. Bedtime is the wall's start, so this is the notice that the
- * wall is up (with the alarm time); it replaces the wind-down one on purpose.
+ * wall is up (with the alarm time). The only night notice: the 19:30
+ * wind-down reminder before it was removed on 2026-11-13 at the user's request.
  */
 fun lightsOutDue(minuteOfDay: Int, sentOnDay: Long, today: Long): Boolean =
     minuteOfDay in BEDTIME_MINUTES until BEDTIME_MINUTES + 30 && sentOnDay != today

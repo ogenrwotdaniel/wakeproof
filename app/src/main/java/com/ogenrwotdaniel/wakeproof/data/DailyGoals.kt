@@ -21,12 +21,10 @@ import java.time.LocalDate
 data class DailyGoals(
     val pushupTarget: Int,
     val mathTarget: Int = 0,
-    val planTarget: Int = 0,
-    val reviewTarget: Int = 0,
-    val shutdownTarget: Int = 0
+    val reviewTarget: Int = 0
 ) {
     val hasAny: Boolean get() = total > 0
-    val total: Int get() = pushupTarget + mathTarget + planTarget + reviewTarget + shutdownTarget
+    val total: Int get() = pushupTarget + mathTarget + reviewTarget
 }
 
 /** What a day did with the goals it was set. */
@@ -63,7 +61,7 @@ enum class DayOutcome {
  * against the new target.
  */
 fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
-    val live = alarms.filter { it.enabled && !it.deleted && AlarmDays.contains(it.daysMask, day) }
+    val live = alarms.filter { it.enabled && !it.deleted && !it.type.retired && AlarmDays.contains(it.daysMask, day) }
     // Rows on a locked minute of their kind ring once between them (the copies
     // are never armed), and rows on a former locked minute never ring: counting
     // them asked for pushups no alarm could bring, a miss every day. Decided by
@@ -76,9 +74,7 @@ fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
     return DailyGoals(
         pushupTarget = rings(AlarmType.PUSHUP),
         mathTarget = rings(AlarmType.MATH),
-        planTarget = rings(AlarmType.PLAN),
-        reviewTarget = rings(AlarmType.REVIEW),
-        shutdownTarget = rings(AlarmType.SHUTDOWN)
+        reviewTarget = rings(AlarmType.REVIEW)
     )
 }
 
@@ -89,12 +85,6 @@ private fun List<CompletionLog>.countOf(kind: GoalKind): Int =
 /** Pushups must be camera-verified. */
 fun pushupsVerified(dayLogs: List<CompletionLog>): Int =
     dayLogs.count { it.kind == GoalKind.PUSHUP && it.status == CompletionStatus.VERIFIED }
-
-/** Day-plan photos saved, at the alarm or from the library. */
-fun plansLogged(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.PLAN)
-
-/** Evening reviews written, at the alarm or from the library. */
-fun shutdownsDone(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.SHUTDOWN)
 
 /** Review alarms answered (one log per run, whatever its card count). */
 fun reviewsDone(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.REVIEW)
@@ -115,9 +105,7 @@ fun dayOutcome(dayLogs: List<CompletionLog>, goals: DailyGoals): DayOutcome = wh
     dayLogs.any { it.status == CompletionStatus.SKIPPED } -> DayOutcome.MISSED
     pushupsVerified(dayLogs) >= goals.pushupTarget &&
         mathsSolved(dayLogs) >= goals.mathTarget &&
-        plansLogged(dayLogs) >= goals.planTarget &&
-        reviewsDone(dayLogs) >= goals.reviewTarget &&
-        shutdownsDone(dayLogs) >= goals.shutdownTarget -> DayOutcome.MET
+        reviewsDone(dayLogs) >= goals.reviewTarget -> DayOutcome.MET
 
     else -> DayOutcome.MISSED
 }

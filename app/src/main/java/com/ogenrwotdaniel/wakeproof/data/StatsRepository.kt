@@ -21,16 +21,10 @@ data class TodayStatus(
     val focusMinutes: Int = 0,
     val mathCount: Int = 0,
     val mathTarget: Int = 0,
-    /** Day-plan photos saved today, and how many plan alarms ask for one. */
-    val planCount: Int = 0,
-    val planTarget: Int = 0,
     /** Review alarms answered today, the cards graded in them, and how many alarms ask. */
     val reviewCount: Int = 0,
     val reviewCards: Int = 0,
-    val reviewTarget: Int = 0,
-    /** Evening reviews written today, and how many alarms ask for one. */
-    val shutdownCount: Int = 0,
-    val shutdownTarget: Int = 0
+    val reviewTarget: Int = 0
 ) {
     /**
      * Requires a target: with no pushup alarm scheduled today, `0 >= 0` would
@@ -38,7 +32,6 @@ data class TodayStatus(
      */
     val pushupDone: Boolean get() = pushupTarget > 0 && pushupCount >= pushupTarget
     val mathDone: Boolean get() = mathTarget > 0 && mathCount >= mathTarget
-    val planDone: Boolean get() = planTarget > 0 && planCount >= planTarget
     val reviewDone: Boolean get() = reviewTarget > 0 && reviewCount >= reviewTarget
 }
 
@@ -118,15 +111,11 @@ class StatsRepository @Inject constructor(
             focusMinutes = today.focusMinutes(),
             mathCount = mathsSolved(today),
             mathTarget = goals.mathTarget,
-            planCount = plansLogged(today),
-            planTarget = goals.planTarget,
             reviewCount = reviewsDone(today),
             reviewCards = today
                 .filter { it.kind == GoalKind.REVIEW && it.status != CompletionStatus.SKIPPED }
                 .sumOf { it.amount },
-            reviewTarget = goals.reviewTarget,
-            shutdownCount = shutdownsDone(today),
-            shutdownTarget = goals.shutdownTarget
+            reviewTarget = goals.reviewTarget
         )
     }
 

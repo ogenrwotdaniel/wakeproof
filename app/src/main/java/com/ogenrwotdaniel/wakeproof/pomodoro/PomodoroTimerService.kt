@@ -102,6 +102,7 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var usageStatsRepository: UsageStatsRepository
     @Inject lateinit var wallRules: WallRulesRepository
     @Inject lateinit var liveFocusSession: LiveFocusSession
+    @Inject lateinit var recallStore: com.ogenrwotdaniel.wakeproof.study.RecallStore
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickerJob: Job? = null
@@ -666,6 +667,15 @@ class PomodoroTimerService : Service() {
                     status = if (current.treeWithered) CompletionStatus.SKIPPED else CompletionStatus.VERIFIED,
                     minutes = blockSeconds(current.completedFocusSessions + 1, current.targetFocusBlocks) / 60
                 )
+            }
+            // A block that grew its tree is worth recalling; the timer screen asks.
+            if (!current.treeWithered) {
+                runCatching {
+                    recallStore.ask(
+                        settingsRepository.settings.first().activeSubject,
+                        java.time.LocalDate.now().toEpochDay()
+                    )
+                }
             }
             // The watch's focus total otherwise waits for the app's screen to
             // close — and a block run with the phone face-down never opens it.

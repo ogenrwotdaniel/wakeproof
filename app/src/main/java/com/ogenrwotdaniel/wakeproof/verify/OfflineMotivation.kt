@@ -34,24 +34,18 @@ class OfflineMotivation @Inject constructor() : MotivationSource {
                 achievement.reps < 25 -> PUSHUPS_SOLID
                 else -> PUSHUPS_STRONG
             }
-            is Achievement.Water -> when {
-                achievement.ml < 300 -> WATER_SIP
-                achievement.ml < 600 -> WATER_SOLID
-                else -> WATER_STRONG
-            }
         }
         // floorMod, so a negative epoch day (a device clock set before 1970)
         // still lands inside the pool instead of throwing.
         val line = pool[Math.floorMod(rotation, pool.size.toLong()).toInt()]
         val amount = when (achievement) {
             is Achievement.Pushups -> achievement.reps.toString()
-            is Achievement.Water -> achievement.ml.toString()
         }
         return line.replace(AMOUNT, amount)
     }
 
     private companion object {
-        /** Placeholder the pools use for the rep count / millilitres. */
+        /** Placeholder the pools use for the rep count. */
         const val AMOUNT = "{n}"
 
         val PUSHUPS_FEW = listOf(
@@ -79,33 +73,6 @@ class OfflineMotivation @Inject constructor() : MotivationSource {
             "$AMOUNT at this hour is serious. Take the win.",
             "$AMOUNT reps, verified. That's a day most people won't have by noon.",
             "$AMOUNT. Whatever comes next, you've already outworked yesterday."
-        )
-
-        val WATER_SIP = listOf(
-            "$AMOUNT ml down. Your brain runs on that.",
-            "$AMOUNT ml in. Small sip, real start.",
-            "$AMOUNT ml verified. Keep the bottle within reach.",
-            "$AMOUNT ml before anything else. Good instinct.",
-            "That's $AMOUNT ml your body was never going to get from coffee.",
-            "$AMOUNT ml done. Hydration is the cheapest win there is."
-        )
-
-        val WATER_SOLID = listOf(
-            "$AMOUNT ml before the day started. That's a proper opening.",
-            "$AMOUNT ml in and verified. Your head will thank you by 10 AM.",
-            "$AMOUNT ml done — most of the morning's job handled.",
-            "$AMOUNT ml down before breakfast. Well played.",
-            "$AMOUNT ml, camera-verified. No shortcuts taken.",
-            "$AMOUNT ml in. Solid."
-        )
-
-        val WATER_STRONG = listOf(
-            "$AMOUNT ml. That's a serious amount before sunrise.",
-            "$AMOUNT ml before the day started — the whole morning target, gone.",
-            "$AMOUNT ml verified. You didn't just meet it, you cleared it.",
-            "$AMOUNT ml in. That is the strongest possible start.",
-            "$AMOUNT ml done. Nothing half-hearted about that.",
-            "$AMOUNT ml, all verified. Take the win and go."
         )
     }
 }

@@ -280,6 +280,23 @@ class Firestore:
                 self.delete(chunk_doc_id(h["id"], i))
         return len(victims)
 
+    def all_doc_ids(self) -> list[str]:
+        """Every document under this account's `clips`: clips, chunks and presence."""
+        # Names only: the chunks are megabytes nobody needs to read to delete them.
+        rows = self.query({
+            "from": [{"collectionId": "clips"}],
+            "select": {"fields": [{"fieldPath": "__name__"}]},
+        })
+        return [urllib.parse.unquote(doc_id) for doc_id, _ in rows]
+
+    def wipe(self) -> int:
+        """Deletes everything Clip keeps in the cloud for this account. Returns the count."""
+        ids = self.all_doc_ids()
+        # Headers before chunks, so no reader meets a header whose chunks are gone.
+        for doc_id in sorted(ids, key=lambda d: not d.startswith("clip_")):
+            self.delete(doc_id)
+        return len(ids)
+
     def put_presence(self, install_id: str, name: str, addrs: list[str], now_ms: int) -> None:
         self.put(presence_doc_id(install_id), {
             "installId": install_id, "name": name, "platform": "linux",

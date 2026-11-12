@@ -57,6 +57,13 @@ interface FlashcardDao : SyncDao<Flashcard> {
     )
     suspend fun dueCards(today: Long, subject: String, limit: Int = 50): List<Flashcard>
 
+    /** Due cards of every subject, longest overdue first: what a review alarm asks. */
+    @Query(
+        "SELECT * FROM flashcards WHERE dueEpochDay <= :today AND deleted = 0 " +
+            "ORDER BY dueEpochDay, id LIMIT :limit"
+    )
+    suspend fun dueCardsAnySubject(today: Long, limit: Int): List<Flashcard>
+
     @Query("SELECT * FROM flashcards WHERE pending = 1 ORDER BY updatedAt LIMIT :limit")
     override suspend fun pendingUploads(limit: Int): List<Flashcard>
 

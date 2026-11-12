@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.ui.pomodoro
 
+import com.ogenrwotdaniel.wakeproof.study.RecallState
+import com.ogenrwotdaniel.wakeproof.study.RecallStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.KimiRepository
@@ -31,12 +33,28 @@ class PomodoroViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val parkedThoughtDao: ParkedThoughtDao,
     private val spotify: SpotifyController,
+    private val recallStore: RecallStore,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
     /** Distracting thoughts captured mid-focus, oldest done last. */
     val thoughts: StateFlow<List<ParkedThought>> = parkedThoughtDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The recall notes and the block still waiting for one; the screen decides if it is still due. */
+    val recall: StateFlow<RecallState> = recallStore.state
+
+    init {
+        viewModelScope.launch { recallStore.load() }
+    }
+
+    fun saveRecall(text: String) {
+        viewModelScope.launch { recallStore.answer(text) }
+    }
+
+    fun skipRecall() {
+        viewModelScope.launch { recallStore.skip() }
+    }
 
     fun parkThought(text: String) {
         if (text.isBlank()) return

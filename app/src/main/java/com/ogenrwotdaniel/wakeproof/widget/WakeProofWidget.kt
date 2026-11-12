@@ -51,7 +51,7 @@ class WakeProofWidget : GlanceAppWidget() {
         )
         val today = entryPoint.statsRepository().observeToday().first()
         val streak = entryPoint.statsRepository().observeStreak().first()
-        val goal = entryPoint.settingsRepository().settings.first().dailyFocusGoalMinutes
+        val goal = entryPoint.statsRepository().observeFocusGoal().first().minutes
 
         provideContent {
             GlanceTheme {

@@ -59,26 +59,79 @@ class StrictAlarmTest {
     }
 
     @Test
-    fun `the water slot pins a water alarm at 08 20 and adopts only one already there`() {
-        val water = StrictAlarm.SLOTS[2]
-        assertEquals(StrictAlarm.Slot(8, 20, AlarmType.WATER, hard = false), water)
-        val fixed = strictAlarmFixed(alarm(1, type = AlarmType.PUSHUP, hour = 9), water, now = 99L)!!
-        assertEquals(AlarmType.WATER, fixed.type)
+    fun `the plan slot pins a day-plan alarm at 08 20 and adopts only one already there`() {
+        val plan = StrictAlarm.SLOTS[2]
+        assertEquals(StrictAlarm.Slot(8, 20, AlarmType.PLAN, hard = false), plan)
+        val fixed = strictAlarmFixed(alarm(1, type = AlarmType.PUSHUP, hour = 9), plan, now = 99L)!!
+        assertEquals(AlarmType.PLAN, fixed.type)
         assertEquals(8 * 60 + 20, fixed.hour * 60 + fixed.minute)
         val rows = listOf(
-            alarm(1, type = AlarmType.WATER, hour = 7), alarm(2, hour = 8, minute = 20),
-            alarm(3, type = AlarmType.WATER, hour = 8, minute = 20)
+            alarm(1, type = AlarmType.PLAN, hour = 7), alarm(2, hour = 8, minute = 20),
+            alarm(3, type = AlarmType.PLAN, hour = 8, minute = 20)
         )
-        // The 07:00 water alarm is the user's own and stays where it is.
-        assertEquals(3L, strictAlarmCandidate(rows, water)?.id)
-        assertNull(strictAlarmCandidate(rows.take(2), water))
+        // The 07:00 plan alarm is the user's own and stays where it is.
+        assertEquals(3L, strictAlarmCandidate(rows, plan)?.id)
+        assertNull(strictAlarmCandidate(rows.take(2), plan))
+    }
+
+    @Test
+    fun `the evening review is fixed at 19 30 and is not a hard alarm`() {
+        val evening = StrictAlarm.SLOTS[3]
+        assertEquals(StrictAlarm.Slot(19, 30, AlarmType.SHUTDOWN, hard = false), evening)
+        assertEquals(setOf(19 * 60 + 30), StrictAlarm.slotMinutes(AlarmType.SHUTDOWN))
+        // It adopts only an evening review already on its minute.
+        val rows = listOf(
+            alarm(1, type = AlarmType.SHUTDOWN, hour = 18), alarm(2, type = AlarmType.SHUTDOWN, hour = 19, minute = 30)
+        )
+        assertEquals(2L, strictAlarmCandidate(rows, evening)?.id)
+    }
+
+    @Test
+    fun `the water alarm a device had locked at 08 20 becomes the day plan`() {
+        // Slot 2 was water: the adopted row keeps its sync id and history, and
+        // changes kind in place instead of leaving a dead water alarm behind.
+        val old = alarm(1, type = AlarmType.WATER, hour = 8, minute = 20, label = "Morning water")
+        val fixed = strictAlarmFixed(old, StrictAlarm.SLOTS[2], now = 99L)!!
+        assertEquals(AlarmType.PLAN, fixed.type)
+        assertEquals("s1", fixed.syncId)
+        assertEquals("Locked 8:20", fixed.label)
+        assertEquals(99L, fixed.updatedAt)
+        assertTrue(fixed.pending)
+        // Once it is the plan alarm, a label the user gave it is kept.
+        assertNull(strictAlarmFixed(fixed.copy(label = "Plan the day"), StrictAlarm.SLOTS[2], now = 100L))
+    }
+
+    @Test
+    fun `live water alarms are retired, a locked row and tombstones are not`() {
+        val rows = listOf(
+            alarm(1, type = AlarmType.WATER, hour = 12, minute = 50),
+            alarm(2, type = AlarmType.WATER, hour = 9, minute = 0),
+            alarm(3, type = AlarmType.WATER, deleted = true),
+            alarm(4, type = AlarmType.WATER, enabled = false),
+            alarm(5), alarm(6, type = AlarmType.PLAN), alarm(7, type = AlarmType.REVIEW)
+        )
+        assertEquals(listOf(1L, 2L, 4L), retiredAlarms(rows).map { it.id })
+        // A row this device has locked is rewritten by it, not deleted.
+        assertEquals(listOf(1L, 4L), retiredAlarms(rows, locked = setOf("s2")).map { it.id })
+    }
+
+    @Test
+    fun `a water row on the fixed 08 20 minute is left for the device that locked it`() {
+        // On the tablet it looks like any water alarm, but it may be the phone's
+        // locked row not yet seen rewritten: deleting it would have the two
+        // devices delete and restore it in turn.
+        val rows = listOf(
+            alarm(1, type = AlarmType.WATER, hour = 8, minute = 20),
+            alarm(2, type = AlarmType.WATER, hour = 8, minute = 50)
+        )
+        assertEquals(listOf(2L), retiredAlarms(rows).map { it.id })
     }
 
     @Test
     fun `only the pushup alarms are hard, and the night runs to the last of them`() {
         assertEquals(listOf(3 * 60, 5 * 60 + 40), StrictAlarm.hardMinutes)
         assertEquals(5 * 60 + 40, StrictAlarm.lastSlotMinute)
-        assertEquals(setOf(8 * 60 + 20), StrictAlarm.slotMinutes(AlarmType.WATER))
+        assertEquals(setOf(8 * 60 + 20), StrictAlarm.slotMinutes(AlarmType.PLAN))
         assertEquals(emptySet<Int>(), StrictAlarm.silentMinutes(AlarmType.MATH))
     }
 
@@ -114,8 +167,8 @@ class StrictAlarmTest {
             alarm(6, hour = 3, minute = 0, deleted = true),
             // The old locked pairs, synced back from before a move, never ring either.
             alarm(7, hour = 4, minute = 0), alarm(8, hour = 5, minute = 30), alarm(9, hour = 6, minute = 5),
-            // A second water alarm on the fixed minute; a pushup one there is the user's own.
-            alarm(10, hour = 8, minute = 20, type = AlarmType.WATER), alarm(11, hour = 8, minute = 20)
+            // A second plan alarm on the fixed minute; a pushup one there is the user's own.
+            alarm(10, hour = 8, minute = 20, type = AlarmType.PLAN), alarm(11, hour = 8, minute = 20)
         )
         assertEquals(listOf(2L, 3L, 7L, 8L, 9L, 10L), strictAlarmDuplicates(rows, setOf("s1")).map { it.id })
         assertEquals(emptyList<Long>(), strictAlarmDuplicates(rows, emptySet()).map { it.id })

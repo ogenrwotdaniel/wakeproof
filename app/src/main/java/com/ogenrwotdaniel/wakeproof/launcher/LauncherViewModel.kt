@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.launcher
 
+import kotlinx.coroutines.flow.map
 import android.app.AlarmManager
 import android.content.Context
 import androidx.lifecycle.ViewModel
@@ -81,6 +82,10 @@ class LauncherViewModel @Inject constructor(
 
     val today: StateFlow<TodayStatus> = statsRepository.observeToday()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TodayStatus())
+
+    /** Today's focus goal as scored: the user's own, raised before an exam. */
+    val focusGoalMinutes: StateFlow<Int> = statsRepository.observeFocusGoal().map { it.minutes }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 120)
 
     val streak: StateFlow<StreakInfo> = statsRepository.observeStreak()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StreakInfo())

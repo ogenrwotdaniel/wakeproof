@@ -82,7 +82,7 @@ fun OnboardingScreen(
             )
             OnboardingStep(
                 title = "Camera",
-                description = "Required — pushups and water are verified through the camera.",
+                description = "Required: pushups are counted through the camera, and the day plan is a photo.",
                 granted = status.camera,
                 actionLabel = "Grant",
                 onAction = { cameraLauncher.launch(android.Manifest.permission.CAMERA) }

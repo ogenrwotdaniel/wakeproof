@@ -21,7 +21,15 @@ DEFAULT_NAME = "Ubuntu laptop"
 
 
 class KeyringStore:
-    """libsecret, imported lazily so the package loads without gi."""
+    """libsecret, imported lazily so the package loads without gi.
+
+    Always the desktop's Secret Service, asked for by name. libsecret's
+    `password_*` shortcuts pick a backend from the environment, and inside a
+    snap's (a terminal opened from a snap-packaged IDE inherits SNAP_NAME) that
+    is a private file: `status` and `forget` then saw an empty store beside a
+    paired daemon, and a `pair` run there would have saved a key the daemon
+    never finds.
+    """
 
     def __init__(self):
         import gi
@@ -33,20 +41,22 @@ class KeyringStore:
         self._schema = Secret.Schema.new(
             SCHEMA_NAME, Secret.SchemaFlags.NONE, {"item": Secret.SchemaAttributeType.STRING}
         )
+        self._service = Secret.Service.get_sync(Secret.ServiceFlags.OPEN_SESSION, None)
 
     def get(self, item: str) -> str | None:
-        return self._Secret.password_lookup_sync(self._schema, {"item": item}, None)
+        value = self._service.lookup_sync(self._schema, {"item": item}, None)
+        return value.get_text() if value else None
 
     def set(self, item: str, value: str) -> None:
-        ok = self._Secret.password_store_sync(
+        ok = self._service.store_sync(
             self._schema, {"item": item}, self._Secret.COLLECTION_DEFAULT,
-            f"WakeProof Clip ({item})", value, None,
+            f"WakeProof Clip ({item})", self._Secret.Value.new(value, -1, "text/plain"), None,
         )
         if not ok:
             raise RuntimeError(f"keyring refused to store {item}")
 
     def delete(self, item: str) -> None:
-        self._Secret.password_clear_sync(self._schema, {"item": item}, None)
+        self._service.clear_sync(self._schema, {"item": item}, None)
 
 
 class MemoryStore:

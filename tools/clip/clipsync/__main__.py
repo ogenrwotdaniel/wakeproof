@@ -13,7 +13,9 @@ def main(argv=None) -> int:
     sub.add_parser("daemon", help="run the D-Bus/LAN/cloud daemon (systemd runs this)")
     sub.add_parser("pair", help="show a QR and pair one phone or tablet")
     sub.add_parser("status", help="show pairing and daemon state")
-    sub.add_parser("forget", help="delete the clip key and account from this laptop")
+    f = sub.add_parser("forget", help="delete the clip key and account from this laptop")
+    f.add_argument("--cloud", action="store_true",
+                   help="first delete every clip and device record this account has in the cloud")
     p = sub.add_parser("send-test", help="send TEXT as if it had been copied")
     p.add_argument("text")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -34,7 +36,7 @@ def main(argv=None) -> int:
     if args.cmd == "status":
         return status()
     if args.cmd == "forget":
-        return forget()
+        return forget(cloud=args.cloud)
     if args.cmd == "send-test":
         return send_test(args.text)
     return 2
@@ -79,14 +81,27 @@ def status() -> int:
     return 0
 
 
-def forget() -> int:
+def forget(cloud: bool = False) -> int:
     from . import store as st
     from .cloud import CloudError, firestore_for
 
     store = st.KeyringStore()
     cfg = st.load_config()
     account = st.load_account(store)
-    if account:
+    if cloud:
+        # Before the account goes: without it nothing here can reach the cloud.
+        # A failure keeps the key and account, so the command can be run again.
+        if not account:
+            print("Not signed in on this laptop: nothing in the cloud can be reached from here.",
+                  file=sys.stderr)
+            return 1
+        try:
+            n = firestore_for(account).wipe()
+        except CloudError as e:
+            print(f"Could not empty the cloud ({e}). Nothing was forgotten; try again.", file=sys.stderr)
+            return 1
+        print(f"Cloud emptied: {n} document(s) deleted. A device still paired writes its record again.")
+    elif account:
         try:
             firestore_for(account).delete_presence(cfg["installId"])
         except CloudError as e:

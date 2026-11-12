@@ -19,8 +19,6 @@ class WeeklyReportGeneratorTest {
                 epochDay = monday + index,
                 pushupCount = 0,
                 pushupTarget = 1,
-                waterCount = 0,
-                waterTarget = 3,
                 focusMinutes = minutes,
                 skipped = index in skipped
             )
@@ -40,6 +38,36 @@ class WeeklyReportGeneratorTest {
         topApps = apps,
         dailyGoalMinutes = goal
     )
+
+    @Test
+    fun `a course behind its credit weight is named, and is the one suggestion`() {
+        val text = generator.report(
+            stats(subjects = listOf(SubjectMinutes("Math", 500), SubjectMinutes("Physics", 60)))
+                .copy(credits = mapOf("Math" to 3, "Physics" to 3))
+        )
+        assertTrue(text.substringAfter("Watch out:").contains("Physics got 10% of your focus time for 50% of your credits."))
+        assertTrue(text.substringAfter("Next week:").contains("Physics carries 50% of your credits"))
+        // Without credits set, nothing is said about balance.
+        assertTrue(!generator.report(stats()).contains("credits"))
+    }
+
+    @Test
+    fun `late nights are called out and a good week of sleep is a win`() {
+        val late = (0L..6L).map { NightScreen(monday + it, if (it < 3) 45 else 0) }
+        val bad = generator.report(stats().copy(nights = late))
+        assertTrue(bad.contains("in use after 20:00 on 3 of 7 nights"))
+        val good = generator.report(stats().copy(nights = (0L..6L).map { NightScreen(monday + it, 1) }))
+        assertTrue(good.substringBefore("Watch out:").contains("Phone down by 20:00 on 7 of 7 nights."))
+        // Unmeasured nights say nothing either way.
+        assertTrue(!generator.report(stats().copy(nights = listOf(NightScreen(monday, null)))).contains("20:00"))
+    }
+
+    @Test
+    fun `a day is counted against its own goal when an exam raised it`() {
+        val days = (0 until 7).map { DayStat(epochDay = monday + it, focusMinutes = 130, focusGoalMinutes = 240) }
+        val text = generator.report(stats().copy(days = days))
+        assertTrue(text.contains("7 days came in under"))
+    }
 
     @Test
     fun `report always has the three sections the screen renders`() {

@@ -120,6 +120,7 @@ fun LauncherScreen(
     val agenda by viewModel.agenda.collectAsStateWithLifecycle()
     val doneKeys by viewModel.doneEventKeys.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val focusGoalMinutes by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val today by viewModel.today.collectAsStateWithLifecycle()
     val streak by viewModel.streak.collectAsStateWithLifecycle()
@@ -182,7 +183,7 @@ fun LauncherScreen(
                 Spacer(Modifier.height(20.dp))
                 Text(
                     text = "${formatDurationMinutes(today.focusMinutes)} of " +
-                        "${formatDurationMinutes(settings.dailyFocusGoalMinutes)} focused" +
+                        "${formatDurationMinutes(focusGoalMinutes)} focused" +
                         if (streak.days > 0) "  ·  🔥 ${streak.days}" else "",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.LightGray,

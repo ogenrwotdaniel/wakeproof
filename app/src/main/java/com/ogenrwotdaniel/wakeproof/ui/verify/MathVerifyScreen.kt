@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ogenrwotdaniel.wakeproof.alarm.SnoozeStore
+import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import com.ogenrwotdaniel.wakeproof.ui.components.HoldToDismissButton
 import kotlin.math.roundToInt
 
@@ -57,7 +58,7 @@ private val KEY_GAP = 8.dp
 /**
  * The math mission: solve [MathVerifyViewModel]'s problems in an unbroken run
  * to silence the alarm. No camera, no light needed — the mission for mornings
- * the pushup and water ones cannot serve.
+ * the camera ones cannot serve.
  *
  * Same exits as the camera screens: [onSnooze] from the first second, the
  * emergency dismiss once its gates open.
@@ -71,10 +72,13 @@ fun MathVerifyScreen(
     onSnooze: () -> Unit,
     modifier: Modifier = Modifier,
     strict: Boolean = false,
+    goalKind: GoalKind = GoalKind.MATH,
     viewModel: MathVerifyViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(strict) { viewModel.setStrict(strict) }
+    // Set during composition, not in an effect: it must be in place before any tap.
+    viewModel.setGoalKind(goalKind)
     val haptics = LocalHapticFeedback.current
     val shake = remember { Animatable(0f) }
 

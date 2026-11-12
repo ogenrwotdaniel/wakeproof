@@ -3,6 +3,8 @@ package com.ogenrwotdaniel.wakeproof.data.backup
 import androidx.room.withTransaction
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer
 import com.ogenrwotdaniel.wakeproof.data.db.WakeProofDatabase
+import com.ogenrwotdaniel.wakeproof.plan.DayReviewStore
+import com.ogenrwotdaniel.wakeproof.study.RecallStore
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +18,9 @@ import kotlinx.serialization.json.Json
 @Singleton
 class BackupRepository @Inject constructor(
     private val database: WakeProofDatabase,
-    private val alarmInitializer: AlarmInitializer
+    private val alarmInitializer: AlarmInitializer,
+    private val dayReviewStore: DayReviewStore,
+    private val recallStore: RecallStore
 ) {
     private val json = Json {
         // A backup written by a newer build must not be rejected outright by an
@@ -27,7 +31,7 @@ class BackupRepository @Inject constructor(
         encodeDefaults = true
     }
 
-    /** Serialises every table, tombstones included. */
+    /** Serialises every table, tombstones included, and the two device-local note files. */
     suspend fun export(nowMillis: Long = System.currentTimeMillis()): String =
         withContext(Dispatchers.IO) {
             val backup = BackupFile(
@@ -36,7 +40,9 @@ class BackupRepository @Inject constructor(
                 completionLogs = database.completionLogDao().backupAll(),
                 flashcards = database.flashcardDao().backupAll(),
                 exams = database.examDao().backupAll(),
-                parkedThoughts = database.parkedThoughtDao().backupAll()
+                parkedThoughts = database.parkedThoughtDao().backupAll(),
+                dayReviews = dayReviewStore.load().reviews,
+                recallNotes = recallStore.load().notes
             )
             json.encodeToString(BackupFile.serializer(), backup)
         }
@@ -73,6 +79,10 @@ class BackupRepository @Inject constructor(
             database.examDao().restoreAll(backup.exams)
             database.parkedThoughtDao().restoreAll(backup.parkedThoughts)
         }
+        // After the database, so a file that fails there restores nothing at
+        // all. Merged like the rows: the backup wins a day or a note it holds.
+        dayReviewStore.restore(backup.dayReviews)
+        recallStore.restore(backup.recallNotes)
         alarmInitializer.initialize()
         backup
     }

@@ -9,7 +9,7 @@ import org.junit.Test
 class AlarmInitializerTest {
 
     private val enabled = Alarm(id = 1, type = AlarmType.PUSHUP, hour = 5, minute = 0, enabled = true)
-    private val disabled = Alarm(id = 2, type = AlarmType.WATER, hour = 8, minute = 50, enabled = false)
+    private val disabled = Alarm(id = 2, type = AlarmType.MATH, hour = 8, minute = 50, enabled = false)
     private val deleted = Alarm(
         id = 3,
         type = AlarmType.CUSTOM,
@@ -29,6 +29,16 @@ class AlarmInitializerTest {
         assertEquals(listOf(enabled), plan.toSchedule)
         assertEquals(listOf(disabled, deleted), plan.toCancel)
         assertTrue(plan.orphanIds.isEmpty())
+    }
+
+    @Test
+    fun `a retired water alarm is cancelled, never armed`() {
+        // Synced from a device not yet updated: enabled and live, with no screen left to answer it.
+        val water = Alarm(id = 4, type = AlarmType.WATER, hour = 12, minute = 50, enabled = true)
+        val plan = reconcilePlan(alarms = listOf(enabled, water), mirroredIds = setOf(1L, 4L))
+
+        assertEquals(listOf(enabled), plan.toSchedule)
+        assertEquals(listOf(water), plan.toCancel)
     }
 
     @Test

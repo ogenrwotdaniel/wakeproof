@@ -1,5 +1,8 @@
 package com.ogenrwotdaniel.wakeproof.ui.flashcards
 
+import com.ogenrwotdaniel.wakeproof.study.RecallNote
+import com.ogenrwotdaniel.wakeproof.study.RecallStore
+import kotlinx.coroutines.flow.map
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -31,6 +34,7 @@ class FlashcardsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: FlashcardRepository,
     private val kimiRepository: KimiRepository,
+    private val recallStore: RecallStore,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
@@ -91,6 +95,31 @@ class FlashcardsViewModel @Inject constructor(
                 )
         }
     }
+
+    /** Lines written after focus blocks, waiting to be made into cards; newest first. */
+    val recallNotes: StateFlow<List<RecallNote>> = recallStore.state
+        .map { it.notes.asReversed() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    init {
+        viewModelScope.launch { recallStore.load() }
+    }
+
+    /** The note becomes the answer to [question], in its own subject's deck. */
+    fun noteToCard(note: RecallNote, question: String) {
+        if (question.isBlank()) return
+        viewModelScope.launch {
+            repository.addCards(note.subject, listOf(question to note.text))
+            recallStore.remove(note.id)
+        }
+    }
+
+    fun discardNote(note: RecallNote) {
+        viewModelScope.launch { recallStore.remove(note.id) }
+    }
+
+    /** Drafts cards from the note with the AI; the note stays until it is discarded. */
+    fun draftFromNote(note: RecallNote) = generateFromText(note.text)
 
     fun addManualCard(subject: String, front: String, back: String) {
         if (subject.isBlank() || front.isBlank() || back.isBlank()) return

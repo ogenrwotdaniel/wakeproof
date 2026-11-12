@@ -102,6 +102,17 @@ class MathVerifyViewModel @Inject constructor(
         }
     }
 
+    /** What a solved or skipped run is logged as; see [setGoalKind]. */
+    @Volatile private var goalKind = GoalKind.MATH
+
+    /**
+     * A review alarm with no card due is answered here, and must count as that
+     * day's review, not as a math alarm nothing asked for.
+     */
+    fun setGoalKind(kind: GoalKind) {
+        goalKind = kind
+    }
+
     fun onDigit(digit: Char) {
         _uiState.update {
             if (it.verified || it.input.length >= MathChallenge.MAX_ANSWER_DIGITS) it
@@ -131,7 +142,7 @@ class MathVerifyViewModel @Inject constructor(
 
     fun logSkipped(onDone: () -> Unit) {
         viewModelScope.launch {
-            runCatching { completionRepository.log(GoalKind.MATH, CompletionStatus.SKIPPED) }
+            runCatching { completionRepository.log(goalKind, CompletionStatus.SKIPPED) }
             onDone()
         }
     }
@@ -151,9 +162,11 @@ class MathVerifyViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 completionRepository.log(
-                    GoalKind.MATH,
+                    goalKind,
                     CompletionStatus.VERIFIED,
-                    amount = _uiState.value.progress.required
+                    // Standing in for a review, the amount would be read as
+                    // cards reviewed; none were.
+                    amount = if (goalKind == GoalKind.MATH) _uiState.value.progress.required else 0
                 )
             }
         }

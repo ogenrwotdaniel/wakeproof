@@ -92,7 +92,7 @@ going away), hourly in the background, and on the "Sync now" button.
   against it, so per-device goals gave the phone and tablet different streaks
   for the same day. Latest change wins (`sharedSettingAction`); a device whose
   goal was never changed since this shipped (stamp 0) adopts the cloud's.
-  Bottle size, targets and API keys stay per-device. API keys in particular are
+  Targets and API keys stay per-device. API keys in particular are
   in EncryptedSharedPreferences and should not travel.
 - **A pre-sync edit to a starter alarm can duplicate.** Untouched starter alarms
   are local-only and are dropped once real ones arrive (the `seeded` column). Edit

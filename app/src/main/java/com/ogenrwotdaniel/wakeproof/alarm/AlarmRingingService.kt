@@ -268,9 +268,11 @@ class AlarmRingingService : Service() {
 
     private fun contentTextFor(alarm: Alarm) = when (alarm.type) {
         AlarmType.PUSHUP -> "Pushups to silence it. No shortcuts."
-        AlarmType.WATER -> "Drink your water and prove it."
+        AlarmType.PLAN -> "Write today's plan and photograph it."
+        AlarmType.REVIEW -> "Answer your due flashcards to silence it."
+        AlarmType.SHUTDOWN -> "Review today's plan and write tomorrow's top three."
         AlarmType.MATH -> "Solve the sums to silence it."
-        AlarmType.CUSTOM -> "Complete your verification."
+        AlarmType.CUSTOM, AlarmType.WATER -> "Complete your verification."
     }
 
     companion object {
@@ -309,7 +311,7 @@ class AlarmRingingService : Service() {
             )
         }
 
-        /** Ducks/restores the ringtone (cancels the ramp) — used by the water wizard. */
+        /** Ducks/restores the ringtone (cancels the ramp) — used by the verify screens. */
         fun setVolume(context: Context, volume: Float) {
             context.startService(
                 Intent(context, AlarmRingingService::class.java)

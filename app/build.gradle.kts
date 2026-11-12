@@ -68,8 +68,8 @@ android {
         targetSdk = 36
         // 2 was consumed by an upload Play already holds, and a versionCode can
         // never be reused. The build it names is what matters, not the number.
-        versionCode = 10
-        versionName = "1.8.0"
+        versionCode = 11
+        versionName = "1.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -152,8 +152,8 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
-    // Explicit, not the 1.0.0 CameraX drags in: the water detector needs EXIF
-    // orientation applied, and a sideways bottle defeats the whole method.
+    // Explicit, not the 1.0.0 CameraX drags in: day-plan photos are shown by
+    // their EXIF orientation, and a sideways page cannot be read.
     implementation(libs.androidx.exifinterface)
     implementation(libs.mlkit.pose.detection)
     // WakeProof Clip pairing: reads the laptop's QR (bundled model, no Play download).

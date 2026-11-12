@@ -48,9 +48,7 @@ fun ApiKeySection(
                 "A Gemini key is saved (stored encrypted on-device)."
             } else {
                 "Paste your key from $GEMINI_KEY_SOURCE. Flashcard drafting and the " +
-                    "study chat stay disabled without it. Water verification does not " +
-                    "need it — that runs on the device — but a key lets it ask for a " +
-                    "second opinion before rejecting a photo."
+                    "study chat stay disabled without it. Alarms never need it."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

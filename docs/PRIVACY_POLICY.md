@@ -1,6 +1,6 @@
 # WakeProof Privacy Policy
 
-**Effective date:** 6 November 2026
+**Effective date:** 12 November 2026
 **Developer:** Ogenrwot Daniel
 **Contact:** ogenrwotdaniel@gmail.com
 
@@ -54,10 +54,26 @@ app:
 - **Pushup verification video.** The camera feed used to count pushups is
   processed entirely on-device (Google ML Kit pose detection). No video or
   image from pushup verification is stored or transmitted.
+- **Day-plan photos.** The day-plan alarm asks you to photograph the page you
+  wrote your day on. Each photo is saved in WakeProof's private storage on
+  that device, where the Day plans screen shows it and lets you delete it.
+  Only the newest 90 days of plans are kept; older photos are removed.
+  The photos are never uploaded, synced to your other devices or sent to any
+  AI service, and uninstalling the app removes them. WakeProof does not read
+  or analyse what is on the page.
+- **Evening reviews and recall notes.** What you enter at the evening review
+  (how much of the plan got done, tomorrow's top three) and the lines you
+  write after a focus block are kept in WakeProof's private storage on that
+  device. They are not synced. They are included in the JSON backup file
+  you can export yourself. A recall note is sent to Google Gemini only
+  if you tap "Draft with AI" on it.
+- **Night screen use.** For the sleep score WakeProof reads, from the same
+  Usage access, when the screen was on between 20:00 and 03:00. It is worked
+  out on the device each time and sent nowhere.
 - **Your Gemini API key**, stored encrypted (Android EncryptedSharedPreferences).
 - **Your paired watch.** If you install the WakeProof watch app, your phone
-  sends it a small snapshot — streak, focus minutes and goal, water count and
-  target, today's agenda, and the current timer — over Google's on-device
+  sends it a small snapshot — streak, focus minutes and goal, whether today's
+  day plan is done, today's agenda, and the current timer — over Google's on-device
   Wearable Data Layer. This travels between your own two devices and reaches no
   server of ours.
 
@@ -103,8 +119,7 @@ What is sent, per feature, over an encrypted connection (HTTPS):
 
 | Feature | Data sent |
 |---|---|
-| Water-drinking verification — **second opinion only** | The two photos you take of your water container, and only when the on-device check did not accept the pair and you have configured a key |
-| Flashcard drafting | The notes text you paste, or the notes photo you pick |
+| Flashcard drafting | The notes text you paste, the notes photo you pick, or a recall note you choose to draft from |
 | Study coach chat | The messages you type in the chat |
 
 That is the whole list. In particular your **weekly report** and the
@@ -112,13 +127,8 @@ That is the whole list. In particular your **weekly report** and the
 numbers; no statistics, screen-time totals or app names are sent to Google
 Gemini, with or without a key.
 
-**Water photos stay on the device by default.** The water line is read by
-computer vision running on your phone — no key, no network, no upload. A photo
-pair leaves the device only if that on-device check did not accept it *and* you
-have configured a Gemini API key, in which case Gemini is asked for a second
-opinion before you are shown a rejection. Turning off "Read the water level on
-this device" in Settings sends every pair instead. Either way, WakeProof stores
-no photograph: they are held in memory for the comparison and discarded.
+No alarm uses these features: pushup counting, the day-plan photo, flashcard
+review and the sums all run on the device.
 
 WakeProof sends this data directly from your phone to Google's Gemini API; the
 developer of WakeProof never receives, stores or sees any of it. Google
@@ -128,13 +138,13 @@ information you wouldn't share with Google (e.g. avoid photographing notes
 containing other people's personal data).
 
 If you never add an API key and never sign in for sync, the app makes **no
-internet requests at all** — and water verification still works, on the device.
+internet requests at all**.
 
 ## Permissions summary
 
 | Permission | Why WakeProof asks |
 |---|---|
-| Camera | Counting pushups (on-device) and photographing your water container |
+| Camera | Counting pushups (on-device), photographing your day plan (kept on the device), and scanning the WakeProof Clip pairing code |
 | Notifications, exact alarms, full-screen alarms | Making the alarm ring reliably, including on the lock screen |
 | Usage access (special) | Showing you your own screen-time stats, applying the daily app limits you set (notify, or block for the rest of the day), enforcing your open-window and weekend walls on gated apps, and keeping apps outside your focus list shut during a focus session |
 | Display over other apps (special) | The floating Pomodoro timer bubble, the block and focus-session screens shown over other apps, opening the alarm screen while you use other apps, and covering an app left open in a pop-up window while it is walled |
@@ -174,6 +184,12 @@ personal information from children.
 ## Changes to this policy
 
 Material changes will be posted at this URL with an updated effective date.
+
+**12 November 2026** — removed water-drinking verification altogether, and
+with it the only case in which a photo taken at an alarm could be sent to
+Google Gemini; added the day-plan alarm, whose photos are stored on the device
+only, the evening review and focus-block recall notes (on the device only),
+and a sleep score read from screen on/off times.
 
 **6 November 2026** — retired the Kimi / Moonshot AI provider option so
 optional AI features talk exclusively to the Google Gemini API; synced the

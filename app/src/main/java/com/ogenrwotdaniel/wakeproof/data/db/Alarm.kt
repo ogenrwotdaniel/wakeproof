@@ -14,9 +14,21 @@ import java.util.UUID
  * Stored by NAME (Room's default enum mapping, and the backup JSON), so a new
  * value is safe to append — but a build that predates it cannot read a row
  * carrying it, so every synced device must be updated together.
+ *
+ * [WATER] is retired (2026-11-12: the bottle photo check never worked on a real
+ * bottle). The name stays only so rows, cloud documents and backups written
+ * before then still load; such an alarm is never armed and is removed at the
+ * next reconcile ([com.ogenrwotdaniel.wakeproof.alarm.retiredAlarms]).
+ * [PLAN] is a photo of the day's handwritten plan, [REVIEW] a run of due
+ * flashcards, [SHUTDOWN] the evening review of that plan.
  */
 @Serializable
-enum class AlarmType { PUSHUP, WATER, CUSTOM, MATH }
+enum class AlarmType {
+    PUSHUP, WATER, CUSTOM, MATH, PLAN, REVIEW, SHUTDOWN;
+
+    /** No longer offered, armed or counted. */
+    val retired: Boolean get() = this == WATER
+}
 
 /**
  * A daily repeating alarm. [lastCompletedEpochDay] records the most recent day

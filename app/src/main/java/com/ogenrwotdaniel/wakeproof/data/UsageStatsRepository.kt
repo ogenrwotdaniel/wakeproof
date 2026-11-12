@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.data
 
+import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_START_MINUTES
 import android.app.AppOpsManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
@@ -287,6 +289,47 @@ class UsageStatsRepository @Inject constructor(
     }
 
     /**
+     * Screen use inside the sleep wall for each of the last [nights] finished
+     * nights, oldest first. Read from the system's own screen on/off events,
+     * so nothing has to be recorded as the night goes; the system keeps them
+     * for about a week. Empty without usage access.
+     */
+    suspend fun nightScreens(nights: Int = 7, now: Long = System.currentTimeMillis()): List<NightScreen> =
+        withContext(Dispatchers.IO) {
+            if (!hasAccess()) return@withContext emptyList()
+            val usm = context.getSystemService(UsageStatsManager::class.java)
+            val zone = java.time.ZoneId.systemDefault()
+            val today = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+            (nights downTo 1).mapNotNull { back ->
+                val evening = today.minusDays(back.toLong())
+                val start = evening.atStartOfDay(zone).plusMinutes(SLEEP_START_MINUTES.toLong())
+                    .toInstant().toEpochMilli()
+                val end = evening.plusDays(1).atStartOfDay(zone).plusMinutes(SLEEP_END_MINUTES.toLong())
+                    .toInstant().toEpochMilli()
+                // A night still going is not a night to score.
+                if (end > now) return@mapNotNull null
+                val seen = mutableListOf<ScreenEvent>()
+                runCatching {
+                    val events = usm.queryEvents(start - NIGHT_LOOKBACK_MILLIS, end)
+                    val event = UsageEvents.Event()
+                    while (events.hasNextEvent()) {
+                        events.getNextEvent(event)
+                        when (event.eventType) {
+                            UsageEvents.Event.SCREEN_INTERACTIVE -> seen += ScreenEvent(event.timeStamp, true)
+                            // A phone switched off is a phone put down.
+                            UsageEvents.Event.SCREEN_NON_INTERACTIVE,
+                            UsageEvents.Event.DEVICE_SHUTDOWN -> seen += ScreenEvent(event.timeStamp, false)
+                        }
+                    }
+                }
+                NightScreen(
+                    epochDay = evening.toEpochDay(),
+                    minutes = screenOnMillis(seen.sortedBy { it.at }, start, end)?.let { (it / 60_000).toInt() }
+                )
+            }
+        }
+
+    /**
      * The package on screen, or null when no resume event landed in the recent
      * window — which usually means the user has been sitting in the same app.
      * Callers are expected to hold on to the last non-null answer.
@@ -339,3 +382,6 @@ class UsageStatsRepository @Inject constructor(
         const val FOREGROUND_LOOKBACK_MILLIS = 60_000L
     }
 }
+
+/** How far before a night's start its screen events are read, to know the state it began in. */
+private const val NIGHT_LOOKBACK_MILLIS = 12 * 60 * 60_000L

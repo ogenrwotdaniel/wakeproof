@@ -179,6 +179,7 @@ private fun DeckPane(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val recallNotes by viewModel.recallNotes.collectAsStateWithLifecycle()
     var subjectInput by rememberSaveable { mutableStateOf("") }
     var notesInput by rememberSaveable { mutableStateOf("") }
     var frontInput by rememberSaveable { mutableStateOf("") }
@@ -229,6 +230,26 @@ private fun DeckPane(
                         "let the AI draft cards for you.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (recallNotes.isNotEmpty()) {
+            item {
+                Text(text = "From your focus blocks", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "What you wrote after each block. Give each a question and it becomes a card.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            items(recallNotes, key = { "note-" + it.id }) { note ->
+                RecallNoteCard(
+                    note = note,
+                    hasApiKey = hasApiKey,
+                    onSave = { question -> viewModel.noteToCard(note, question) },
+                    onDraft = { viewModel.draftFromNote(note) },
+                    onDiscard = { viewModel.discardNote(note) }
                 )
             }
         }
@@ -372,6 +393,44 @@ private fun DraftRow(
                 )
             }
             TextButton(onClick = onRemove) { Text("Remove") }
+        }
+    }
+}
+
+/** One line written after a focus block: add the question it answers, or let the AI draft cards. */
+@Composable
+private fun RecallNoteCard(
+    note: com.ogenrwotdaniel.wakeproof.study.RecallNote,
+    hasApiKey: Boolean,
+    onSave: (String) -> Unit,
+    onDraft: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    var question by rememberSaveable(note.id) { mutableStateOf("") }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = note.subject + " · " + java.time.LocalDate.ofEpochDay(note.epochDay).format(
+                    java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(text = note.text, style = MaterialTheme.typography.bodyLarge)
+            androidx.compose.material3.OutlinedTextField(
+                value = question,
+                onValueChange = { question = it },
+                label = { Text("Question this answers") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    onClick = { onSave(question) },
+                    enabled = question.isNotBlank()
+                ) { Text("Save card") }
+                if (hasApiKey) TextButton(onClick = onDraft) { Text("Draft with AI") }
+                TextButton(onClick = onDiscard) { Text("Discard") }
+            }
         }
     }
 }

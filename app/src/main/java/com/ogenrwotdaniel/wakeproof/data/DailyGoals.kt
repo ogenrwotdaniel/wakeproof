@@ -14,15 +14,19 @@ import java.time.LocalDate
  * How much a given day is asking for: one verification per alarm that rings
  * that day.
  *
- * This used to be hardcoded — one pushup and three waters, forever, whatever
- * the schedule said. Someone running one pushup alarm and two water alarms
- * therefore had a streak that could never advance: the day demanded a third
- * water that nothing would ever ring for. The schedule is the only honest
- * source for the target, so the target is read from it.
+ * This used to be hardcoded, whatever the schedule said, so a day could demand
+ * a verification that nothing would ever ring for. The schedule is the only
+ * honest source for the target, so the target is read from it.
  */
-data class DailyGoals(val pushupTarget: Int, val waterTarget: Int, val mathTarget: Int = 0) {
-    val hasAny: Boolean get() = pushupTarget > 0 || waterTarget > 0 || mathTarget > 0
-    val total: Int get() = pushupTarget + waterTarget + mathTarget
+data class DailyGoals(
+    val pushupTarget: Int,
+    val mathTarget: Int = 0,
+    val planTarget: Int = 0,
+    val reviewTarget: Int = 0,
+    val shutdownTarget: Int = 0
+) {
+    val hasAny: Boolean get() = total > 0
+    val total: Int get() = pushupTarget + mathTarget + planTarget + reviewTarget + shutdownTarget
 }
 
 /** What a day did with the goals it was set. */
@@ -49,13 +53,13 @@ enum class DayOutcome {
  * Disabled and deleted alarms ask for nothing, and an alarm only asks on the
  * days its own repeat mask covers. Each verifying type is its own target — a
  * MATH alarm asks for one solved run, and was once left out entirely, so a
- * morning's math never appeared on Home at all. [AlarmType.CUSTOM] is counted as none —
- * it has no verification screen behind it, so no completion log can ever
- * satisfy it and counting it would freeze the streak permanently.
+ * morning's math never appeared on Home at all. [AlarmType.CUSTOM] and the retired
+ * [AlarmType.WATER] are counted as none: they have no verification screen
+ * behind them, so no completion log can ever satisfy them.
  *
  * Applied to past days too, since only the *current* schedule is stored — the
  * app has no record of what the alarms were three days ago. That is a real
- * approximation: adding a water alarm today re-scores the whole visible week
+ * approximation: adding an alarm today re-scores the whole visible week
  * against the new target.
  */
 fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
@@ -71,8 +75,10 @@ fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
     }
     return DailyGoals(
         pushupTarget = rings(AlarmType.PUSHUP),
-        waterTarget = rings(AlarmType.WATER),
-        mathTarget = rings(AlarmType.MATH)
+        mathTarget = rings(AlarmType.MATH),
+        planTarget = rings(AlarmType.PLAN),
+        reviewTarget = rings(AlarmType.REVIEW),
+        shutdownTarget = rings(AlarmType.SHUTDOWN)
     )
 }
 
@@ -80,11 +86,18 @@ fun dailyGoalsFrom(alarms: List<Alarm>, day: DayOfWeek): DailyGoals {
 private fun List<CompletionLog>.countOf(kind: GoalKind): Int =
     count { it.kind == kind && it.status != CompletionStatus.SKIPPED }
 
-/** Pushups must be camera-verified; honor-mode water still counts (with an asterisk). */
+/** Pushups must be camera-verified. */
 fun pushupsVerified(dayLogs: List<CompletionLog>): Int =
     dayLogs.count { it.kind == GoalKind.PUSHUP && it.status == CompletionStatus.VERIFIED }
 
-fun watersLogged(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.WATER)
+/** Day-plan photos saved, at the alarm or from the library. */
+fun plansLogged(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.PLAN)
+
+/** Evening reviews written, at the alarm or from the library. */
+fun shutdownsDone(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.SHUTDOWN)
+
+/** Review alarms answered (one log per run, whatever its card count). */
+fun reviewsDone(dayLogs: List<CompletionLog>): Int = dayLogs.countOf(GoalKind.REVIEW)
 
 /** Math runs actually solved; an emergency-dismissed one is logged SKIPPED and does not count. */
 fun mathsSolved(dayLogs: List<CompletionLog>): Int =
@@ -101,8 +114,10 @@ fun dayOutcome(dayLogs: List<CompletionLog>, goals: DailyGoals): DayOutcome = wh
     !goals.hasAny -> DayOutcome.NO_GOALS
     dayLogs.any { it.status == CompletionStatus.SKIPPED } -> DayOutcome.MISSED
     pushupsVerified(dayLogs) >= goals.pushupTarget &&
-        watersLogged(dayLogs) >= goals.waterTarget &&
-        mathsSolved(dayLogs) >= goals.mathTarget -> DayOutcome.MET
+        mathsSolved(dayLogs) >= goals.mathTarget &&
+        plansLogged(dayLogs) >= goals.planTarget &&
+        reviewsDone(dayLogs) >= goals.reviewTarget &&
+        shutdownsDone(dayLogs) >= goals.shutdownTarget -> DayOutcome.MET
 
     else -> DayOutcome.MISSED
 }

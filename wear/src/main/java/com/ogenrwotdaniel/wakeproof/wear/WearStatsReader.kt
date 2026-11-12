@@ -19,9 +19,10 @@ private object WearContract {
     const val KEY_ASTERISK = "asterisk"
     const val KEY_FOCUS = "focus_minutes"
     const val KEY_FOCUS_GOAL = "focus_goal"
-    const val KEY_WATER_COUNT = "water_count"
-    const val KEY_WATER_TARGET = "water_target"
-    const val KEY_WATER_ML = "water_ml"
+    const val KEY_PLAN_COUNT = "plan_count"
+    const val KEY_PLAN_TARGET = "plan_target"
+    const val KEY_SHUTDOWN_COUNT = "shutdown_count"
+    const val KEY_SHUTDOWN_TARGET = "shutdown_target"
     const val KEY_UPDATED = "updated_at"
     const val KEY_FOCUS_LEN = "focus_len"
     const val KEY_SHORT_BREAK_LEN = "short_break_len"
@@ -35,9 +36,12 @@ data class WearStats(
     val asterisk: Boolean = false,
     val focusMinutes: Int = 0,
     val focusGoal: Int = 0,
-    val waterCount: Int = 0,
-    val waterTarget: Int = 3,
-    val waterMl: Int = 0,
+    /** Day-plan photos saved today, and how many the schedule asks for (0 = none). */
+    val planCount: Int = 0,
+    val planTarget: Int = 0,
+    /** Evening reviews written today, and how many the schedule asks for (0 = none). */
+    val shutdownCount: Int = 0,
+    val shutdownTarget: Int = 0,
     val present: Boolean = false,
     /** When the phone computed these numbers; 0 for a pre-1.6 phone that never said. */
     val updatedAtMillis: Long = 0L,
@@ -56,6 +60,31 @@ data class WearStats(
         else 0
 }
 
+/**
+ * Pure: the one line about today's fixed alarms, or null on a day with none.
+ * One line, not two: the tile has no room for both, and the day plan matters
+ * until it is photographed, the evening review after that.
+ */
+fun dayLine(stats: WearStats): String? {
+    val planAsked = stats.planTarget > 0
+    val planDone = planAsked && stats.planCount >= stats.planTarget
+    val reviewAsked = stats.shutdownTarget > 0
+    val reviewDone = reviewAsked && stats.shutdownCount >= stats.shutdownTarget
+    return when {
+        planAsked && !planDone -> "Day plan pending"
+        reviewAsked && !reviewDone -> if (planAsked) "Plan ✓ · review due" else "Evening review due"
+        planAsked && reviewAsked -> "Plan ✓ · review ✓"
+        planAsked -> "Day plan ✓"
+        reviewAsked -> "Evening review ✓"
+        else -> null
+    }
+}
+
+/** Pure: whether [dayLine] has nothing left to ask today. */
+fun dayLineDone(stats: WearStats): Boolean =
+    (stats.planTarget == 0 || stats.planCount >= stats.planTarget) &&
+        (stats.shutdownTarget == 0 || stats.shutdownCount >= stats.shutdownTarget)
+
 /** Reads the latest [WearStats] the phone pushed onto the Data Layer. */
 object WearStatsReader {
     suspend fun read(context: Context): WearStats = withContext(Dispatchers.IO) {
@@ -72,9 +101,10 @@ object WearStatsReader {
                 asterisk = map.getBoolean(WearContract.KEY_ASTERISK, false),
                 focusMinutes = map.getInt(WearContract.KEY_FOCUS, 0),
                 focusGoal = map.getInt(WearContract.KEY_FOCUS_GOAL, 0),
-                waterCount = map.getInt(WearContract.KEY_WATER_COUNT, 0),
-                waterTarget = map.getInt(WearContract.KEY_WATER_TARGET, 3),
-                waterMl = map.getInt(WearContract.KEY_WATER_ML, 0),
+                planCount = map.getInt(WearContract.KEY_PLAN_COUNT, 0),
+                planTarget = map.getInt(WearContract.KEY_PLAN_TARGET, 0),
+                shutdownCount = map.getInt(WearContract.KEY_SHUTDOWN_COUNT, 0),
+                shutdownTarget = map.getInt(WearContract.KEY_SHUTDOWN_TARGET, 0),
                 present = true,
                 updatedAtMillis = map.getLong(WearContract.KEY_UPDATED, 0L),
                 durations = WatchDurations(

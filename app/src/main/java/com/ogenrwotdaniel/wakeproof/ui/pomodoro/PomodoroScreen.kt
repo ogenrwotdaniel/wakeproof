@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.ui.pomodoro
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.ogenrwotdaniel.wakeproof.study.recallDue
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -130,6 +132,19 @@ fun PomodoroScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Asked in the break (or after the last block), never over a running
+            // focus block. Read on each tick, so it leaves when it goes stale.
+            val recallState by viewModel.recall.collectAsStateWithLifecycle()
+            val focusing = timer.active && timer.running && timer.phase == PomodoroPhase.FOCUS
+            val recall = recallDue(recallState, System.currentTimeMillis()).takeIf { !focusing }
+            if (recall != null) {
+                RecallPrompt(
+                    subject = recall.subject,
+                    onSave = viewModel::saveRecall,
+                    onSkip = viewModel::skipRecall
+                )
+                Spacer(Modifier.height(16.dp))
+            }
             Text(
                 text = if (timer.active) timer.phase.label else "Pomodoro",
                 style = MaterialTheme.typography.headlineMedium
@@ -885,6 +900,39 @@ private fun StudyChatPanel(
                 },
                 enabled = enabled && !sending && input.isNotBlank()
             ) { Text(if (sending) "…" else "Send") }
+        }
+    }
+}
+
+/**
+ * Active recall at the end of a focus block: two lines, from memory, on what
+ * it taught. Saved lines wait on the Flashcards screen to become cards.
+ */
+@Composable
+private fun RecallPrompt(subject: String, onSave: (String) -> Unit, onSkip: () -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    androidx.compose.material3.Card(modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = "What did you just learn?", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Two lines from memory, without looking ($subject). They become flashcards.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.take(400) },
+                minLines = 2,
+                maxLines = 5,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    onClick = { onSave(text); text = "" },
+                    enabled = text.isNotBlank()
+                ) { Text("Save") }
+                TextButton(onClick = onSkip) { Text("Skip") }
+            }
         }
     }
 }

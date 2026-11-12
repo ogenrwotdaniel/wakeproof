@@ -41,9 +41,19 @@ class AlarmInitializer @Inject constructor(
     /**
      * Pins every [StrictAlarm] slot on the ringing device: adopts an alarm the
      * first time ([strictAlarmCandidate], or a new one), brings it back if it
-     * was deleted, and rewrites any change to it.
+     * was deleted, and rewrites any change to it. Then, on every device,
+     * deletes alarms of a retired kind ([retiredAlarms]).
      */
     suspend fun enforceStrict() {
+        pinSlots()
+        // After the locked slots, so the old 08:20 water row has already become
+        // the day plan. Here rather than in [initialize] because a sync pull
+        // calls only this, and water alarms arrive by sync.
+        retiredAlarms(repository.getAllAlarmsIncludingDeleted(), StrictAlarm.syncIds(context))
+            .forEach { repository.deleteAlarm(it) }
+    }
+
+    private suspend fun pinSlots() {
         if (!devicePolicy.ringsAlarms) return
         WearAlarmSync.pushSchedule(context, StrictAlarm.hardMinutes)
         StrictAlarm.SLOTS.forEachIndexed { index, slot ->
@@ -91,7 +101,8 @@ internal fun reconcilePlan(
     mirroredIds: Set<Long>,
     ringsAlarms: Boolean = true
 ): AlarmReconcilePlan {
-    val (live, dead) = alarms.partition { it.enabled && !it.deleted }
+    // A retired kind never rings, whatever its row says: there is no screen left to answer it.
+    val (live, dead) = alarms.partition { it.enabled && !it.deleted && !it.type.retired }
     return AlarmReconcilePlan(
         // A companion device arms nothing and disarms everything, so switching
         // the role off is a real disarm rather than a promise not to ring: the

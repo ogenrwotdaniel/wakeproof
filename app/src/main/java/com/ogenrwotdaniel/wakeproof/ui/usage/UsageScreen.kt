@@ -1,5 +1,11 @@
 package com.ogenrwotdaniel.wakeproof.ui.usage
 
+import com.ogenrwotdaniel.wakeproof.data.NightScreen
+import com.ogenrwotdaniel.wakeproof.data.SLEEP_GRACE_MINUTES
+import com.ogenrwotdaniel.wakeproof.data.neglectedSubject
+import com.ogenrwotdaniel.wakeproof.data.nightOnTime
+import com.ogenrwotdaniel.wakeproof.data.sleepScore
+import com.ogenrwotdaniel.wakeproof.data.subjectBalance
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.Canvas
@@ -92,6 +98,8 @@ fun UsageScreen(
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
     val today by viewModel.today.collectAsStateWithLifecycle()
     val subjectMinutes by viewModel.subjectMinutes.collectAsStateWithLifecycle()
+    val subjectCredits by viewModel.subjectCredits.collectAsStateWithLifecycle()
+    val nights by viewModel.nights.collectAsStateWithLifecycle()
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val limitedApps by viewModel.limitedApps.collectAsStateWithLifecycle()
     val studyTime by viewModel.studyTime.collectAsStateWithLifecycle()
@@ -156,6 +164,20 @@ fun UsageScreen(
                                     label = row.subject ?: "Untagged",
                                     value = formatMinutes(row.minutes.toLong()),
                                     fraction = row.minutes.toFloat() / maxSubject
+                                )
+                            }
+                            // Time against credit weight, when credits are set in Settings.
+                            val shares = subjectBalance(
+                                subjectRows.mapNotNull { row -> row.subject?.let { it to row.minutes } }.toMap(),
+                                subjectCredits
+                            )
+                            neglectedSubject(shares)?.let { behind ->
+                                Text(
+                                    text = "${behind.subject} is falling behind: " +
+                                        "${(behind.timeShare * 100).toInt()}% of the time for " +
+                                        "${(behind.creditShare * 100).toInt()}% of your credits.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
                                 )
                             }
                         }
@@ -246,6 +268,8 @@ fun UsageScreen(
                         }
                     )
                     if (wallWeek.isNotEmpty()) WallWeekCard(wallWeek)
+
+                    if (nights.any { it.minutes != null }) SleepCard(nights)
 
                     SectionCard(title = "Weekly report") {
                         report?.let { cached ->
@@ -810,6 +834,40 @@ private fun WallWeekCard(week: List<WallDay>) {
                 )
             },
             height = 112.dp
+        )
+    }
+}
+
+/**
+ * Sleep consistency: on how many of the last nights the phone was down by the
+ * night wall's start, and how long the screen was on inside it each night.
+ */
+@Composable
+private fun SleepCard(nights: List<NightScreen>) {
+    val score = sleepScore(nights)
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    SectionCard(
+        title = "Sleep",
+        caption = "Phone down by 20:00 on ${score.onTime} of ${score.measured} nights"
+    ) {
+        nights.forEach { night ->
+            val day = java.time.LocalDate.ofEpochDay(night.epochDay).dayOfWeek
+                .getDisplayName(java.time.format.TextStyle.SHORT, locale)
+            Text(
+                text = when {
+                    night.minutes == null -> "$day  not measured"
+                    nightOnTime(night) -> "$day  down on time ✓"
+                    else -> "$day  screen on ${formatMinutes(night.minutes.toLong())} after 20:00"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (night.minutes != null && !nightOnTime(night)) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            text = "Counted from 20:00 to 03:00; up to $SLEEP_GRACE_MINUTES minutes of screen is still on time.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

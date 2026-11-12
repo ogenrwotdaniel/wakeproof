@@ -25,8 +25,8 @@ import kotlinx.coroutines.delay
 
 /**
  * Press-and-hold button that fires [onCompleted] only after an uninterrupted
- * [holdSeconds]-second hold. Used for the emergency dismiss and the
- * honor-mode water fallback — long enough to be a real commitment.
+ * [holdSeconds]-second hold. Used for the emergency dismiss: long
+ * enough to be a real commitment.
  */
 @Composable
 fun HoldToDismissButton(

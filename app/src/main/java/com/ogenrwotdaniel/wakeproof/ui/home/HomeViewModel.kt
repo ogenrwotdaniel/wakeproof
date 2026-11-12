@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
+import com.ogenrwotdaniel.wakeproof.data.FocusGoalToday
+import com.ogenrwotdaniel.wakeproof.plan.DayReviewStore
+import com.ogenrwotdaniel.wakeproof.plan.topThreeFor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmDevicePolicy
 import com.ogenrwotdaniel.wakeproof.alarm.AlarmScheduler
@@ -52,7 +55,8 @@ class HomeViewModel @Inject constructor(
     statsRepository: StatsRepository,
     private val settingsRepository: SettingsRepository,
     liveCloudFeed: LiveCloudFeed,
-    wallRulesRepository: WallRulesRepository
+    wallRulesRepository: WallRulesRepository,
+    private val dayReviewStore: DayReviewStore
 ) : ViewModel() {
 
     private val grants = MutableStateFlow(readGrants())
@@ -127,9 +131,22 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Daily focus goal in minutes, for the Focus card's progress. */
-    val focusGoalMinutes: StateFlow<Int> = settingsRepository.settings
-        .map { it.dailyFocusGoalMinutes }
+    val focusGoalMinutes: StateFlow<Int> = statsRepository.observeFocusGoal()
+        .map { it.minutes }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 120)
+
+    /** The goal with its reason: raised before an exam, and how to split it. */
+    val focusGoal: StateFlow<FocusGoalToday> = statsRepository.observeFocusGoal()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FocusGoalToday())
+
+    /** What last evening's review put first for today. */
+    val topThree: StateFlow<List<String>> = dayReviewStore.reviews
+        .map { topThreeFor(it, LocalDate.now().toEpochDay()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    init {
+        viewModelScope.launch { dayReviewStore.load() }
+    }
 
     val alarms: StateFlow<List<Alarm>> = repository.observeAlarms()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

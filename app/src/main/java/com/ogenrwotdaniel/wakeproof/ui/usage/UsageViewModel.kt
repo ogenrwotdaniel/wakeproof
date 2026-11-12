@@ -1,5 +1,7 @@
 package com.ogenrwotdaniel.wakeproof.ui.usage
 
+import com.ogenrwotdaniel.wakeproof.data.NightScreen
+import kotlinx.coroutines.flow.map
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -65,7 +67,7 @@ class UsageViewModel @Inject constructor(
     val report: StateFlow<CachedReport?> = reportRepository.report
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** Per-day focus/pushup/water for the last 7 days, oldest first. */
+    /** Per-day focus and pushups for the last 7 days, oldest first. */
     private val weekDays = statsRepository.observeWeek()
 
     data class ReportUiState(val generating: Boolean = false)
@@ -93,8 +95,20 @@ class UsageViewModel @Inject constructor(
         screenByDay = _snapshot.value?.week.orEmpty(),
         topApps = _snapshot.value?.topApps.orEmpty(),
         dailyGoalMinutes = settingsRepository.settings.first().dailyFocusGoalMinutes,
-        wall = _wallWeek.value
+        wall = _wallWeek.value,
+        credits = settingsRepository.settings.first().subjectCredits,
+        nights = _nights.value
     )
+
+    private val _nights = MutableStateFlow<List<NightScreen>>(emptyList())
+
+    /** Screen use inside the sleep wall, the last finished nights, oldest first. */
+    val nights: StateFlow<List<NightScreen>> = _nights.asStateFlow()
+
+    /** Credits per course, for the balance line under the subject breakdown. */
+    val subjectCredits: StateFlow<Map<String, Int>> = settingsRepository.settings
+        .map { it.subjectCredits }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     /** The walls over gated apps: fixed, shown for reading only. */
     val wallRules: StateFlow<WallRules> = wallRulesRepository.rules
@@ -258,6 +272,7 @@ class UsageViewModel @Inject constructor(
             _limitUsage.value = usageStatsRepository.todayForegroundMillisFor(capped)
                 .mapValues { (_, millis) -> millis / 60_000 }
             _wallWeek.value = measureWallWeek()
+            _nights.value = usageStatsRepository.nightScreens()
             val study = studyUsageSync.localMinutesToday()
             _localStudy.value = study
             // Publish ours before reading theirs, so a peer opening its card

@@ -4,6 +4,7 @@ import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmDao
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionLog
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
+import com.ogenrwotdaniel.wakeproof.data.db.ExamDao
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import java.time.LocalDate
 import javax.inject.Inject
@@ -17,21 +18,28 @@ import kotlinx.coroutines.flow.map
 data class TodayStatus(
     val pushupCount: Int = 0,
     val pushupTarget: Int = 0,
-    val waterCount: Int = 0,
-    val waterMl: Int = 0,
-    val waterTargetCount: Int = 0,
     val focusMinutes: Int = 0,
-    val anyUnverifiedWater: Boolean = false,
     val mathCount: Int = 0,
-    val mathTarget: Int = 0
+    val mathTarget: Int = 0,
+    /** Day-plan photos saved today, and how many plan alarms ask for one. */
+    val planCount: Int = 0,
+    val planTarget: Int = 0,
+    /** Review alarms answered today, the cards graded in them, and how many alarms ask. */
+    val reviewCount: Int = 0,
+    val reviewCards: Int = 0,
+    val reviewTarget: Int = 0,
+    /** Evening reviews written today, and how many alarms ask for one. */
+    val shutdownCount: Int = 0,
+    val shutdownTarget: Int = 0
 ) {
     /**
      * Requires a target: with no pushup alarm scheduled today, `0 >= 0` would
      * read as "done" and quietly credit a day that was never asked for one.
      */
     val pushupDone: Boolean get() = pushupTarget > 0 && pushupCount >= pushupTarget
-    val waterDone: Boolean get() = waterTargetCount > 0 && waterCount >= waterTargetCount
     val mathDone: Boolean get() = mathTarget > 0 && mathCount >= mathTarget
+    val planDone: Boolean get() = planTarget > 0 && planCount >= planTarget
+    val reviewDone: Boolean get() = reviewTarget > 0 && reviewCount >= reviewTarget
 }
 
 /** One day of history for the 7-day chart. */
@@ -39,10 +47,8 @@ data class DayStat(
     val epochDay: Long,
     val pushupCount: Int = 0,
     val pushupTarget: Int = 0,
-    val waterCount: Int = 0,
-    val waterTarget: Int = 0,
     val focusMinutes: Int = 0,
-    /** The daily focus goal this day is scored against — the current one. */
+    /** The focus goal this day is scored against: the current one, raised before an exam. */
     val focusGoalMinutes: Int = 0,
     val skipped: Boolean = false,
     /** Streak outcome, i.e. [focusDayOutcome]. */
@@ -71,7 +77,8 @@ data class StreakInfo(val days: Int = 0, val best: Int = 0)
 class StatsRepository @Inject constructor(
     private val completionRepository: CompletionRepository,
     private val alarmDao: AlarmDao,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val examDao: ExamDao
 ) {
     private fun window(): Flow<List<CompletionLog>> =
         completionRepository.observeSince(LocalDate.now().toEpochDay() - WINDOW_DAYS)
@@ -79,31 +86,47 @@ class StatsRepository @Inject constructor(
     private data class Source(
         val logs: List<CompletionLog>,
         val alarms: List<Alarm>,
-        val focusGoalMinutes: Int
-    )
+        /** The goal the user set; [goalOn] is what a day is scored against. */
+        val focusGoalMinutes: Int,
+        val exams: List<ExamDay>
+    ) {
+        fun goalOn(day: Long): Int = focusGoalOn(day, focusGoalMinutes, exams)
+    }
 
     /** Logs, the schedule and the focus goal together — every number here is scored against them. */
     private fun source(): Flow<Source> = combine(
         window(),
         alarmDao.observeAll(),
-        settingsRepository.settings.map { it.dailyFocusGoalMinutes }.distinctUntilChanged()
-    ) { logs, alarms, goal -> Source(logs, alarms, goal) }
+        settingsRepository.settings.map { it.dailyFocusGoalMinutes }.distinctUntilChanged(),
+        // Past exams too: the days before them were scored against a raised goal.
+        examDao.observeUpcoming(LocalDate.now().toEpochDay() - WINDOW_DAYS)
+            .map { rows -> rows.map { ExamDay(it.name, it.epochDay) } }
+    ) { logs, alarms, goal, exams -> Source(logs, alarms, goal, exams) }
+
+    /** Today's focus goal: the user's own, raised before an exam ([focusGoalOn]). */
+    fun observeFocusGoal(): Flow<FocusGoalToday> = source().map { src ->
+        focusGoalToday(LocalDate.now().toEpochDay(), src.focusGoalMinutes, src.exams)
+    }.distinctUntilChanged()
 
     fun observeToday(): Flow<TodayStatus> = source().map { (logs, alarms) ->
         val epochDay = LocalDate.now().toEpochDay()
         val today = logs.filter { it.epochDay == epochDay }
         val goals = dailyGoalsFrom(alarms, dayOfWeekFor(epochDay))
-        val waters = today.filter { it.kind == GoalKind.WATER && it.status != CompletionStatus.SKIPPED }
         TodayStatus(
             pushupCount = pushupsVerified(today),
             pushupTarget = goals.pushupTarget,
-            waterCount = waters.size,
-            waterMl = waters.sumOf { it.amount },
-            waterTargetCount = goals.waterTarget,
             focusMinutes = today.focusMinutes(),
-            anyUnverifiedWater = waters.any { it.status == CompletionStatus.UNVERIFIED },
             mathCount = mathsSolved(today),
-            mathTarget = goals.mathTarget
+            mathTarget = goals.mathTarget,
+            planCount = plansLogged(today),
+            planTarget = goals.planTarget,
+            reviewCount = reviewsDone(today),
+            reviewCards = today
+                .filter { it.kind == GoalKind.REVIEW && it.status != CompletionStatus.SKIPPED }
+                .sumOf { it.amount },
+            reviewTarget = goals.reviewTarget,
+            shutdownCount = shutdownsDone(today),
+            shutdownTarget = goals.shutdownTarget
         )
     }
 
@@ -117,7 +140,7 @@ class StatsRepository @Inject constructor(
         val today = LocalDate.now().toEpochDay()
         val byDay = src.logs.groupBy { it.epochDay }
         fun outcomeOn(day: Long) =
-            focusDayOutcome(byDay[day].orEmpty().focusMinutes(), src.focusGoalMinutes)
+            focusDayOutcome(byDay[day].orEmpty().focusMinutes(), src.goalOn(day))
 
         // Today is still in progress, so a day that has not met its goal yet is
         // not a broken streak — start from yesterday unless today is already won.
@@ -134,13 +157,11 @@ class StatsRepository @Inject constructor(
             epochDay = day,
             pushupCount = pushupsVerified(dayLogs),
             pushupTarget = goals.pushupTarget,
-            waterCount = watersLogged(dayLogs),
-            waterTarget = goals.waterTarget,
             focusMinutes = focus,
-            focusGoalMinutes = src.focusGoalMinutes,
+            focusGoalMinutes = src.goalOn(day),
             // An emergency-dismissed ALARM; a withered focus tree is not one.
             skipped = dayLogs.any { it.kind != GoalKind.FOCUS && it.status == CompletionStatus.SKIPPED },
-            outcome = focusDayOutcome(focus, src.focusGoalMinutes)
+            outcome = focusDayOutcome(focus, src.goalOn(day))
         )
     }
 

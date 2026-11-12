@@ -6,14 +6,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ogenrwotdaniel.wakeproof.ui.agenda.AgendaScreen
-import com.ogenrwotdaniel.wakeproof.ui.corpus.CorpusCaptureScreen
 import com.ogenrwotdaniel.wakeproof.ui.flashcards.FlashcardsScreen
 import com.ogenrwotdaniel.wakeproof.ui.forest.ForestScreen
 import com.ogenrwotdaniel.wakeproof.ui.home.HomeScreen
 import com.ogenrwotdaniel.wakeproof.ui.onboarding.OnboardingScreen
+import com.ogenrwotdaniel.wakeproof.ui.plans.DayPlansScreen
 import com.ogenrwotdaniel.wakeproof.ui.pomodoro.PomodoroScreen
 import com.ogenrwotdaniel.wakeproof.ui.settings.SettingsScreen
 import com.ogenrwotdaniel.wakeproof.ui.usage.UsageScreen
+import com.ogenrwotdaniel.wakeproof.ui.verify.PlanVerifyScreen
+import com.ogenrwotdaniel.wakeproof.ui.verify.ShutdownVerifyScreen
 
 /**
  * Main in-app navigation graph. The lock-screen alarm flow (ringing +
@@ -36,6 +38,7 @@ fun WakeProofNavGraph(
                     onOpenAgenda = { navController.navigate(AgendaRoute) },
                     onOpenFlashcards = { navController.navigate(FlashcardsRoute) },
                     onOpenForest = { navController.navigate(ForestRoute) },
+                    onOpenPlans = { navController.navigate(DayPlansRoute) },
                 )
             }
             composable<OnboardingRoute> {
@@ -63,8 +66,34 @@ fun WakeProofNavGraph(
             composable<ForestRoute> {
                 ForestScreen(onBack = { navController.popBackStack() })
             }
-            composable<CorpusCaptureRoute> {
-                CorpusCaptureScreen(onBack = { navController.popBackStack() })
+            composable<DayPlansRoute> {
+                DayPlansScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddPlan = { navController.navigate(PlanCaptureRoute) },
+                    onReviewDay = { navController.navigate(ShutdownNowRoute) }
+                )
+            }
+            composable<ShutdownNowRoute> {
+                ShutdownVerifyScreen(
+                    onVerified = {},
+                    onFinish = { navController.popBackStack(DayPlansRoute, inclusive = false) },
+                    onEmergencyDismiss = {},
+                    snoozesLeft = 0,
+                    onSnooze = {},
+                    ringing = false
+                )
+            }
+            composable<PlanCaptureRoute> {
+                // The alarm's own screen, without an alarm behind it.
+                PlanVerifyScreen(
+                    onVerified = {},
+                    // To the library by name: a second tap must not pop that too.
+                    onFinish = { navController.popBackStack(DayPlansRoute, inclusive = false) },
+                    onEmergencyDismiss = {},
+                    snoozesLeft = 0,
+                    onSnooze = {},
+                    ringing = false
+                )
             }
         }
     }

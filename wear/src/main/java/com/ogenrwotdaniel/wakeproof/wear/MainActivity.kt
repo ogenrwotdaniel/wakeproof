@@ -385,8 +385,7 @@ class MainActivity : ComponentActivity() {
                 append("🔥 ${s.streak}-day streak\n\n")
                 append("Focus ${formatFocusMinutes(today.minutes)}")
                 if (s.focusGoal > 0) append(" / ${formatFocusMinutes(s.focusGoal)}")
-                append("\n")
-                append("💧 ${s.waterCount}/${s.waterTarget}  (${s.waterMl} ml)")
+                dayLine(s)?.let { append("\n").append(it) }
             } else {
                 append("Focus today ${formatFocusMinutes(today.minutes)}")
             }

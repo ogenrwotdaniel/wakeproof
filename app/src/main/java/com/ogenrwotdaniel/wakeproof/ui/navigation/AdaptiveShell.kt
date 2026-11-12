@@ -55,6 +55,7 @@ private val SHELL_DESTINATIONS = listOf(
     ShellDestination("Forest", ForestRoute, ForestRoute::class),
     ShellDestination("Flashcards", FlashcardsRoute, FlashcardsRoute::class),
     ShellDestination("Agenda", AgendaRoute, AgendaRoute::class),
+    ShellDestination("Day plans", DayPlansRoute, DayPlansRoute::class),
     ShellDestination("Screen time", UsageRoute, UsageRoute::class),
     ShellDestination("Settings", SettingsRoute, SettingsRoute::class)
 )

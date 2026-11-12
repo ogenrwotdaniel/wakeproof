@@ -5,6 +5,8 @@ import com.ogenrwotdaniel.wakeproof.data.db.CompletionLog
 import com.ogenrwotdaniel.wakeproof.data.db.Exam
 import com.ogenrwotdaniel.wakeproof.data.db.Flashcard
 import com.ogenrwotdaniel.wakeproof.data.db.ParkedThought
+import com.ogenrwotdaniel.wakeproof.plan.DayReview
+import com.ogenrwotdaniel.wakeproof.study.RecallNote
 import kotlinx.serialization.Serializable
 
 /**
@@ -39,19 +41,27 @@ data class BackupFile(
     val completionLogs: List<CompletionLog> = emptyList(),
     val flashcards: List<Flashcard> = emptyList(),
     val exams: List<Exam> = emptyList(),
-    val parkedThoughts: List<ParkedThought> = emptyList()
+    val parkedThoughts: List<ParkedThought> = emptyList(),
+    /**
+     * The evening reviews and focus-block recall notes: small files on one
+     * device that sync never carries, so without the backup a reinstall loses
+     * them. The day-plan photos are not here; they stay on the device.
+     */
+    val dayReviews: List<DayReview> = emptyList(),
+    val recallNotes: List<RecallNote> = emptyList()
 ) {
     val totalRows: Int
         get() = alarms.size + completionLogs.size + flashcards.size +
-            exams.size + parkedThoughts.size
+            exams.size + parkedThoughts.size + dayReviews.size + recallNotes.size
 }
 
 /**
  * Bumped when the *document* shape changes, not when the database does.
  *
  * 1 — first format: the five Room tables, tombstones included.
+ * 2 — adds the evening reviews and recall notes (2026-11-12).
  */
-const val CURRENT_BACKUP_VERSION = 1
+const val CURRENT_BACKUP_VERSION = 2
 
 /**
  * A stable, sortable filename so a folder of backups reads as a history.

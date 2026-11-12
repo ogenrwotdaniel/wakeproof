@@ -41,7 +41,9 @@ class AlarmScheduler @Inject constructor(
      * makes "alarms ring on the phone only" true rather than mostly true.
      */
     fun schedule(alarm: Alarm) {
-        if (!devicePolicy.ringsAlarms) {
+        // A retired kind (water) synced from a device not yet updated has no
+        // verification screen left; armed, it would ring as pushups.
+        if (!devicePolicy.ringsAlarms || alarm.type.retired) {
             cancelById(alarm.id)
             return
         }

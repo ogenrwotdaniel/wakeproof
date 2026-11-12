@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.data.MAX_SUBJECT_CREDITS
 import com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.data.MIN_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
@@ -204,38 +205,6 @@ fun SettingsScreen(
                 steps = MathChallenge.MAX_PROBLEMS - MathChallenge.MIN_PROBLEMS - 1
             )
             SliderSetting(
-                label = "Water per alarm",
-                value = settings.waterAmountMl,
-                range = 250f..1000f,
-                unit = "ml",
-                onCommit = viewModel::setWaterAmountMl
-            )
-            SliderSetting(
-                label = "Bottle size",
-                value = settings.bottleCapacityMl,
-                range = 250f..2000f,
-                unit = "ml",
-                onCommit = viewModel::setBottleCapacityMl
-            )
-            Text(
-                text = "Your bottle's full capacity — how the camera check turns the drop in " +
-                    "the water level into millilitres. No printed ml marks needed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            SwitchSetting(
-                label = "Read the water level on this device",
-                description = "Finds the water line with on-device computer vision: no API " +
-                    "key, no network, no waiting at 06:00, and the photos never leave the " +
-                    "phone. A vision model is still asked for a second opinion before any " +
-                    "rejection is shown, if you have a key. Turn this off to send every " +
-                    "pair to the model instead — worth trying if your own bottle is " +
-                    "misread. Verification needs a translucent bottle either way; a steel " +
-                    "flask has no visible line at any price.",
-                checked = settings.offlineWaterVerification,
-                onCheckedChange = viewModel::setOfflineWaterVerification
-            )
-            SliderSetting(
                 label = "Emergency hold",
                 value = settings.emergencyHoldSeconds,
                 range = 30f..120f,
@@ -256,6 +225,37 @@ fun SettingsScreen(
                 valueText = ::formatDurationMinutes,
                 onCommit = viewModel::setDailyFocusGoalMinutes
             )
+            Text(
+                text = "Before an exam on the Exams list the goal rises by itself: a quarter more " +
+                    "from two weeks out, half more in the last week, double in the last three days.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(text = "Course credits", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = "The weekly report weighs each subject's focus time against its credits " +
+                    "and names the one falling behind. Leave a subject at 0 to keep it out.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            settings.studySubjects.sorted().forEach { subject ->
+                val credits = settings.subjectCredits[subject] ?: 0
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = subject, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = { viewModel.setSubjectCredits(subject, credits - 1) },
+                        enabled = credits > 0
+                    ) { Text("−") }
+                    Text(text = if (credits == 0) "0" else "$credits cr")
+                    TextButton(
+                        onClick = { viewModel.setSubjectCredits(subject, credits + 1) },
+                        enabled = credits < MAX_SUBJECT_CREDITS
+                    ) { Text("+") }
+                }
+            }
             Text(
                 text = "How much focused time a day counts as a full day — the goal on " +
                     "Home, the widget and the watch. Up to 12 hours, in quarter-hour steps.",
@@ -464,7 +464,7 @@ fun SettingsScreen(
                 // version actually shipped.
                 text = "WakeProof ${BuildConfig.VERSION_NAME} — alarms you can only " +
                     "dismiss by proving it. " +
-                    "Pushups and water are verified on-device (with optional Gemini fallback).",
+                    "Pushups are counted on the device; nothing from the camera leaves it.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -860,13 +860,25 @@ private fun SliderSetting(
 }
 
 /**
- * Creates an extra alarm — a second pushup session, another water reminder.
+ * Creates an extra alarm: a second pushup session, a flashcard review.
  *
  * A new alarm never conflicts across devices: it gets its own sync id, so one
  * added on the phone and one added on the tablet are two separate alarms rather
  * than two versions of the same one.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+/** The kinds an alarm can be added as, with the name on their chip. */
+private val ADDABLE_TYPES = listOf(
+    AlarmType.PUSHUP to "Pushups",
+    AlarmType.MATH to "Math",
+    AlarmType.REVIEW to "Flashcards",
+    AlarmType.PLAN to "Day plan",
+    AlarmType.SHUTDOWN to "Evening review"
+)
+
+@OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class
+)
 @Composable
 private fun AddAlarmDialog(
     onConfirm: (AlarmType, Int, Int, String, Int) -> Unit,
@@ -889,14 +901,14 @@ private fun AddAlarmDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // CUSTOM is left out on purpose: it has no verification screen,
                     // so offering it here would create an alarm nothing can dismiss.
-                    listOf(AlarmType.PUSHUP, AlarmType.WATER, AlarmType.MATH).forEach { candidate ->
+                    ADDABLE_TYPES.forEach { (candidate, name) ->
                         FilterChip(
                             selected = candidate == type,
                             onClick = { type = candidate },
-                            label = { Text(candidate.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                            label = { Text(name) }
                         )
                     }
                 }
@@ -984,8 +996,9 @@ private fun TimePickerDialog(
 @Composable
 private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
     val context = LocalContext.current
-    // The water alarm is fixed in the schedule only; it rings like any other.
-    val hard = StrictAlarm.slotOf(context, alarm)?.hard != false
+    // The day-plan alarm is fixed in the schedule only; it rings like any other.
+    val slot = StrictAlarm.slotOf(context, alarm)
+    val hard = slot?.hard != false
     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp)) {
         Text(
             text = formatAlarmTime(context, alarm.hour, alarm.minute),
@@ -993,7 +1006,7 @@ private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
         )
         Text(
             text = (if (isStrictLabel(alarm.label)) "" else alarm.label).ifBlank { "Locked" } +
-                (if (hard) " · ${StrictAlarm.REPS} pushups" else " · water") + " · every day",
+                (if (hard) " · ${StrictAlarm.REPS} pushups" else if (slot?.type == AlarmType.SHUTDOWN) " · evening review" else " · photo of your day plan") + " · every day",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

@@ -18,8 +18,22 @@ data class WeekStats(
     val topApps: List<AppUsage> = emptyList(),
     val dailyGoalMinutes: Int = 120,
     /** Time spent in gated apps day by day; empty when not measured. */
-    val wall: List<WallDay> = emptyList()
-)
+    val wall: List<WallDay> = emptyList(),
+    /** Credits per course; empty when none are set, and then balance is not judged. */
+    val credits: Map<String, Int> = emptyMap(),
+    /** Screen use inside the sleep wall, night by night; empty when not measured. */
+    val nights: List<NightScreen> = emptyList()
+) {
+    /** The goal [day] was scored against: its own (raised before an exam), else the set one. */
+    fun goalOf(day: DayStat): Int = day.focusGoalMinutes.takeIf { it > 0 } ?: dailyGoalMinutes
+
+    /** Each credited course's time beside its weight. */
+    val balance: List<SubjectShare>
+        get() = subjectBalance(
+            focusBySubject.mapNotNull { row -> row.subject?.let { it to row.minutes } }.toMap(),
+            credits
+        )
+}
 
 /** One day's measured minutes across gated social, video, messaging and browser apps. */
 data class WallDay(
@@ -57,7 +71,7 @@ class WeeklyReportGenerator @Inject constructor() {
     private fun wins(stats: WeekStats): String {
         val lines = mutableListOf<String>()
         val totalFocus = stats.days.sumOf { it.focusMinutes }
-        val goalDays = stats.days.count { it.focusMinutes >= stats.dailyGoalMinutes }
+        val goalDays = stats.days.count { it.focusMinutes >= stats.goalOf(it) }
 
         if (totalFocus > 0) {
             lines += "${formatDuration(totalFocus)} of focused work over 7 days" +
@@ -76,6 +90,10 @@ class WeeklyReportGenerator @Inject constructor() {
         if (blackboard > 0) {
             lines += "${formatDuration(blackboard.toInt())} on Blackboard."
         }
+        val sleep = sleepScore(stats.nights)
+        if (sleep.measured >= 3 && sleep.onTime * 100 >= sleep.measured * 70) {
+            lines += "Phone down by 20:00 on ${sleep.onTime} of ${sleep.measured} nights."
+        }
         val pushupDays = stats.days.count { it.pushupDone }
         if (pushupDays > 0) {
             lines += "Pushups verified on $pushupDays ${dayWord(pushupDays)}."
@@ -91,7 +109,7 @@ class WeeklyReportGenerator @Inject constructor() {
     private fun watchOut(stats: WeekStats): String {
         val lines = mutableListOf<String>()
         val focusTotal = stats.days.sumOf { it.focusMinutes }
-        val missedDays = stats.days.count { !it.skipped && it.focusMinutes < stats.dailyGoalMinutes }
+        val missedDays = stats.days.count { !it.skipped && it.focusMinutes < stats.goalOf(it) }
         // With nothing logged at all, "7 days under goal" only restates the gap
         // line below it.
         if (missedDays > 0 && focusTotal > 0) {
@@ -104,6 +122,18 @@ class WeeklyReportGenerator @Inject constructor() {
         val gap = longestZeroRun(stats.days)
         if (gap >= 2) {
             lines += "$gap days in a row with no focus logged — the longest gap this week."
+        }
+
+        neglectedSubject(stats.balance)?.let { behind ->
+            lines += "${behind.subject} got ${percent(behind.timeShare)} of your focus time for " +
+                "${percent(behind.creditShare)} of your credits."
+        }
+        val sleep = sleepScore(stats.nights)
+        val lateNights = sleep.measured - sleep.onTime
+        if (sleep.measured >= 3 && lateNights >= 2) {
+            val worst = stats.nights.filter { it.minutes != null }.maxByOrNull { it.minutes ?: 0 }
+            lines += "The phone was in use after 20:00 on $lateNights of ${sleep.measured} nights" +
+                (worst?.let { " (${dayName(it.epochDay)}: ${formatDuration(it.minutes ?: 0)})." } ?: ".")
         }
 
         val screenTotal = stats.screenByDay.sumOf { it.minutes }
@@ -139,7 +169,7 @@ class WeeklyReportGenerator @Inject constructor() {
      */
     private fun nextWeek(stats: WeekStats): String {
         val focusTotal = stats.days.sumOf { it.focusMinutes }
-        val goalDays = stats.days.count { it.focusMinutes >= stats.dailyGoalMinutes }
+        val goalDays = stats.days.count { it.focusMinutes >= stats.goalOf(it) }
         val neglected = stats.focusBySubject.filter { it.subject != null && it.minutes == 0 }
 
         val suggestion = when {
@@ -155,6 +185,14 @@ class WeeklyReportGenerator @Inject constructor() {
                 "You didn't reach ${stats.dailyGoalMinutes} minutes on any day. Drop the goal " +
                     "to ${(focusTotal / stats.days.size.coerceAtLeast(1) / 15 + 1) * 15} minutes " +
                     "and actually hit it — a goal you miss daily stops meaning anything."
+
+            neglectedSubject(stats.balance) != null -> {
+                val behind = neglectedSubject(stats.balance)!!
+                val fair = (stats.balance.sumOf { it.minutes } * behind.creditShare).toInt()
+                "${behind.subject} carries ${percent(behind.creditShare)} of your credits and got " +
+                    "${formatDuration(behind.minutes)}. Give it about ${formatDuration(fair)} next " +
+                    "week, starting with the first block on Monday."
+            }
 
             neglected.isNotEmpty() ->
                 "${neglected.first().subject} got no time at all. Give it one block " +
@@ -189,6 +227,8 @@ class WeeklyReportGenerator @Inject constructor() {
         }
         return longest
     }
+
+    private fun percent(share: Double): String = "${(share * 100).toInt()}%"
 
     private fun dayWord(count: Int) = if (count == 1) "day" else "days"
 

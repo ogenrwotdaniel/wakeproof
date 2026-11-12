@@ -22,13 +22,8 @@ CLAUDE.md
 .claude/
 docs/TESTER_EMAIL.md
 
-# Water-verification corpus: bottle photographs. The privacy policy promises
-# these are not retained, so they must never enter the repository.
-# See tools/water/README.md.
-tools/water/corpus/
 tools/**/__pycache__/
 .pytest_cache/
-tools/water/.pytest_cache/
 
 # Play Console working notes (release checklist, store texts) — kept locally
 docs/PLAY_PUBLISHING.md

@@ -121,6 +121,8 @@ a clip identical (SHA-256 of mime+body) to the last one this device sent or rece
    "installId","name","uid"}, aad="wakeproof-pair-v1")`. The device adopts K_final.
    The tablet pairs by scanning the laptop's QR the same way and so gets the same K.
 5. Forget (either side) deletes the local K and stops the feature on that device only.
+   The laptop's `forget --cloud` also deletes every document under `users/{uid}/clips/`
+   first; a device still paired writes its presence again.
 
 ## D-Bus between the GNOME extension and the daemon
 

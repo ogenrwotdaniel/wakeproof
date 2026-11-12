@@ -76,7 +76,9 @@ fun AlarmRingingScreen(
             Spacer(Modifier.height(24.dp))
             Text(
                 text = when (alarm?.type) {
-                    AlarmType.WATER -> "Drink your water and prove it with the camera."
+                    AlarmType.PLAN -> "Write down everything you will do today, then photograph the page."
+                    AlarmType.REVIEW -> "Answer your due flashcards."
+                    AlarmType.SHUTDOWN -> "Look at this morning's plan, say what got done, and write tomorrow's top three."
                     AlarmType.PUSHUP -> "Do your pushups in front of the camera."
                     AlarmType.MATH -> "Solve a few sums. Works in the dark, no camera."
                     else -> "Complete your verification to silence the alarm."

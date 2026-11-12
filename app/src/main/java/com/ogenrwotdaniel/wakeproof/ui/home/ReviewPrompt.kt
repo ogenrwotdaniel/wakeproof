@@ -12,7 +12,7 @@ const val REVIEW_STREAK_DAYS = 3
  * after [REVIEW_STREAK_DAYS] days in a row of hitting the focus goal.
  *
  * Timing is the whole game with ratings. Asked on day one, people rate a promise;
- * asked straight after a rejected water photo, they rate a grudge. Three met days
+ * asked straight after a failed verification, they rate a grudge. Three met days
  * means the app has demonstrably worked for this person, and they are looking at
  * the number that proves it.
  */

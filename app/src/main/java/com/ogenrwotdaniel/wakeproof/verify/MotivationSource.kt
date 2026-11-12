@@ -8,9 +8,6 @@ package com.ogenrwotdaniel.wakeproof.verify
 sealed interface Achievement {
     /** [reps] pushups counted on-device by the pose detector. */
     data class Pushups(val reps: Int) : Achievement
-
-    /** [ml] millilitres credited across the verified before/after photo pairs. */
-    data class Water(val ml: Int) : Achievement
 }
 
 /**

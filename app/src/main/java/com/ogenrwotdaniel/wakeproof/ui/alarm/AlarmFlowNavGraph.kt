@@ -2,18 +2,26 @@ package com.ogenrwotdaniel.wakeproof.ui.alarm
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
+import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
 import com.ogenrwotdaniel.wakeproof.ui.navigation.AlarmRingingRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.MathVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.navigation.PushupVerifyRoute
-import com.ogenrwotdaniel.wakeproof.ui.navigation.WaterVerifyRoute
+import com.ogenrwotdaniel.wakeproof.ui.navigation.PlanVerifyRoute
+import com.ogenrwotdaniel.wakeproof.ui.navigation.ReviewVerifyRoute
+import com.ogenrwotdaniel.wakeproof.ui.navigation.ShutdownVerifyRoute
 import com.ogenrwotdaniel.wakeproof.ui.verify.MathVerifyScreen
 import com.ogenrwotdaniel.wakeproof.ui.verify.PushupVerifyScreen
-import com.ogenrwotdaniel.wakeproof.ui.verify.WaterVerifyScreen
+import com.ogenrwotdaniel.wakeproof.ui.verify.PlanVerifyScreen
+import com.ogenrwotdaniel.wakeproof.ui.verify.ReviewVerifyScreen
+import com.ogenrwotdaniel.wakeproof.ui.verify.ShutdownVerifyScreen
 
 /**
  * Navigation for the lock-screen alarm flow: ringing → the verification screen
@@ -34,6 +42,11 @@ fun AlarmFlowNavGraph(
     val alarm by viewModel.alarm.collectAsStateWithLifecycle()
     val snoozesLeft by viewModel.snoozesLeft.collectAsStateWithLifecycle()
     val strict by viewModel.strict.collectAsStateWithLifecycle()
+    // Sums standing in for a review alarm with no card due are logged as the
+    // review. Kept by alarm id: this screen is reused when another alarm fires
+    // (onNewIntent), and that one's sums are its own.
+    var reviewStandInFor by rememberSaveable { mutableStateOf(NO_STAND_IN) }
+    val alarmId = alarm?.id ?: -1L
 
     NavHost(navController = navController, startDestination = AlarmRingingRoute()) {
         composable<AlarmRingingRoute> {
@@ -41,8 +54,13 @@ fun AlarmFlowNavGraph(
                 alarm = alarm,
                 onStartVerification = { type ->
                     when (type) {
-                        AlarmType.WATER -> navController.navigate(WaterVerifyRoute)
-                        AlarmType.MATH -> navController.navigate(MathVerifyRoute)
+                        AlarmType.PLAN -> navController.navigate(PlanVerifyRoute)
+                        AlarmType.REVIEW -> navController.navigate(ReviewVerifyRoute)
+                        AlarmType.SHUTDOWN -> navController.navigate(ShutdownVerifyRoute)
+                        AlarmType.MATH -> {
+                            reviewStandInFor = NO_STAND_IN
+                            navController.navigate(MathVerifyRoute)
+                        }
                         else -> navController.navigate(PushupVerifyRoute)
                     }
                 }
@@ -56,7 +74,10 @@ fun AlarmFlowNavGraph(
                 snoozesLeft = snoozesLeft,
                 onSnooze = { viewModel.snooze(onSnooze) },
                 strict = strict,
-                onCameraFallback = { navController.navigate(MathVerifyRoute) }
+                onCameraFallback = {
+                    reviewStandInFor = NO_STAND_IN
+                    navController.navigate(MathVerifyRoute)
+                }
             )
         }
         composable<MathVerifyRoute> {
@@ -66,11 +87,12 @@ fun AlarmFlowNavGraph(
                 onEmergencyDismiss = onEmergencyDismiss,
                 snoozesLeft = snoozesLeft,
                 onSnooze = { viewModel.snooze(onSnooze) },
-                strict = strict
+                strict = strict,
+                goalKind = if (reviewStandInFor == alarmId) GoalKind.REVIEW else GoalKind.MATH
             )
         }
-        composable<WaterVerifyRoute> {
-            WaterVerifyScreen(
+        composable<PlanVerifyRoute> {
+            PlanVerifyScreen(
                 onVerified = onVerified,
                 onFinish = onFinish,
                 onEmergencyDismiss = onEmergencyDismiss,
@@ -78,5 +100,34 @@ fun AlarmFlowNavGraph(
                 onSnooze = { viewModel.snooze(onSnooze) }
             )
         }
+        composable<ShutdownVerifyRoute> {
+            ShutdownVerifyScreen(
+                onVerified = onVerified,
+                onFinish = onFinish,
+                onEmergencyDismiss = onEmergencyDismiss,
+                snoozesLeft = snoozesLeft,
+                onSnooze = { viewModel.snooze(onSnooze) }
+            )
+        }
+        composable<ReviewVerifyRoute> {
+            ReviewVerifyScreen(
+                onVerified = onVerified,
+                onFinish = onFinish,
+                onEmergencyDismiss = onEmergencyDismiss,
+                snoozesLeft = snoozesLeft,
+                onSnooze = { viewModel.snooze(onSnooze) },
+                // No card is due (or the cards cannot be read before the first
+                // unlock): sums instead, never a free exit.
+                onNoCards = {
+                    reviewStandInFor = alarmId
+                    navController.navigate(MathVerifyRoute) {
+                        popUpTo<ReviewVerifyRoute> { inclusive = true }
+                    }
+                }
+            )
+        }
     }
 }
+
+/** No alarm's sums stand in for a review; distinct from -1, the id of an alarm that could not be read. */
+private const val NO_STAND_IN = Long.MIN_VALUE

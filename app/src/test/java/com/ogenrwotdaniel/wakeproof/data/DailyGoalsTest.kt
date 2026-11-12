@@ -42,14 +42,14 @@ class DailyGoalsTest {
         val goals = dailyGoalsFrom(
             listOf(
                 alarm(AlarmType.PUSHUP),
-                alarm(AlarmType.WATER),
-                alarm(AlarmType.WATER)
+                alarm(AlarmType.PLAN),
+                alarm(AlarmType.PLAN)
             ),
             DayOfWeek.MONDAY
         )
-        // The bug this replaced: one pushup and two waters scored against a
-        // hardcoded three-water target, so the day could never be completed.
-        assertEquals(DailyGoals(pushupTarget = 1, waterTarget = 2), goals)
+        // The bug this replaced: targets were hardcoded, so a day could ask for
+        // a verification no alarm would ever ring for.
+        assertEquals(DailyGoals(pushupTarget = 1, planTarget = 2), goals)
     }
 
     @Test
@@ -61,27 +61,42 @@ class DailyGoalsTest {
                 alarm(AlarmType.PUSHUP, hour = 3, minute = 0), alarm(AlarmType.PUSHUP, hour = 4, minute = 0),
                 alarm(AlarmType.PUSHUP, hour = 5, minute = 30), alarm(AlarmType.PUSHUP, hour = 6, minute = 5),
                 alarm(AlarmType.PUSHUP, hour = 7, minute = 0),
-                // The fixed water alarm and a copy of it ring once between them.
-                alarm(AlarmType.WATER, hour = 8, minute = 20), alarm(AlarmType.WATER, hour = 8, minute = 20),
-                alarm(AlarmType.WATER, hour = 12, minute = 0)
+                // The fixed plan alarm and a copy of it ring once between them.
+                alarm(AlarmType.PLAN, hour = 8, minute = 20), alarm(AlarmType.PLAN, hour = 8, minute = 20),
+                alarm(AlarmType.PLAN, hour = 12, minute = 0)
             ),
             DayOfWeek.MONDAY
         )
         assertEquals(3, goals.pushupTarget)
-        assertEquals(2, goals.waterTarget)
+        assertEquals(2, goals.planTarget)
     }
 
     @Test
     fun `disabled and deleted alarms ask for nothing`() {
         val goals = dailyGoalsFrom(
             listOf(
-                alarm(AlarmType.WATER),
-                alarm(AlarmType.WATER, enabled = false),
-                alarm(AlarmType.WATER, deleted = true)
+                alarm(AlarmType.PLAN),
+                alarm(AlarmType.PLAN, enabled = false),
+                alarm(AlarmType.PLAN, deleted = true)
             ),
             DayOfWeek.MONDAY
         )
-        assertEquals(1, goals.waterTarget)
+        assertEquals(1, goals.planTarget)
+    }
+
+    @Test
+    fun `retired water alarms and review alarms are scored as what they are`() {
+        val goals = dailyGoalsFrom(
+            listOf(alarm(AlarmType.WATER), alarm(AlarmType.WATER), alarm(AlarmType.REVIEW)),
+            DayOfWeek.MONDAY
+        )
+        // Water asks for nothing: no screen is left that could ever log it.
+        assertEquals(DailyGoals(pushupTarget = 0, reviewTarget = 1), goals)
+        assertEquals(DayOutcome.MET, dayOutcome(logs(log(GoalKind.REVIEW)), goals))
+        assertEquals(
+            DayOutcome.MISSED,
+            dayOutcome(logs(log(GoalKind.REVIEW, CompletionStatus.SKIPPED)), goals)
+        )
     }
 
     @Test
@@ -100,7 +115,7 @@ class DailyGoalsTest {
             listOf(alarm(AlarmType.MATH), alarm(AlarmType.PUSHUP)),
             DayOfWeek.MONDAY
         )
-        assertEquals(DailyGoals(pushupTarget = 1, waterTarget = 0, mathTarget = 1), goals)
+        assertEquals(DailyGoals(pushupTarget = 1, planTarget = 0, mathTarget = 1), goals)
     }
 
     @Test
@@ -120,43 +135,43 @@ class DailyGoalsTest {
 
     @Test
     fun `a day meeting every goal is MET`() {
-        val goals = DailyGoals(pushupTarget = 1, waterTarget = 2)
+        val goals = DailyGoals(pushupTarget = 1, planTarget = 2)
         val met = logs(
             log(GoalKind.PUSHUP),
-            log(GoalKind.WATER),
-            log(GoalKind.WATER)
+            log(GoalKind.PLAN),
+            log(GoalKind.PLAN)
         )
         assertEquals(DayOutcome.MET, dayOutcome(met, goals))
     }
 
     @Test
-    fun `honor-mode water counts toward the target`() {
-        val goals = DailyGoals(pushupTarget = 0, waterTarget = 1)
-        val honor = logs(log(GoalKind.WATER, CompletionStatus.UNVERIFIED))
+    fun `an unverified plan still counts toward the target`() {
+        val goals = DailyGoals(pushupTarget = 0, planTarget = 1)
+        val honor = logs(log(GoalKind.PLAN, CompletionStatus.UNVERIFIED))
         assertEquals(DayOutcome.MET, dayOutcome(honor, goals))
     }
 
     @Test
     fun `an unverified pushup does not count`() {
-        val goals = DailyGoals(pushupTarget = 1, waterTarget = 0)
+        val goals = DailyGoals(pushupTarget = 1, planTarget = 0)
         val honor = logs(log(GoalKind.PUSHUP, CompletionStatus.UNVERIFIED))
         assertEquals(DayOutcome.MISSED, dayOutcome(honor, goals))
     }
 
     @Test
     fun `an emergency dismiss anywhere in the day misses it`() {
-        val goals = DailyGoals(pushupTarget = 1, waterTarget = 1)
+        val goals = DailyGoals(pushupTarget = 1, planTarget = 1)
         val skipped = logs(
             log(GoalKind.PUSHUP),
-            log(GoalKind.WATER),
-            log(GoalKind.WATER, CompletionStatus.SKIPPED)
+            log(GoalKind.PLAN),
+            log(GoalKind.PLAN, CompletionStatus.SKIPPED)
         )
         assertEquals(DayOutcome.MISSED, dayOutcome(skipped, goals))
     }
 
     @Test
     fun `a math target is met by a solved run`() {
-        val goals = DailyGoals(pushupTarget = 0, waterTarget = 0, mathTarget = 1)
+        val goals = DailyGoals(pushupTarget = 0, planTarget = 0, mathTarget = 1)
         assertEquals(DayOutcome.MET, dayOutcome(logs(log(GoalKind.MATH)), goals))
         assertEquals(DayOutcome.MISSED, dayOutcome(emptyList(), goals))
     }
@@ -168,8 +183,8 @@ class DailyGoalsTest {
 
     @Test
     fun `extra completions beyond the target still count as met`() {
-        val goals = DailyGoals(pushupTarget = 0, waterTarget = 1)
-        val plenty = logs(log(GoalKind.WATER), log(GoalKind.WATER), log(GoalKind.WATER))
+        val goals = DailyGoals(pushupTarget = 0, planTarget = 1)
+        val plenty = logs(log(GoalKind.PLAN), log(GoalKind.PLAN), log(GoalKind.PLAN))
         assertEquals(DayOutcome.MET, dayOutcome(plenty, goals))
     }
 

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * Single source of truth for alarms. Seeds the default WakeProof schedule
- * (pushups at 05:00, water at 08:50 / 12:50 / 18:30) on first launch.
+ * (pushups at 05:00) on first launch.
  */
 @Singleton
 class AlarmRepository @Inject constructor(
@@ -99,10 +99,7 @@ class AlarmRepository @Inject constructor(
          * into an account that already has a real one.
          */
         val DEFAULT_ALARMS = listOf(
-            Alarm(type = AlarmType.PUSHUP, hour = 5, minute = 0, label = "Morning pushups"),
-            Alarm(type = AlarmType.WATER, hour = 8, minute = 50, label = "Morning water"),
-            Alarm(type = AlarmType.WATER, hour = 12, minute = 50, label = "Midday water"),
-            Alarm(type = AlarmType.WATER, hour = 18, minute = 30, label = "Evening water")
+            Alarm(type = AlarmType.PUSHUP, hour = 5, minute = 0, label = "Morning pushups")
         ).map { it.copy(seeded = true, pending = false) }
     }
 }

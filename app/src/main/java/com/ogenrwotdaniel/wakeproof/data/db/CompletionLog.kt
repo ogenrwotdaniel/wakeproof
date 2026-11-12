@@ -8,9 +8,12 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-/** Which daily goal a log entry belongs to. */
+/**
+ * Which daily goal a log entry belongs to. WATER is retired with its alarm
+ * (2026-11-12); the name stays so old rows, cloud documents and backups load.
+ */
 @Serializable
-enum class GoalKind { PUSHUP, WATER, FOCUS, MATH }
+enum class GoalKind { PUSHUP, WATER, FOCUS, MATH, PLAN, REVIEW, SHUTDOWN }
 
 /**
  * How the goal was completed. VERIFIED = camera/API proof, UNVERIFIED =
@@ -22,8 +25,8 @@ enum class CompletionStatus { VERIFIED, UNVERIFIED, SKIPPED }
 
 /**
  * One completed (or skipped) goal instance. [epochDay] is
- * [java.time.LocalDate.toEpochDay]; [amount] is reps for PUSHUP, ml for WATER,
- * minutes for FOCUS, problems solved for MATH.
+ * [java.time.LocalDate.toEpochDay]; [amount] is reps for PUSHUP, minutes for
+ * FOCUS, problems solved for MATH, photos for PLAN, cards for REVIEW, things written for tomorrow for SHUTDOWN.
  */
 @Entity(
     tableName = "completion_logs",

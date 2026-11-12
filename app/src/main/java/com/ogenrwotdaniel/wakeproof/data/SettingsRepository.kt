@@ -34,22 +34,7 @@ data class WakeProofSettings(
     val pushupTarget: Int = MAX_PUSHUP_TARGET,
     /** Problems in a row a math alarm demands; see [com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge]. */
     val mathProblems: Int = 3,
-    val waterAmountMl: Int = 500,
-    /** Full capacity of the bottle you drink from; converts a level drop into ml. */
-    val bottleCapacityMl: Int = 750,
     val emergencyHoldSeconds: Int = 60,
-    /**
-     * Read the water line on the device instead of sending the photos to a
-     * vision model. On by default: it needs no API key, no network and no round
-     * trip at 06:00, and it is what removes the honour-mode hold that used to
-     * stand in for verification whenever no key was configured.
-     *
-     * The cloud is still consulted as a second opinion before any rejection is
-     * shown, when a key exists. Turning this off forces the cloud path for
-     * everything — the escape hatch if the on-device detector misreads your own
-     * bottle, which has never been checked against a real photograph.
-     */
-    val offlineWaterVerification: Boolean = true,
     val focusMinutes: Int = 25,
     val shortBreakMinutes: Int = 5,
     val longBreakMinutes: Int = 15,
@@ -95,6 +80,8 @@ data class WakeProofSettings(
     val dailyFocusGoalMinutes: Int = 120,
     val studySubjects: Set<String> = setOf("General"),
     val activeSubject: String = "General",
+    /** Credits per course, for the weekly balance; a course without any is left out of it. */
+    val subjectCredits: Map<String, Int> = emptyMap(),
     /**
      * Apps that ARE studying — Samsung Notes by default. Time in them during a
      * session counts as study, not as screen time against you, and leaving
@@ -136,10 +123,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             pushupTarget = (prefs[PUSHUP_TARGET] ?: MAX_PUSHUP_TARGET)
                 .coerceIn(MIN_PUSHUP_TARGET, MAX_PUSHUP_TARGET),
             mathProblems = prefs[MATH_PROBLEMS] ?: 3,
-            waterAmountMl = prefs[WATER_AMOUNT_ML] ?: 500,
-            bottleCapacityMl = prefs[BOTTLE_CAPACITY_ML] ?: 750,
             emergencyHoldSeconds = prefs[EMERGENCY_HOLD_SECONDS] ?: 60,
-            offlineWaterVerification = prefs[OFFLINE_WATER_VERIFICATION] ?: true,
             focusMinutes = prefs[FOCUS_MINUTES] ?: 25,
             shortBreakMinutes = prefs[SHORT_BREAK_MINUTES] ?: 5,
             longBreakMinutes = prefs[LONG_BREAK_MINUTES] ?: 15,
@@ -155,6 +139,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             dailyFocusGoalMinutes = prefs[DAILY_FOCUS_GOAL_MINUTES] ?: 120,
             studySubjects = prefs[STUDY_SUBJECTS]?.takeIf { it.isNotEmpty() } ?: setOf("General"),
             activeSubject = prefs[ACTIVE_SUBJECT] ?: "General",
+            subjectCredits = decodeSubjectCredits(prefs[SUBJECT_CREDITS]),
             studyApps = prefs[STUDY_APPS] ?: WakeProofSettings.DEFAULT_STUDY_APPS,
             focusCreditApp = prefs[FOCUS_CREDIT_APP] ?: WakeProofSettings.DEFAULT_FOCUS_CREDIT_APP,
             focusQuotes = prefs[FOCUS_QUOTES] ?: true,
@@ -170,11 +155,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun reviewPrompted(): Boolean = dataStore.data.first()[REVIEW_PROMPTED] ?: false
     suspend fun markReviewPrompted() = dataStore.edit { it[REVIEW_PROMPTED] = true }
     suspend fun setMathProblems(value: Int) = dataStore.edit { it[MATH_PROBLEMS] = value }
-    suspend fun setWaterAmountMl(value: Int) = dataStore.edit { it[WATER_AMOUNT_ML] = value }
-    suspend fun setBottleCapacityMl(value: Int) = dataStore.edit { it[BOTTLE_CAPACITY_ML] = value }
     suspend fun setEmergencyHoldSeconds(value: Int) = dataStore.edit { it[EMERGENCY_HOLD_SECONDS] = value }
-    suspend fun setOfflineWaterVerification(value: Boolean) =
-        dataStore.edit { it[OFFLINE_WATER_VERIFICATION] = value }
     suspend fun setFocusMinutes(value: Int) = dataStore.edit { it[FOCUS_MINUTES] = value }
     suspend fun setShortBreakMinutes(value: Int) = dataStore.edit { it[SHORT_BREAK_MINUTES] = value }
     suspend fun setLongBreakMinutes(value: Int) = dataStore.edit { it[LONG_BREAK_MINUTES] = value }
@@ -264,16 +245,20 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     }
 
     suspend fun setActiveSubject(name: String) = dataStore.edit { it[ACTIVE_SUBJECT] = name }
+
+    /** Sets a course's credits; zero takes it out of the balance. */
+    suspend fun setSubjectCredits(name: String, credits: Int) = dataStore.edit { prefs ->
+        val all = decodeSubjectCredits(prefs[SUBJECT_CREDITS]).toMutableMap()
+        if (credits <= 0) all.remove(name) else all[name] = credits.coerceAtMost(MAX_SUBJECT_CREDITS)
+        prefs[SUBJECT_CREDITS] = encodeSubjectCredits(all)
+    }
     suspend fun setOnboardingComplete(value: Boolean) = dataStore.edit { it[ONBOARDING_COMPLETE] = value }
 
     private companion object {
         val PUSHUP_TARGET = intPreferencesKey("pushup_target")
         val MATH_PROBLEMS = intPreferencesKey("math_problems")
         val REVIEW_PROMPTED = booleanPreferencesKey("review_prompted")
-        val WATER_AMOUNT_ML = intPreferencesKey("water_amount_ml")
-        val BOTTLE_CAPACITY_ML = intPreferencesKey("bottle_capacity_ml")
         val EMERGENCY_HOLD_SECONDS = intPreferencesKey("emergency_hold_seconds")
-        val OFFLINE_WATER_VERIFICATION = booleanPreferencesKey("offline_water_verification")
         val FOCUS_MINUTES = intPreferencesKey("focus_minutes")
         val SHORT_BREAK_MINUTES = intPreferencesKey("short_break_minutes")
         val LONG_BREAK_MINUTES = intPreferencesKey("long_break_minutes")
@@ -300,6 +285,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val DAILY_FOCUS_GOAL_UPDATED_AT = longPreferencesKey("daily_focus_goal_updated_at")
         val STUDY_SUBJECTS = stringSetPreferencesKey("study_subjects")
         val ACTIVE_SUBJECT = stringPreferencesKey("active_subject")
+        val SUBJECT_CREDITS = stringPreferencesKey("subject_credits")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
     }
 }

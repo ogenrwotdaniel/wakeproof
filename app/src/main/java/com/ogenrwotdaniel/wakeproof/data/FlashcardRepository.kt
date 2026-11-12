@@ -18,12 +18,17 @@ class FlashcardRepository @Inject constructor(private val dao: FlashcardDao) {
     suspend fun dueCards(subject: String): List<Flashcard> =
         dao.dueCards(LocalDate.now().toEpochDay(), subject)
 
-    /** Grades a card and persists its new SM-2 schedule. */
-    suspend fun review(card: Flashcard, grade: ReviewGrade) {
+    suspend fun dueCardsAnySubject(limit: Int): List<Flashcard> =
+        dao.dueCardsAnySubject(LocalDate.now().toEpochDay(), limit)
+
+    /** Grades a card, persists its new SM-2 schedule and returns the card as stored. */
+    suspend fun review(card: Flashcard, grade: ReviewGrade): Flashcard {
         val reviewed = Sm2Scheduler.review(card, grade, LocalDate.now().toEpochDay())
-        // Stamped for upload here so a review done on the tablet does not come due
-        // again on the phone.
-        dao.update(reviewed.copy(updatedAt = System.currentTimeMillis(), pending = true))
+            // Stamped for upload here so a review done on the tablet does not come due
+            // again on the phone.
+            .copy(updatedAt = System.currentTimeMillis(), pending = true)
+        dao.update(reviewed)
+        return reviewed
     }
 
     /** New cards are due immediately so they enter today's review queue. */

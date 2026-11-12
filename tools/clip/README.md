@@ -83,12 +83,13 @@ cd tools/clip && python3 -m clipsync pair
 On the phone: Settings → Clipboard across devices → Pair a computer, scan the QR. Pair the
 tablet the same way (it then gets the same key). Both devices must be on one network for
 this step only. `python3 -m clipsync status` shows the result; `forget` removes the key
-and account from this laptop. The terminal `pair` and the tile share port 47322, so only
+and account from this laptop; `forget --cloud` first deletes every clip and device record the
+account has in the cloud, to start over (then use "Forget pairing" on each phone or tablet). The terminal `pair` and the tile share port 47322, so only
 one can be open at a time.
 
 ## Commands
 
-`python3 -m clipsync {daemon,pair,status,forget,send-test TEXT}` (`-v` for debug logs).
+`python3 -m clipsync {daemon,pair,status,forget [--cloud],send-test TEXT}` (`-v` for debug logs).
 `send-test` goes through the running daemon if there is one, else sends in-process.
 
 D-Bus control surface used by the tile (local to this laptop, not part of

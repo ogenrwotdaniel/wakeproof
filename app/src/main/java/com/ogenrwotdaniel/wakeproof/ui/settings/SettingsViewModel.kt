@@ -1,5 +1,6 @@
 package com.ogenrwotdaniel.wakeproof.ui.settings
 
+import com.ogenrwotdaniel.wakeproof.data.MAX_SUBJECT_CREDITS
 import com.ogenrwotdaniel.wakeproof.data.MAX_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.data.MIN_PUSHUP_TARGET
 import com.ogenrwotdaniel.wakeproof.alarm.StrictAlarm
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -160,6 +162,9 @@ class SettingsViewModel @Inject constructor(
     )
 
     val alarms: StateFlow<List<Alarm>> = alarmRepository.observeAlarms()
+        // A retired kind (water) that has not been cleaned up yet never rings;
+        // listed, its switch would look as though it did.
+        .map { list -> list.filter { !it.type.retired } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Whether this device is the one that rings. See [AlarmDevicePolicy]. */
@@ -223,7 +228,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Adds a pushup or water alarm at the chosen time, on the chosen days. */
+    /** Adds an alarm at the chosen time, on the chosen days. */
     fun addAlarm(type: AlarmType, hour: Int, minute: Int, label: String, daysMask: Int) {
         viewModelScope.launch { alarmRepository.addAlarm(type, hour, minute, label, daysMask) }
     }
@@ -237,8 +242,8 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { alarmRepository.deleteAlarm(alarm) }
     }
 
-    fun setOfflineWaterVerification(value: Boolean) {
-        viewModelScope.launch { settingsRepository.setOfflineWaterVerification(value) }
+    fun setSubjectCredits(name: String, credits: Int) {
+        viewModelScope.launch { settingsRepository.setSubjectCredits(name, credits.coerceIn(0, MAX_SUBJECT_CREDITS)) }
     }
 
     fun setPushupTarget(value: Int) {
@@ -251,14 +256,6 @@ class SettingsViewModel @Inject constructor(
                 value.coerceIn(MathChallenge.MIN_PROBLEMS, MathChallenge.MAX_PROBLEMS)
             )
         }
-    }
-
-    fun setWaterAmountMl(value: Int) {
-        viewModelScope.launch { settingsRepository.setWaterAmountMl(value.coerceIn(250, 1000)) }
-    }
-
-    fun setBottleCapacityMl(value: Int) {
-        viewModelScope.launch { settingsRepository.setBottleCapacityMl(value.coerceIn(250, 2000)) }
     }
 
     fun setEmergencyHoldSeconds(value: Int) {

@@ -65,6 +65,7 @@ fun HomeScreen(
     onOpenAgenda: () -> Unit,
     onOpenFlashcards: () -> Unit,
     onOpenForest: () -> Unit,
+    onOpenPlans: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -74,6 +75,8 @@ fun HomeScreen(
     val nextPushup by viewModel.nextPushupAlarm.collectAsStateWithLifecycle()
     val nextMath by viewModel.nextMathAlarm.collectAsStateWithLifecycle()
     val focusGoal by viewModel.focusGoalMinutes.collectAsStateWithLifecycle()
+    val goalToday by viewModel.focusGoal.collectAsStateWithLifecycle()
+    val topThree by viewModel.topThree.collectAsStateWithLifecycle()
     val exams by viewModel.exams.collectAsStateWithLifecycle()
     val ringsAlarms by viewModel.ringsAlarms.collectAsStateWithLifecycle()
     val timer by viewModel.timer.collectAsStateWithLifecycle()
@@ -160,6 +163,22 @@ fun HomeScreen(
             // First and biggest: since 1.5 the streak is decided by focus time
             // alone, so this is the card the day is actually won on.
             FocusGoalCard(focusMinutes = today.focusMinutes, goalMinutes = focusGoal)
+            ExamTargetNote(goalToday)
+            if (topThree.isNotEmpty()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(text = "Today's top three", style = MaterialTheme.typography.titleMedium)
+                        topThree.forEachIndexed { index, item ->
+                            Text(text = "${index + 1}. $item", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        Text(
+                            text = "From last evening's review",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
 
             StatusCard(
                 title = "Pushups",
@@ -175,15 +194,40 @@ fun HomeScreen(
                 },
                 highlight = today.pushupDone
             )
-            StatusCard(
-                title = "Water",
-                value = if (today.waterTargetCount == 0) "—" else
-                    "${today.waterCount}/${today.waterTargetCount}" +
-                        if (today.anyUnverifiedWater) " *" else "",
-                detail = if (today.waterTargetCount == 0) "No water alarm due today"
-                else "${today.waterMl} ml today",
-                highlight = today.waterDone
-            )
+            // A plan photographed from the library counts too, so the card shows
+            // one even on a device or a day with no plan alarm.
+            if (today.planTarget > 0 || today.planCount > 0) {
+                StatusCard(
+                    title = "Day plan",
+                    value = if (today.planCount > 0) "Done ✓" else "Pending",
+                    // The log syncs, the photo does not: no promise about where it is.
+                    detail = if (today.planCount > 0) "Written and photographed today"
+                    else "Write it down and photograph it",
+                    highlight = today.planCount > 0
+                )
+            }
+            if (today.shutdownTarget > 0 || today.shutdownCount > 0) {
+                StatusCard(
+                    title = "Evening review",
+                    value = if (today.shutdownCount > 0) "Done ✓" else "Pending",
+                    detail = if (today.shutdownCount > 0) "Day closed, tomorrow planned"
+                    else "What got done, and tomorrow's top three",
+                    highlight = today.shutdownCount > 0
+                )
+            }
+            if (today.reviewTarget > 0 || today.reviewCount > 0) {
+                StatusCard(
+                    title = "Flashcard review",
+                    value = when {
+                        today.reviewTarget == 0 || today.reviewDone -> "Done ✓"
+                        today.reviewTarget == 1 -> "Pending"
+                        else -> "${today.reviewCount}/${today.reviewTarget}"
+                    },
+                    detail = if (today.reviewCards > 0) "${today.reviewCards} cards at alarms today"
+                    else "Due cards silence the alarm",
+                    highlight = today.reviewTarget == 0 || today.reviewDone
+                )
+            }
             // Only for people who use math alarms — a permanent "—" card would be noise for the rest.
             if (today.mathTarget > 0 || today.mathCount > 0) {
                 StatusCard(
@@ -226,6 +270,7 @@ fun HomeScreen(
             NavigationRow("Forest", "A tree for every focus block", onOpenForest)
             NavigationRow("Flashcards", "Review what's due today", onOpenFlashcards)
             NavigationRow("Agenda", "Today's calendar events", onOpenAgenda)
+            NavigationRow("Day plans", "Photos of each day's written plan", onOpenPlans)
             NavigationRow("Screen time", "Usage and daily app limits", onOpenUsage)
             NavigationRow("Settings", "Alarms, focus, sync, data", onOpenSettings)
             NavigationRow("Setup check", "Permissions and reliability", onOpenOnboarding)
@@ -609,6 +654,37 @@ private fun WeekChart(week: List<DayStat>, goalMinutes: Int, modifier: Modifier 
  * Today's focus against the goal as a bar, not a fraction: "47/120 min" made you
  * do the sum, and this is the number the streak now turns on.
  */
+/** Why today's goal is higher than the one set, and how to share it between the exams coming. */
+@Composable
+private fun ExamTargetNote(goal: com.ogenrwotdaniel.wakeproof.data.FocusGoalToday) {
+    val exam = goal.exam ?: return
+    if (!goal.raised && goal.split.size < 2) return
+    val days = when (goal.daysLeft) {
+        0L -> "today"
+        1L -> "tomorrow"
+        else -> "in ${goal.daysLeft} days"
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (goal.raised) {
+            Text(
+                text = "${exam.name} is $days: goal raised from " +
+                    "${formatDurationMinutes(goal.baseMinutes)} to ${formatDurationMinutes(goal.minutes)}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        if (goal.split.size >= 2) {
+            Text(
+                text = "Suggested split: " + goal.split.joinToString(" · ") {
+                    "${it.name} ${formatDurationMinutes(it.minutes)}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 @Composable
 private fun FocusGoalCard(focusMinutes: Int, goalMinutes: Int, modifier: Modifier = Modifier) {
     val reached = goalMinutes > 0 && focusMinutes >= goalMinutes

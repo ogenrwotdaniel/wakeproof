@@ -115,7 +115,7 @@
 % Header & Footer
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{\sffamily\footnotesize\textcolor{wpmuted}{\textbf{WakeProof} $\cdot$ Complete Feature \& Architecture Guide (v1.8)}}
+\fancyhead[L]{\sffamily\footnotesize\textcolor{wpmuted}{\textbf{WakeProof} $\cdot$ Complete Feature \& Architecture Guide (v1.9)}}
 \fancyhead[R]{\sffamily\footnotesize\textcolor{wpmuted}{\href{https://ogenrwotdaniel.github.io/wakeproof/}{ogenrwotdaniel.github.io/wakeproof}}}
 \fancyfoot[L]{\sffamily\footnotesize\textcolor{wpmuted}{Ogenrwot Daniel $\cdot$ GPL-3.0 Open Source}}
 \fancyfoot[R]{\sffamily\footnotesize\textcolor{wpnavy}{\textbf{Page \thepage}}}
@@ -142,7 +142,7 @@
   {\sffamily\Huge\bfseries\textcolor{white}{WakeProof}}\\[4pt]
   {\sffamily\large\textcolor{white!92}{The alarm you cannot talk your way out of --- and the study \& focus system that guards the rest of your day.}}\\[10pt]
   {\sffamily\small\textcolor{white!80}{%
-    \textbf{Version:} 1.8.0 (November 2026) \quad|\quad
+    \textbf{Version:} 1.9.0 (November 2026) \quad|\quad
     \textbf{Author:} Ogenrwot Daniel \quad|\quad
     \textbf{License:} GPL-3.0\\[3pt]
     \textbf{Web:} \href{https://ogenrwotdaniel.github.io/wakeproof/}{\textcolor{white}{\underline{ogenrwotdaniel.github.io/wakeproof}}} \quad|\quad
@@ -158,7 +158,7 @@ Most productivity tools fail at the exact moment willpower is lowest: at \textbf
 
 \textbf{WakeProof} eliminates negotiation across the entire daily cycle while remaining \textbf{private and offline-first by design}:
 \begin{enumerate}
-  \item \textbf{Physical-Proof Morning Alarms:} Alarms carry no dismiss button. Ringing stops only after live on-device ML~Kit pose detection counts your push-ups, on-device computer vision verifies water left your bottle, or you solve an unbroken run of mental arithmetic.
+  \item \textbf{Physical-Proof Morning Alarms:} Alarms carry no dismiss button. Ringing stops only after live on-device ML~Kit pose detection counts your push-ups, you photograph the day's written plan, you answer your due flashcards, or you solve an unbroken run of mental arithmetic.
   \item \textbf{Nuclear Deep-Work Sessions:} Fixed-duration Pomodoro recipes (1\,h, 1\,h\,30, 2\,h, 3\,h, or exact calendar-event durations) have \textbf{no pause and no stop button}, walling non-study apps across your phone, tablet, and smartwatch simultaneously --- breaks included.
   \item \textbf{Integrated Study Suite:} Spaced-repetition flashcards (SM-2) with optional Gemini AI card drafting, circular stereo soundscapes, Spotify transport control, Focus Forest tree-guarding, exam countdowns, parked thoughts, and an on-device weekly coach report.
   \item \textbf{Hardened Distraction Schedule \& Minimalist Launcher:} Social, video, messaging, portal, and browser apps open \textbf{only Monday--Thursday from 08:10 to 08:50} and stay \textbf{completely shut Friday--Sunday}, backed by walls fixed in code (no setting moves or loosens them), notification/media guards, a night sleep wall (21:00--04:00), and a calm text-only home screen.
@@ -203,7 +203,7 @@ WakeProof is designed as a cohesive personal system spanning a primary Android p
 \midrule
 \textbf{Android Phone} \newline {\scriptsize (Android 14+, API 34+)} &
 Ringing primary, camera verifier \& daily launcher &
-Rings scheduled and locked morning alarms; runs CameraX push-up and water verification; hosts the minimalist home screen, Nuclear Focus timer, flashcards, distraction walls, and Wearable Data Layer bridge. \\
+Rings scheduled and locked morning alarms; runs CameraX push-up counting and the day-plan photo; hosts the minimalist home screen, Nuclear Focus timer, flashcards, distraction walls, and Wearable Data Layer bridge. \\
 \addlinespace[4pt]
 \textbf{Android Tablet} \newline {\scriptsize (Adaptive two-pane UI)} &
 Silent-alarm study desk \& review surface &
@@ -252,16 +252,31 @@ WakeProof schedules alarms with \texttt{AlarmManager.setAlarmClock()}, granting 
   \item \textbf{Zero retention:} Camera frames are analysed in memory and immediately discarded; no photo or video is ever saved to disk or sent over the network.
 \end{itemize}
 
-\subsubsection[2. Water-Drinking Verification (On-Device CV + Optional Gemini Second Opinion)]{2. Water-Drinking Verification \texorpdfstring{\pill{On-Device CV + Optional Gemini Second Opinion}}{(On-Device CV + Optional Gemini Second Opinion)}}
+\subsubsection[2. Day-Plan Photo (Kept On The Device)]{2. Day-Plan Photo \texorpdfstring{\pill{Kept On The Device}}{(Kept On The Device)}}
 \begin{itemize}
-  \item \textbf{Two-photo protocol:} Photograph your translucent water bottle (\emph{Before}), drink, and photograph it again (\emph{After}). Capture runs at low-latency $\sim 1280\times 960$ resolution with automatic EXIF orientation normalization (\texttt{WaterImageSampler}).
-  \item \textbf{Geometry-first on-device detector (\texttt{WaterLineDetector}):} Rather than looking for the biggest brightness step (which is easily fooled by background clutter seen through clear plastic), WakeProof measures \textbf{across-column horizontal coherence of the vertical gradient}, gated by a two-region Welch $t$-statistic and damped where paired opposite edges indicate a printed bottle label rather than a liquid meniscus.
-  \item \textbf{Same-bottle verification (\texttt{ContainerMatcher}):} Compares lighting-invariant chromaticity histograms only across the bands unchanged by drinking (air above the higher water line and water below the lower line), remaining robust when indoor lighting shifts.
-  \item \textbf{Verdict \& multi-sip chaining (\texttt{WaterVerdictRules}):} Consumed volume is $\lfloor \Delta\text{fill} \times \text{bottleCapacityMl} \rfloor_{10\,\text{ml}}$ (bottle size configurable $250\text{--}2000\,\text{ml}$, default $750\,\text{ml}$). A sip is accepted when it is the same container, readable in both shots, not refilled, and shows $\ge 30\,\text{ml}$ and $\ge 5\%$ drop. You do not have to chug in one go: each accepted \emph{After} photo automatically chains into the next \emph{Before} photo until cumulative intake reaches target (within a $50\,\text{ml}$ tolerance).
-  \item \textbf{Cloud second opinion:} On-device acceptances finish instantly with zero network traffic. Only if the on-device detector rejects a pair \emph{and} you have configured a Gemini API key does \texttt{LocalFirstWaterObserver} request a second opinion from \texttt{gemini-3.8-flash} (capped at an $8\,\text{s}$ timeout) before surfacing a rejection.
+  \item \textbf{Write, then photograph:} The alarm asks you to write down everything the day holds and photograph the page. You look at the photo once (\emph{Keep this photo} or \emph{Retake}) and the ringing stops when it is kept.
+  \item \textbf{Nothing is judged:} WakeProof does not read or analyse the page. The photo is the whole proof.
+  \item \textbf{Day plans library:} Every photo is filed under its day in the app's private storage and shown in the \textbf{Day plans} screen, newest first, with pinch-to-zoom and delete. A plan can also be photographed there at any time. Photos stay on the device that took them: they are never uploaded or synced. The newest 90 days of plans are kept.
+  \item \textbf{Fixed 08:20 slot:} On the ringing device a day-plan alarm is pinned at 08:20 every day. Its row cannot be edited or deleted, but it rings like an ordinary alarm, with snooze and the emergency dismiss.
 \end{itemize}
 
-\subsubsection[3. Mental Math Verification (Camera-Free / Dark-Room Ready)]{3. Mental Math Verification \texorpdfstring{\pill{Camera-Free / Dark-Room Ready}}{(Camera-Free / Dark-Room Ready)}}
+\subsubsection[3. Flashcard Review (SM-2, Camera-Free)]{3. Flashcard Review \texorpdfstring{\pill{SM-2, Camera-Free}}{(SM-2, Camera-Free)}}
+\begin{itemize}
+  \item \textbf{Due cards silence the alarm:} Up to 10 flashcards that are due today, across every subject, longest overdue first. Each is graded \emph{Again / Hard / Good / Easy} exactly as on the Flashcards screen, and the SM-2 schedule is updated.
+  \item \textbf{Recall first:} A card's answer can be shown only after its question has stood for three seconds. A card graded \emph{Again} comes round once more and does not count.
+  \item \textbf{Self-graded:} Nothing checks the answer; the alarm's job is to put the day's spaced repetition in front of you.
+  \item \textbf{No card due:} The alarm falls back to the mental-math run, logged as that day's review.
+\end{itemize}
+
+\subsubsection[4. Evening Review (19:30, Kept On The Device)]{4. Evening Review \texorpdfstring{\pill{19:30, Kept On The Device}}{(19:30, Kept On The Device)}}
+\begin{itemize}
+  \item \textbf{The plan, checked:} Half an hour before the night wall a fixed alarm shows the morning's plan photo and asks how much of it got done (\emph{All of it / Most / Some / None}).
+  \item \textbf{Tomorrow's top three:} Up to three lines for tomorrow; one is enough to close the day. Home shows them the next day, and the morning plan alarm repeats them.
+  \item \textbf{Study targets that follow the exams:} In the two weeks before an exam on the Exams list the daily focus goal rises by itself (a quarter more, then half more, then double in the last three days) and review alarms ask for 15 or 20 cards, the exam's subject first.
+  \item \textbf{Recall, balance and sleep:} Every finished focus block asks for two lines of recall, which wait on the Flashcards screen to become cards. The weekly report weighs each subject's hours against the credits set in Settings, and scores on how many nights the phone was down by 20:00.
+\end{itemize}
+
+\subsubsection[5. Mental Math Verification (Camera-Free / Dark-Room Ready)]{5. Mental Math Verification \texorpdfstring{\pill{Camera-Free / Dark-Room Ready}}{(Camera-Free / Dark-Room Ready)}}
 \begin{itemize}
   \item Designed for dark rooms, shared bedrooms, or mornings where camera missions are impractical.
   \item Requires solving \textbf{1 to 10 consecutive arithmetic problems} (default 3) with positive $\le 4$-digit answers.
@@ -414,14 +429,14 @@ Choosing WakeProof as your Android home app (\texttt{LauncherActivity}) replaces
 \subsection{Wear OS Smartwatch App (\texttt{:wear})}
 \begin{itemize}
   \item \textbf{Standalone Nuclear Wrist Timer (\texttt{WatchTimerEngine}):} Start \textbf{1\,h}, \textbf{1\,h\,30}, \textbf{2\,h}, or \textbf{3\,h} sessions directly on your watch with no phone nearby. Phase transitions fire exact alarms with unmistakable alarm-strength wrist vibration patterns ($\sim 30\,\text{s}$ back-to-focus, $\sim 10\,\text{s}$ into break/complete, stoppable on tap) and keep a low-power dimmed ambient countdown on screen when your wrist drops.
-  \item \textbf{Tiles, Complication \& Now Bar:} Includes the \textbf{WakeProof Stats Tile} (streak, focus vs.\ goal, water), the \textbf{WakeProof Today Agenda Tile} (tap any upcoming calendar event on your wrist to launch a timed focus session for it), a \textbf{Watch-Face Complication} (\texttt{SHORT\_TEXT} / \texttt{LONG\_TEXT}), and a Wear~OS \textbf{Ongoing Activity} Now Bar indicator.
+  \item \textbf{Tiles, Complication \& Now Bar:} Includes the \textbf{WakeProof Stats Tile} (streak, focus vs.\ goal, day plan), the \textbf{WakeProof Today Agenda Tile} (tap any upcoming calendar event on your wrist to launch a timed focus session for it), a \textbf{Watch-Face Complication} (\texttt{SHORT\_TEXT} / \texttt{LONG\_TEXT}), and a Wear~OS \textbf{Ongoing Activity} Now Bar indicator.
   \item \textbf{Offline-Resilient Dual Sync:} Finished watch focus blocks queue in \texttt{FocusSessionOutbox} for Bluetooth Data Layer import (acknowledged via a 14-day ID window so zero blocks double-count or get stranded) \emph{and}, when signed in, upload directly over watch Wi-Fi/LTE to Firestore (\texttt{WatchCloud}) while broadcasting the live wrist timer to your tablet and phone.
 \end{itemize}
 
 \subsection{Dual-Clock Tombstone Cloud Sync \& Local Backups}
 \begin{itemize}
   \item \textbf{Firestore Mirror (\texttt{SyncEngine}):} Opt-in via Google Credential Manager sign-in (or one-tap phone-to-watch token handoff). Every Room v5 row carries \texttt{syncId}, \texttt{updatedAt}, \texttt{deleted} (tombstone), and \texttt{pending}. Device timestamps arbitrate per-row last-write-wins merges (\texttt{MergeDecision}), while Firestore \texttt{serverTimestamp} drives incremental pull cursors so a skewed device clock can never skip records.
-  \item \textbf{Portable Backups:} Export completion history to \textbf{CSV} for spreadsheets, or write/restore a full \textbf{JSON backup} (\texttt{data/backup/}) that merges entities non-destructively (preserving tombstones) and immediately reconciles \texttt{AlarmManager}.
+  \item \textbf{Portable Backups:} Export completion history to \textbf{CSV} for spreadsheets, or write/restore a full \textbf{JSON backup} (\texttt{data/backup/}) that merges entities non-destructively (preserving tombstones) and immediately reconciles \texttt{AlarmManager}. The JSON backup also carries the evening reviews and focus-block recall notes; day-plan photos stay on the device.
 \end{itemize}
 
 \subsection{WakeProof Clip --- End-to-End Encrypted Cross-Device Clipboard}
@@ -437,7 +452,7 @@ Choosing WakeProof as your Android home app (\texttt{LauncherActivity}) replaces
 \section{Privacy, Permissions \& Technical Architecture}
 
 \begin{wpbox}[wpteal]{Zero Ads $\cdot$ Zero Analytics $\cdot$ Offline by Default}
-WakeProof contains \textbf{no advertising SDKs, no crash/behavioural telemetry, and no developer-operated backend}. Without signing into Cloud Sync or pasting your own Gemini API key, WakeProof makes \textbf{zero internet requests} --- and push-up alarms, on-device water verification, math alarms, Nuclear Focus, flashcards, distraction walls, and weekly reports all work 100\% offline.
+WakeProof contains \textbf{no advertising SDKs, no crash/behavioural telemetry, and no developer-operated backend}. Without signing into Cloud Sync or pasting your own Gemini API key, WakeProof makes \textbf{zero internet requests} --- and push-up alarms, day-plan and flashcard-review alarms, math alarms, Nuclear Focus, flashcards, distraction walls, and weekly reports all work 100\% offline.
 \end{wpbox}
 
 \subsection{Data Flow Transparency}
@@ -449,7 +464,7 @@ WakeProof contains \textbf{no advertising SDKs, no crash/behavioural telemetry, 
 \textbf{\sffamily Data Category} & \textbf{\sffamily Default Scope} & \textbf{\sffamily Network / Retention Policy} \\
 \midrule
 Push-up camera stream & On-device RAM only & Processed live by ML~Kit Pose Detection; never saved or uploaded. \\
-Water bottle photos & On-device RAM default & Analysed locally by \texttt{WaterLineDetector}; sent to Gemini \emph{only} as an optional second opinion on local rejection when an API key is set; never stored. \\
+Day-plan photos & On-device storage & Saved as JPEG files in the app's private storage and shown in Day plans; never uploaded, synced or analysed; removed on delete, on uninstall, or once older than the newest 90 days of plans. \\
 Screen-time \& calendar & Strictly local & Folded on-device from \texttt{UsageEvents} and \texttt{CalendarContract} (only per-app study-app totals share across your own UID if signed in). \\
 Alarms, logs, decks, exams & Local Room DB v5 & Mirrored to private \texttt{users/\{uid\}} Firestore tree \emph{only} when signed into Cloud Sync. \\
 WakeProof Clip items & Paired devices only & Sealed end-to-end with AES-256-GCM; cloud sees ciphertext chunks only ($1\,\text{h}$ TTL). \\
@@ -467,7 +482,7 @@ Gemini API key & Local encrypted store & Stored in \texttt{EncryptedSharedPrefer
 \toprule
 \textbf{\sffamily Permission / Special Grant} & \textbf{\sffamily Exact Purpose in WakeProof} \\
 \midrule
-\texttt{CAMERA} & Live on-device push-up pose counting, water bottle before/after capture, and QR pairing for WakeProof Clip. \\
+\texttt{CAMERA} & Live on-device push-up pose counting, the day-plan photo, and QR pairing for WakeProof Clip. \\
 \texttt{USE\_EXACT\_ALARM}, \texttt{POST\_NOTIFICATIONS}, \newline \texttt{USE\_FULL\_SCREEN\_INTENT} & Firing exact morning alarms, lock-screen alarm presentation, timer status, and pre-event reminders. \\
 \texttt{PACKAGE\_USAGE\_STATS} {\scriptsize (Special)} & Honest event-folded screen time, daily app caps, Mon--Thu \texttt{08:10--08:50} / Fri--Sun walls, and focus tree/session walls. \\
 \texttt{SYSTEM\_ALERT\_WINDOW} {\scriptsize (Special)} & Floating Pomodoro bubble, launching alarm/block walls reliably over foreground apps, and covering pop-up windows. \\
@@ -484,12 +499,12 @@ Gemini API key & Local encrypted store & Stored in \texttt{EncryptedSharedPrefer
 \begin{itemize}
   \item \textbf{Core Android (\texttt{:app}):} Kotlin 2.4, Gradle 9.8 / AGP 9.5, Jetpack Compose + Material~3, Hilt DI, Room SQLite (v5, WAL) + Preferences DataStore, CameraX + ExifInterface, ML~Kit Pose Detection \& Barcode Scanning, WorkManager, Jetpack Glance AppWidget, Retrofit~3 + OkHttp~5 + \texttt{kotlinx.serialization} targeting Google Gemini (\texttt{gemini-3.8-flash}).
   \item \textbf{Wear OS (\texttt{:wear}):} \texttt{ComponentActivity} with \texttt{AmbientLifecycle\allowbreak Observer}, Wear ProtoLayout Tiles (\texttt{StatsTile\allowbreak Service}, \texttt{AgendaTile\allowbreak Service}), Watch-Face Complications (\texttt{AgendaComplication\allowbreak Service}), Ongoing Activity API, Wearable Data Layer / MessageClient, and direct Firebase Auth + Firestore upload.
-  \item \textbf{Companion Tooling (\texttt{tools/}):} Cross-language synthetic LCG fixture \& evaluation pipeline for water-line computer vision (\texttt{tools/water/}), circular stereo OGG Vorbis soundscape synthesizer (\texttt{tools/sounds/}), and the Ubuntu GNOME Wayland D-Bus + Python AES-256-GCM clipboard daemon (\texttt{tools/clip/}).
+  \item \textbf{Companion Tooling (\texttt{tools/}):} Circular stereo OGG Vorbis soundscape synthesizer (\texttt{tools/sounds/}), and the Ubuntu GNOME Wayland D-Bus + Python AES-256-GCM clipboard daemon (\texttt{tools/clip/}).
 \end{itemize}
 
 \vspace{8pt}
 {\color{wpborder}\hrule height 0.6pt}
 \vspace{4pt}
-{\sloppy\sffamily\footnotesize\color{wpmuted}Document generated November 2026 for \textbf{WakeProof v1.8.0}. For source code, issue tracking, and updates visit \href{https://github.com/ogenrwotdaniel/wakeproof}{github.com/ogenrwotdaniel/wakeproof} and \href{https://ogenrwotdaniel.github.io/wakeproof/}{ogenrwotdaniel.github.io/wakeproof}.\par}
+{\sloppy\sffamily\footnotesize\color{wpmuted}Document generated November 2026 for \textbf{WakeProof v1.9.0}. For source code, issue tracking, and updates visit \href{https://github.com/ogenrwotdaniel/wakeproof}{github.com/ogenrwotdaniel/wakeproof} and \href{https://ogenrwotdaniel.github.io/wakeproof/}{ogenrwotdaniel.github.io/wakeproof}.\par}
 
 \end{document}

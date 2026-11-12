@@ -16,8 +16,13 @@ data class AlarmRingingRoute(val alarmId: Long = -1L)
 @Serializable
 data object PushupVerifyRoute
 
+/** The day-plan alarm: photograph today's handwritten plan. */
 @Serializable
-data object WaterVerifyRoute
+data object PlanVerifyRoute
+
+/** The review alarm: a run of due flashcards. */
+@Serializable
+data object ReviewVerifyRoute
 
 @Serializable
 data object MathVerifyRoute
@@ -40,10 +45,18 @@ data object FlashcardsRoute
 @Serializable
 data object ForestRoute
 
-/**
- * Debug-only: the water depth-corpus capture tool. Not in [SHELL_DESTINATIONS]
- * and not reachable in a release build — it retains photographs, which the
- * shipping app deliberately does not.
- */
+/** The evening review alarm: the day's plan judged, tomorrow's top three written. */
 @Serializable
-data object CorpusCaptureRoute
+data object ShutdownVerifyRoute
+
+/** The evening review opened from the library, outside an alarm. */
+@Serializable
+data object ShutdownNowRoute
+
+/** The library of day-plan photos. */
+@Serializable
+data object DayPlansRoute
+
+/** Photographing a plan from the library, outside an alarm. */
+@Serializable
+data object PlanCaptureRoute

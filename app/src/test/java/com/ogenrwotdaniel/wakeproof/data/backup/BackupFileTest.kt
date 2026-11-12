@@ -5,6 +5,9 @@ import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionLog
 import com.ogenrwotdaniel.wakeproof.data.db.CompletionStatus
 import com.ogenrwotdaniel.wakeproof.data.db.GoalKind
+import com.ogenrwotdaniel.wakeproof.plan.DayReview
+import com.ogenrwotdaniel.wakeproof.plan.PlanDone
+import com.ogenrwotdaniel.wakeproof.study.RecallNote
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -71,6 +74,20 @@ class BackupFileTest {
     @Test
     fun `totalRows counts every table`() {
         assertEquals(3, backup.totalRows)
+    }
+
+    @Test
+    fun `evening reviews and recall notes travel in the backup, and an older file has none`() {
+        val withNotes = backup.copy(
+            dayReviews = listOf(DayReview(20_000, PlanDone.MOST, listOf("Thermo problem set"))),
+            recallNotes = listOf(RecallNote("n1", "Entropy never falls", "Physics", 20_000, 5L))
+        )
+        val text = json.encodeToString(BackupFile.serializer(), withNotes)
+        assertEquals(withNotes, json.decodeFromString(BackupFile.serializer(), text))
+        assertEquals(5, withNotes.totalRows)
+        // A version 1 file predates both lists and must restore as before.
+        val old = json.decodeFromString(BackupFile.serializer(), """{"version":1,"alarms":[]}""")
+        assertTrue(old.dayReviews.isEmpty() && old.recallNotes.isEmpty())
     }
 
     @Test

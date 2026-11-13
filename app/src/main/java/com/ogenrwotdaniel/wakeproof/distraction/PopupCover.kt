@@ -21,9 +21,8 @@ import kotlin.math.roundToInt
  * An overlay window draws above pop-ups, so the cover goes there.
  *
  * Up when the app last walled ([wallAgeMillis] ago) is still resumed beside
- * WakeProof's wall, which is in front. Not in the first [COVER_SETTLE_MILLIS]:
- * a full-screen app's PAUSED lands a moment after the wall's RESUMED, and the
- * cover must not flash over every ordinary wall. Never past [COVER_MAX_MILLIS]
+ * WakeProof's wall, which is in front; in the first [COVER_SETTLE_MILLIS] the
+ * wall need not be in front yet. Never past [COVER_MAX_MILLIS]
  * after the wall: the resumed set is folded from events, and a PAUSED that was
  * never recorded would otherwise hold a screen-sized, touch-eating window over
  * the phone for good. A pop-up still there at the limit gets a fresh wall from
@@ -37,11 +36,20 @@ fun popupCoverWanted(
     wallAgeMillis: Long?,
     ownWallInFront: Boolean,
     walledStillResumed: Boolean,
-    inGrace: Boolean
+    inGrace: Boolean,
+    /** An alarm's screen is up or coming up: the cover never lands on it. */
+    alarmOnScreen: Boolean = false
 ): Boolean =
     wallAgeMillis != null &&
-        wallAgeMillis in COVER_SETTLE_MILLIS..COVER_MAX_MILLIS &&
-        ownWallInFront && walledStillResumed && !inGrace
+        wallAgeMillis in 0..COVER_MAX_MILLIS &&
+        // Since 2026-11-13 (the user: "cut the time ... make it 0 if possible")
+        // the cover goes up with the wall and stays through the first
+        // [COVER_SETTLE_MILLIS] whatever is in front, while the walled app is
+        // still resumed: a pop-up used to be usable for that long. Over an
+        // ordinary full-screen app it shows for the moment until its PAUSED
+        // lands, which only makes that wall quicker.
+        (ownWallInFront || (wallAgeMillis < COVER_SETTLE_MILLIS && !alarmOnScreen)) &&
+        walledStillResumed && !inGrace
 
 /**
  * Pure: whether a wall for [walled] may land while [front] is in front. Never over
@@ -123,6 +131,19 @@ const val COVER_MAX_MILLIS = 2 * 60_000L
 
 /** How long "Let me close it" lifts the cover. */
 const val COVER_GRACE_MILLIS = 8_000L
+
+/** How long before the same app's cover offers "Let me close it" again. */
+const val COVER_GRACE_EVERY_MILLIS = 10 * 60_000L
+
+/**
+ * Pure: the cover over a walled pop-up offers its "Let me close it" button.
+ * Once per app in [COVER_GRACE_EVERY_MILLIS] ([lastUsedAt] null = never): each
+ * press is [COVER_GRACE_MILLIS] of the walled app, and offered on every cover it
+ * added up to using the app. Without it the window is closed from Recents,
+ * where the cover is not in front.
+ */
+fun coverGraceOffered(lastUsedAt: Long?, now: Long): Boolean =
+    lastUsedAt == null || now - lastUsedAt >= COVER_GRACE_EVERY_MILLIS
 
 /**
  * Pure: whether the PIN cover should be up (2026-11-04, user report: "you can

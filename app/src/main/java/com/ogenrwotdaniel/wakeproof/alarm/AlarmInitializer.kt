@@ -49,7 +49,7 @@ class AlarmInitializer @Inject constructor(
         pinSlots()
         // Here rather than in [initialize] because a sync pull calls only this,
         // and water and day-plan alarms arrive by sync.
-        retiredAlarms(repository.getAllAlarmsIncludingDeleted())
+        retiredAlarms(repository.getAllAlarmsIncludingDeleted(), StrictAlarm.syncIds(context))
             .forEach { repository.deleteAlarm(it) }
     }
 
@@ -75,6 +75,9 @@ class AlarmInitializer @Inject constructor(
             val all = repository.getAllAlarmsIncludingDeleted()
             val syncId = StrictAlarm.syncId(context, index)
             var row = all.firstOrNull { it.syncId == syncId }
+            // A fixed slot moves to the row every device agrees on, so the copy
+            // this device made before it had synced can be deleted as a duplicate.
+            if (!slot.hard) fixedSlotRow(all, slot)?.let { row = it }
             if (row == null) {
                 row = strictAlarmCandidate(all, slot, taken = StrictAlarm.syncIds(context)) ?: run {
                     repository.addAlarm(slot.type, slot.hour, slot.minute, strictLabel(slot))

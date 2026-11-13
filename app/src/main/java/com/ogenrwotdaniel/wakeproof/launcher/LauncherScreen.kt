@@ -202,6 +202,7 @@ fun LauncherScreen(
                         .combinedClickable(onClick = onOpenWakeProof)
                 )
 
+                TopThreeLines(viewModel)
                 Spacer(Modifier.height(20.dp))
                 Agenda(
                     events = agenda,
@@ -382,6 +383,29 @@ private fun Agenda(
                         .padding(vertical = 3.dp)
                 )
             }
+        }
+    }
+}
+
+/** The top three for today, and tomorrow's once written: the home screen is where the day starts. */
+@Composable
+private fun TopThreeLines(viewModel: LauncherViewModel) {
+    val all by viewModel.topThrees.collectAsStateWithLifecycle()
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        viewModel.loadTopThree()
+        onPauseOrDispose { }
+    }
+    // Read at each composition: the screen recomposes with the clock, so midnight turns it over.
+    val shown = com.ogenrwotdaniel.wakeproof.plan.topThreeShown(all, java.time.LocalDate.now().toEpochDay())
+    shown.forEach { (title, items) ->
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 14.dp, bottom = 2.dp)
+        )
+        items.forEachIndexed { index, item ->
+            Text(text = "${index + 1}. $item", style = MaterialTheme.typography.bodyLarge, color = Color.White)
         }
     }
 }

@@ -270,7 +270,8 @@ class AlarmRingingService : Service() {
         AlarmType.PUSHUP -> "Pushups to silence it. No shortcuts."
         AlarmType.REVIEW -> "Answer your due flashcards to silence it."
         AlarmType.MATH -> "Solve the sums to silence it."
-        AlarmType.CUSTOM, AlarmType.WATER, AlarmType.PLAN, AlarmType.SHUTDOWN -> "Complete your verification."
+        AlarmType.SHUTDOWN -> "Write tomorrow's top three."
+        AlarmType.CUSTOM, AlarmType.WATER, AlarmType.PLAN -> "Complete your verification."
     }
 
     companion object {

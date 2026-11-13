@@ -67,8 +67,9 @@ import com.ogenrwotdaniel.wakeproof.data.UsageSnapshot
 import com.ogenrwotdaniel.wakeproof.data.WallDay
 import com.ogenrwotdaniel.wakeproof.distraction.BEDTIME_END_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.MINUTES_PER_DAY
-import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
-import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_START_MINUTES
+import com.ogenrwotdaniel.wakeproof.distraction.longNightDevice
+import com.ogenrwotdaniel.wakeproof.distraction.nightWallEnd
+import com.ogenrwotdaniel.wakeproof.distraction.nightWallStart
 import com.ogenrwotdaniel.wakeproof.distraction.WallRules
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import com.ogenrwotdaniel.wakeproof.distraction.gatedOpenWindow
@@ -672,6 +673,10 @@ private fun ScheduleCard(
     val shutColor = MaterialTheme.colorScheme.surfaceVariant
     val nightColor = MaterialTheme.colorScheme.tertiary
     val now = LocalTime.now().let { it.hour * 60 + it.minute }
+    // The phone's night wall is the longer one; the tablet keeps the sleep wall's hours.
+    val phone = remember { longNightDevice(context) }
+    val nightStart = nightWallStart(phone)
+    val nightEnd = nightWallEnd(phone)
 
     SectionCard(title = "Schedule", caption = "Every day's walls") {
         DayStrip(
@@ -684,8 +689,8 @@ private fun ScheduleCard(
             label = "Everything else",
             base = openColor.copy(alpha = 0.35f),
             spans = listOf(
-                Span(SLEEP_START_MINUTES, MINUTES_PER_DAY, nightColor),
-                Span(0, SLEEP_END_MINUTES, nightColor)
+                Span(nightStart, MINUTES_PER_DAY, nightColor),
+                Span(0, nightEnd, nightColor)
             ),
             nowMinute = now
         )
@@ -719,12 +724,12 @@ private fun ScheduleCard(
         ScheduleRow(
             swatch = nightColor,
             label = "Night wall",
-            value = "${clock(SLEEP_START_MINUTES)}–${clock(SLEEP_END_MINUTES)}"
+            value = "${clock(nightStart)}–${clock(nightEnd)}"
         )
         Text(
             text = "Gated apps are social, video, messaging, the Play Store and every browser. " +
-                "The night wall shuts every app but calls, Clock, Calendar, WakeProof and a " +
-                "running focus session's apps. In a focus session Do Not Disturb is on.",
+                "The night wall shuts every app but calls, " + (if (phone) "the camera, " else "") +
+                "Clock, Calendar, WakeProof and a running focus session's apps. In a focus session Do Not Disturb is on.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

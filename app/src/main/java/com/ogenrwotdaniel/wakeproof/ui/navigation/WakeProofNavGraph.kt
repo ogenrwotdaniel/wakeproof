@@ -1,7 +1,9 @@
 package com.ogenrwotdaniel.wakeproof.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.flow.first
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -11,6 +13,7 @@ import com.ogenrwotdaniel.wakeproof.ui.forest.ForestScreen
 import com.ogenrwotdaniel.wakeproof.ui.home.HomeScreen
 import com.ogenrwotdaniel.wakeproof.ui.onboarding.OnboardingScreen
 import com.ogenrwotdaniel.wakeproof.ui.plans.SessionSummariesScreen
+import com.ogenrwotdaniel.wakeproof.ui.plans.TopThreeScreen
 import com.ogenrwotdaniel.wakeproof.ui.pomodoro.PomodoroScreen
 import com.ogenrwotdaniel.wakeproof.ui.pomodoro.SummaryCaptureScreen
 import com.ogenrwotdaniel.wakeproof.ui.settings.SettingsScreen
@@ -26,8 +29,23 @@ fun WakeProofNavGraph(
     navController: NavHostController = rememberNavController(),
     immersiveFocus: Boolean = false,
     /** Bumped by a notification that asks for the focus timer; 0 = never asked. */
-    openTimer: Int = 0
+    openTimer: Int = 0,
+    /** Bumped when a break ends and the full-screen timer comes back; 0 = never. */
+    landTimer: Int = 0
 ) {
+    // Only from Home: any other screen (flashcards, a summary photo, a setting
+    // half typed) is work in hand that a pop would lose. The timer waits under it.
+    androidx.compose.runtime.LaunchedEffect(landTimer) {
+        if (landTimer > 0) runCatching {
+            // Started cold, the graph is not set yet: wait for its first screen.
+            val at = kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+                navController.currentBackStackEntryFlow.first()
+            }?.destination ?: navController.currentDestination
+            if (at?.hasRoute<HomeRoute>() == true) {
+                navController.navigate(PomodoroRoute) { launchSingleTop = true }
+            }
+        }
+    }
     // After the graph is set below. Back to the timer when it is already under
     // the screen in front (the capture screen, the library): a second timer on
     // top would leave a camera running beneath it.
@@ -50,7 +68,12 @@ fun WakeProofNavGraph(
                     onOpenFlashcards = { navController.navigate(FlashcardsRoute) },
                     onOpenForest = { navController.navigate(ForestRoute) },
                     onOpenSummaries = { navController.navigate(SessionSummariesRoute) },
+                    onOpenTopThree = { navController.navigate(TopThreeRoute) { launchSingleTop = true } },
                 )
+            }
+            composable<TopThreeRoute> {
+                // Popped by name: Save and a second tap must not pop the screen under it too.
+                TopThreeScreen(onFinish = { navController.popBackStack(TopThreeRoute, inclusive = true) })
             }
             composable<OnboardingRoute> {
                 OnboardingScreen(

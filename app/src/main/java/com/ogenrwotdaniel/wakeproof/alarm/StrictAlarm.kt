@@ -35,7 +35,19 @@ object StrictAlarm {
      * One locked alarm's time and kind: no snooze, no emergency dismiss, held
      * volume, resumed after a restart.
      */
-    data class Slot(val hour: Int, val minute: Int, val type: AlarmType = AlarmType.PUSHUP) {
+    data class Slot(
+        val hour: Int,
+        val minute: Int,
+        val type: AlarmType = AlarmType.PUSHUP,
+        /**
+         * False for a slot that is fixed but not hard: its row is as uneditable
+         * as any locked one, but the ring keeps the ordinary snooze and
+         * emergency dismiss, is not resumed after a restart and is not backed
+         * up by the watch. The evening's top three is one: an alarm to write
+         * three lines must not be able to keep the user from bed.
+         */
+        val hard: Boolean = true
+    ) {
         val minuteOfDay: Int get() = hour * 60 + minute
     }
 
@@ -44,7 +56,20 @@ object StrictAlarm {
      * from when there was only one. Keys are never renumbered or reused, or a
      * device would take the row it still holds under an old key for a new slot's.
      */
-    val PINNED: List<IndexedValue<Slot>> = listOf(IndexedValue(0, Slot(3, 0)))
+    val PINNED: List<IndexedValue<Slot>> = listOf(
+        IndexedValue(0, Slot(3, 0)),
+        // Tomorrow's top three, ten minutes before bed (2026-11-13, the user:
+        // "make it alarm then for top three"). Key 4: 3 was the 19:30 evening
+        // review, and a device still holding that row must delete it, not move it.
+        IndexedValue(
+            4,
+            Slot(
+                com.ogenrwotdaniel.wakeproof.plan.TOP_THREE_MINUTES / 60,
+                com.ogenrwotdaniel.wakeproof.plan.TOP_THREE_MINUTES % 60,
+                AlarmType.SHUTDOWN, hard = false
+            )
+        )
+    )
 
     /** The locked alarms' times and kinds, in order. */
     val SLOTS: List<Slot> = PINNED.map { it.value }
@@ -74,8 +99,8 @@ object StrictAlarm {
     fun slotMinutes(type: AlarmType): Set<Int> =
         SLOTS.filter { it.type == type }.map { it.minuteOfDay }.toSet()
 
-    /** The locked alarms' minutes, in order: what the watch backs up. */
-    val hardMinutes: List<Int> get() = SLOTS.map { it.minuteOfDay }
+    /** The [Slot.hard] alarms' minutes, in order: what the watch backs up. */
+    val hardMinutes: List<Int> get() = SLOTS.filter { it.hard }.map { it.minuteOfDay }
 
     /** The last locked alarm's minute of the day: night quiet and the charge nag run until it. */
     val lastSlotMinute: Int get() = hardMinutes.max()
@@ -111,6 +136,16 @@ object StrictAlarm {
         edit.commit()
     }
 
+    /**
+     * Lets go of every pinned slot without touching the rows: for a tablet
+     * leaving the ringing role, whose rows are the phone's own locked alarms.
+     */
+    fun release(context: Context) {
+        val edit = prefs(context).edit()
+        PINNED.forEach { edit.remove(syncKey(it.index)).remove(idKey(it.index)) }
+        edit.remove(KEY_RINGING_ID).remove(KEY_RINGING_AT).commit()
+    }
+
     /** Slot key [slot]'s sync id on this device; null = none adopted yet. */
     fun syncId(context: Context, slot: Int): String? = prefs(context).getString(syncKey(slot), null)
 
@@ -140,7 +175,7 @@ object StrictAlarm {
     fun isStrictId(context: Context, alarmId: Long): Boolean {
         if (alarmId == -1L) return false
         val prefs = prefs(context)
-        return PINNED.any { prefs.getLong(idKey(it.index), -1L) == alarmId }
+        return PINNED.any { it.value.hard && prefs.getLong(idKey(it.index), -1L) == alarmId }
     }
 
     /** The bundled alarm song (every alarm uses it), or null for the phone's alarm sound. */
@@ -216,7 +251,12 @@ fun strictAlarmCandidate(
     taken: Set<String> = emptySet()
 ): Alarm? =
     alarms.filter { it.enabled && !it.deleted && it.type == slot.type && it.syncId !in taken }
-        .minWithOrNull(compareBy<Alarm>({ it.hour }, { it.minute }))
+        // A fixed slot takes only a row already on its minute, and of several the
+        // one every device agrees on ([fixedSlotRow]).
+        .filter { slot.hard || it.hour * 60 + it.minute == slot.minuteOfDay }
+        .minWithOrNull(
+            if (slot.hard) compareBy<Alarm>({ it.hour }, { it.minute }) else compareBy { it.syncId }
+        )
 
 
 /** The label a created locked alarm carries, e.g. "Locked 3:00". */
@@ -252,11 +292,36 @@ fun strictAlarmDuplicates(alarms: List<Alarm>, locked: Set<String>): List<Alarm>
     }
 
 /**
- * Pure: live alarms of a retired kind ([AlarmType.retired]: water, the day
- * plan, the evening review), which the reconcile deletes on every device.
+ * Pure: live alarms the reconcile deletes on every device: those of a retired
+ * kind ([AlarmType.retired]: water, the day plan) and strays of a kind that
+ * exists only as a fixed slot ([locked] is no longer consulted: the kept row is
+ * chosen the same way everywhere).
  */
-fun retiredAlarms(alarms: List<Alarm>): List<Alarm> =
-    alarms.filter { it.type.retired && !it.deleted }
+fun retiredAlarms(alarms: List<Alarm>, locked: Set<String> = emptySet()): List<Alarm> {
+    // A kind that exists only as a fixed slot (the top three): every other live
+    // row of it is a leftover, such as the old 19:30 evening review. Rows on the
+    // slot's minute are spared everywhere, because on a device that rings nothing
+    // the ringing device's locked row is unlocked and would be deleted for it.
+    // One row a slot, the same on every device ([fixedSlotRow]): two devices that
+    // each made one before they had synced showed the alarm twice.
+    val fixed = StrictAlarm.SLOTS.filter { !it.hard }
+    val kept = fixed.mapNotNull { fixedSlotRow(alarms, it)?.syncId }.toSet()
+    return alarms.filter { alarm ->
+        !alarm.deleted && (
+            alarm.type.retired || (fixed.any { it.type == alarm.type } && alarm.syncId !in kept)
+            )
+    }
+}
+
+/**
+ * Pure: the one row a fixed (not hard) [slot] keeps: of the live rows of its
+ * kind on its minute, the smallest sync id, so every device picks the same one
+ * whichever it made itself. Null when there is none.
+ */
+fun fixedSlotRow(alarms: List<Alarm>, slot: StrictAlarm.Slot): Alarm? =
+    alarms.filter {
+        !it.deleted && it.type == slot.type && it.hour * 60 + it.minute == slot.minuteOfDay
+    }.minByOrNull { it.syncId }
 
 /** The share of the alarm stream's maximum a locked alarm rings at; see [strictStreamIndex]. */
 const val STRICT_STREAM_FRACTION = 0.7f

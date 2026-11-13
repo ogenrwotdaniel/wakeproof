@@ -273,7 +273,7 @@ class PomodoroTimerService : Service() {
                     SessionEvent(key, intent.getStringExtra(EXTRA_EVENT_TITLE).orEmpty())
                 }
                 scope.launch {
-                    if (refusedForSummary()) return@launch
+                    if (refusedForNight(maxOf(sessionMinutes, exactMinutes)) || refusedForSummary()) return@launch
                     // A session already running on the watch or another device is
                     // joined, not doubled: one session, the same countdown everywhere.
                     PeerSessions.joinable()?.let { running ->
@@ -331,7 +331,7 @@ class PomodoroTimerService : Service() {
                 }
                 // Its own session realigning is not a start.
                 val starting = !_state.value.active
-                scope.launch { if (!starting || !refusedForSummary()) join(shared) }
+                scope.launch { if (!starting || !(refusedForNight() || refusedForSummary())) join(shared) }
             }
             ACTION_RESTORE -> {
                 createChannel()
@@ -625,6 +625,21 @@ class PomodoroTimerService : Service() {
     }
 
     /**
+     * Bed hours take no work: nothing starts or is joined in them, and nothing
+     * [minutes] long starts that would run into them ([sessionReachesBed]); it
+     * could not be stopped, and would count focus with every app shut. True when refused.
+     */
+    private fun refusedForNight(minutes: Int = 0): Boolean {
+        val minute = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+        if (!com.ogenrwotdaniel.wakeproof.distraction.sessionReachesBed(minute, minutes)) return false
+        android.widget.Toast.makeText(
+            this, com.ogenrwotdaniel.wakeproof.distraction.BED_HOURS_TEXT, android.widget.Toast.LENGTH_LONG
+        ).show()
+        stopSelf()
+        return true
+    }
+
+    /**
      * No session starts, from any door (the timer screen, Home, a calendar
      * event, the watch, Continue here), while the last one's summary is owed:
      * a new session would be the way to never write it. True when refused.
@@ -799,9 +814,35 @@ class PomodoroTimerService : Service() {
                 )
             }
             armDeadline()
+            landTimer()
         }
         syncWatch()
         publishSession()
+    }
+
+    /**
+     * Brings the full-screen timer back as a break ends ([timerLandsAtFocus]).
+     * From the background too: the draw-over-apps grant the walls need is what
+     * lets a service open a screen. Without it nothing opens, as before.
+     */
+    private fun landTimer() {
+        val lands = timerLandsAtFocus(
+            immersiveTimer = latestSettings.focusImmersiveTimer,
+            alarmRinging = com.ogenrwotdaniel.wakeproof.alarm.AlarmRingingService.ringing ||
+                com.ogenrwotdaniel.wakeproof.distraction.callOrRing(this),
+            studying = com.ogenrwotdaniel.wakeproof.distraction.AppBlockService.otherAppInFront() ||
+                com.ogenrwotdaniel.wakeproof.study.StudyBrowserActivity.inFront
+        )
+        // Not with the screen off: what was in front then is not known for sure
+        // (Blackboard has paused), and it would be found covered on waking.
+        val screenOn = getSystemService(android.os.PowerManager::class.java).isInteractive
+        if (!lands || !screenOn) return
+        runCatching {
+            startActivity(
+                com.ogenrwotdaniel.wakeproof.MainActivity.landTimerIntent(this)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
     }
 
     /**

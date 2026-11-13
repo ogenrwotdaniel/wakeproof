@@ -61,7 +61,8 @@ class SyncEngine @Inject constructor(
     private val alarmInitializer: com.ogenrwotdaniel.wakeproof.alarm.AlarmInitializer,
     private val settings: SettingsRepository,
     private val studyUsage: StudyUsageSync,
-    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore,
+    private val topThreeStore: com.ogenrwotdaniel.wakeproof.plan.TopThreeStore
 ) {
 
     /** One pass at a time: the periodic worker and a "Sync now" tap can overlap. */
@@ -159,6 +160,14 @@ class SyncEngine @Inject constructor(
         val doc = collection(db, uid, SETTINGS).document(SHARED_SETTINGS)
         val remote = doc.get(Source.SERVER).await()
         val studyChanged = syncStudyApps(doc, remote)
+        // Its failure must not cost the goal and the study apps their pass.
+        try {
+            syncTopThree(doc, remote)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("SyncEngine", "top three not synced", e)
+        }
         return syncFocusGoal(doc, remote) || studyChanged
     }
 
@@ -235,6 +244,35 @@ class SyncEngine @Inject constructor(
             }
 
             SharedSettingAction.NONE -> false
+        }
+    }
+
+    /**
+     * Tomorrow's top three (2026-11-13, the user: "sync tomorrow's top 3
+     * between phone and tablet too"): the evening written last rides the same
+     * document, newest wins by the time it was written. Only that one evening:
+     * it is what Home shows, and the document stays a few fields.
+     */
+    private suspend fun syncTopThree(doc: DocumentReference, remote: DocumentSnapshot) {
+        val remoteItems = (remote.get(TOP_THREE_ITEMS) as? List<*>)?.filterIsInstance<String>()
+        val remoteDay = remote.getLong(TOP_THREE_DAY)
+        val remoteStamp = remote.getLong(TOP_THREE_UPDATED_AT)?.takeIf { remoteItems != null && remoteDay != null }
+        val local = topThreeStore.newest()
+        when {
+            local != null && local.atMillis > (remoteStamp ?: 0L) -> doc.set(
+                mapOf(
+                    TOP_THREE_DAY to local.epochDay,
+                    TOP_THREE_ITEMS to local.items,
+                    TOP_THREE_UPDATED_AT to local.atMillis,
+                    SERVER_UPDATED_AT to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            ).await()
+            remoteStamp != null && remoteStamp > (local?.atMillis ?: 0L) -> topThreeStore.save(
+                com.ogenrwotdaniel.wakeproof.plan.TopThree(
+                    remoteDay!!, com.ogenrwotdaniel.wakeproof.plan.cleanTopThree(remoteItems!!), remoteStamp
+                )
+            )
         }
     }
 
@@ -350,6 +388,9 @@ class SyncEngine @Inject constructor(
         const val FOCUS_GOAL_UPDATED_AT = "dailyFocusGoalUpdatedAt"
         const val STUDY_APPS = "studyApps"
         const val STUDY_APPS_UPDATED_AT = "studyAppsUpdatedAt"
+        const val TOP_THREE_DAY = "topThreeDay"
+        const val TOP_THREE_ITEMS = "topThreeItems"
+        const val TOP_THREE_UPDATED_AT = "topThreeUpdatedAt"
 
         /** Server-clock stamp, used only to order reads. */
         const val SERVER_UPDATED_AT = "serverUpdatedAt"

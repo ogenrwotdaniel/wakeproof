@@ -34,6 +34,54 @@ fun sleepWallActive(minuteOfDay: Int): Boolean =
     minuteOfDay >= SLEEP_START_MINUTES || minuteOfDay < SLEEP_END_MINUTES
 
 /**
+ * The phone's longer night (2026-11-13, the user: "gating almost all apps
+ * except phone, camera, calendar, wakeproof right from 6pm to 8am ... only in
+ * the phone not tablet"). The same wall as the sleep wall, with the same
+ * verdict, from [PHONE_NIGHT_START_MINUTES] to [PHONE_NIGHT_END_MINUTES]; the
+ * tablet keeps the sleep wall's own hours. Bed, lights out, the charge nag,
+ * the quiet hours and the sleep score stay on 20:00–03:00 everywhere: this is
+ * about the phone being shut, not about when the user sleeps.
+ */
+const val PHONE_NIGHT_START_MINUTES = 18 * 60
+const val PHONE_NIGHT_END_MINUTES = 8 * 60
+
+/** Pure: the minute the night wall goes up on this kind of device. */
+fun nightWallStart(phone: Boolean): Int = if (phone) PHONE_NIGHT_START_MINUTES else SLEEP_START_MINUTES
+
+/** Pure: the minute the night wall comes down on this kind of device. */
+fun nightWallEnd(phone: Boolean): Int = if (phone) PHONE_NIGHT_END_MINUTES else SLEEP_END_MINUTES
+
+/** Pure: inside the night wall's hours for this kind of device (they span midnight). */
+fun nightWallActive(minuteOfDay: Int, phone: Boolean): Boolean =
+    minuteOfDay >= nightWallStart(phone) || minuteOfDay < nightWallEnd(phone)
+
+/**
+ * Pure: the night wall takes a walled app's notifications only in the sleep
+ * wall's own hours. In the phone's extra hours the app stays shut but its
+ * notification stays in the shade: a removed one is lost for good, and
+ * fourteen hours a day of lost bank and mail alerts is more than the wall is for.
+ */
+fun nightWallStrips(minuteOfDay: Int): Boolean = sleepWallActive(minuteOfDay)
+
+/**
+ * Pure: the night wall's headline and body. In bed hours it sends the user to
+ * bed; in the phone's extra hours it only says what is open and until when.
+ */
+// [phone] false is every device on the shorter night.
+fun nightWallCopy(minuteOfDay: Int, phone: Boolean, formatClock: (Int) -> String): Pair<String, String> =
+    when {
+        !phone -> "Time to sleep" to
+            "Everything but calls, the clock and your alarms is shut until " +
+            "${formatClock(SLEEP_END_MINUTES)}. Put it on charge and go to bed."
+        sleepWallActive(minuteOfDay) -> "Time to sleep" to
+            "Everything but calls, the camera, the clock, the calendar and WakeProof is shut until " +
+            "${formatClock(PHONE_NIGHT_END_MINUTES)}. Put the phone on charge and go to bed."
+        else -> "Phone shut for the night" to
+            "Everything but calls, the camera, the clock, the calendar and WakeProof is shut from " +
+            "${formatClock(PHONE_NIGHT_START_MINUTES)} to ${formatClock(PHONE_NIGHT_END_MINUTES)}."
+    }
+
+/**
  * Pure: the "lights out" reminder is due — in the half hour from bedtime, not
  * yet sent today. Bedtime is the wall's start, so this is the notice that the
  * wall is up (with the alarm time). The only night notice: the 19:30
@@ -92,3 +140,38 @@ fun chargeNagDue(
     (minuteOfDay >= CHARGE_FROM_MINUTES || minuteOfDay < maxOf(SLEEP_END_MINUTES, lastSlotMinutes)) &&
         !charging && levelPercent in 0 until CHARGE_BELOW_PERCENT &&
         now - lastNagAt >= CHARGE_NAG_EVERY_MILLIS
+
+/**
+ * Whether this device has the phone's longer night ([nightWallActive]): any
+ * phone, on the Play build as on the sideloaded one (the user's choice,
+ * 2026-11-13: the source is public for anyone who wants other hours).
+ */
+fun longNightDevice(context: android.content.Context): Boolean =
+    com.ogenrwotdaniel.wakeproof.alarm.isPhoneDevice(context)
+
+/**
+ * Pure: bed hours take no work (2026-11-13, the user: "no exception or no work
+ * whether on tablet, watch or phone between 8pm to 3am"). No focus session
+ * starts or is joined then on any device, and one that runs into them loses
+ * its focus-list apps to the sleep wall like everything else.
+ */
+fun bedHoursShutWork(minuteOfDay: Int): Boolean = sleepWallActive(minuteOfDay)
+
+/**
+ * Pure: a session of [minutes] started now is in bed hours or would run into
+ * them. A calendar event's or a joined session's length is not checked beyond
+ * its start when [minutes] is 0.
+ */
+fun sessionReachesBed(minuteOfDay: Int, minutes: Int): Boolean =
+    bedHoursShutWork(minuteOfDay) || minuteOfDay + minutes > SLEEP_START_MINUTES
+
+/** Said when a session start is refused for bed hours. */
+const val BED_HOURS_TEXT = "No focus between 20:00 and 03:00: this session would not end by 20:00."
+
+/**
+ * A call is ringing or under way (the audio mode says so without any
+ * permission): nothing WakeProof opens by itself may land on it.
+ */
+fun callOrRing(context: android.content.Context): Boolean = runCatching {
+    context.getSystemService(android.media.AudioManager::class.java).mode != android.media.AudioManager.MODE_NORMAL
+}.getOrDefault(false)

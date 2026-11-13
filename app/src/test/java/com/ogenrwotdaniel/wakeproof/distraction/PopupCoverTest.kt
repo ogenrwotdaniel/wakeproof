@@ -20,8 +20,15 @@ class PopupCoverTest {
     }
 
     @Test
-    fun `an ordinary full-screen wall never flashes the cover`() {
-        assertFalse(wanted(age = 200L))
+    fun `the cover is up from the wall's first moment, and gone once the app has left`() {
+        assertTrue(wanted(age = 0L))
+        assertTrue(wanted(age = 200L))
+        // Before the wall is in front, too, but only in the first moments and never over an alarm.
+        assertTrue(popupCoverWanted(200L, ownWallInFront = false, walledStillResumed = true, inGrace = false))
+        assertFalse(popupCoverWanted(COVER_SETTLE_MILLIS, ownWallInFront = false, walledStillResumed = true, inGrace = false))
+        assertFalse(
+            popupCoverWanted(200L, ownWallInFront = false, walledStillResumed = true, inGrace = false, alarmOnScreen = true)
+        )
         assertFalse(wanted(resumed = false))
     }
 
@@ -160,5 +167,13 @@ class PopupCoverTest {
         assertFalse(leftToCover("popup", "popup", COVER_MAX_MILLIS + 1, ownFront = true))
         assertFalse(leftToCover("other", "popup", 0L, ownFront = true))
         assertFalse(leftToCover("popup", null, 0L, ownFront = true))
+    }
+
+    @org.junit.Test
+    fun `let me close it is offered once per app in ten minutes`() {
+        org.junit.Assert.assertTrue(coverGraceOffered(lastUsedAt = null, now = 5_000L))
+        org.junit.Assert.assertFalse(coverGraceOffered(lastUsedAt = 5_000L, now = 5_000L + COVER_GRACE_MILLIS))
+        org.junit.Assert.assertFalse(coverGraceOffered(lastUsedAt = 5_000L, now = 5_000L + COVER_GRACE_EVERY_MILLIS - 1))
+        org.junit.Assert.assertTrue(coverGraceOffered(lastUsedAt = 5_000L, now = 5_000L + COVER_GRACE_EVERY_MILLIS))
     }
 }

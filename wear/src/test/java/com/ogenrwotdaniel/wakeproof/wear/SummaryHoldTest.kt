@@ -19,4 +19,13 @@ class SummaryHoldTest {
         assertFalse(summaryHolds(untilMillis = now - 1L, now = now))
         assertFalse(summaryHolds(untilMillis = now + SUMMARY_HOLD_MAX_MILLIS + 1L, now = now))
     }
+
+    @Test
+    fun `bed hours run 20 00 to 03 00`() {
+        assertFalse(bedHours(19 * 60 + 59))
+        assertTrue(bedHours(20 * 60))
+        assertTrue(bedHours(0))
+        assertTrue(bedHours(2 * 60 + 59))
+        assertFalse(bedHours(3 * 60))
+    }
 }

@@ -68,6 +68,15 @@ const val SUMMARY_OWED_TEXT = "First photograph your session summary on the phon
 fun summaryHolds(untilMillis: Long, now: Long): Boolean =
     untilMillis - now in 1..SUMMARY_HOLD_MAX_MILLIS
 
+/**
+ * Pure: bed hours (20:00 to 03:00; matches `bedHoursShutWork` in `:app`) take
+ * no work, so no session starts or is followed on the watch either.
+ */
+fun bedHours(minuteOfDay: Int): Boolean = minuteOfDay >= 20 * 60 || minuteOfDay < 3 * 60
+
+/** Said when a start is refused in bed hours. */
+const val BED_HOURS_TEXT = "No focus between 20:00 and 03:00. Go to bed."
+
 /** Reads the latest [WearStats] the phone pushed onto the Data Layer. */
 object WearStatsReader {
     suspend fun read(context: Context): WearStats = withContext(Dispatchers.IO) {

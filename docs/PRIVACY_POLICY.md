@@ -66,6 +66,12 @@ app:
   day-plan alarm and the evening review were removed on 13 November 2026. The
   photos and reviews they had saved are deleted from the device the first time
   the updated app is opened.
+- **Tomorrow's top three.** The up to three lines you write in the evening
+  for the next day are kept in WakeProof's private storage on that device
+  (the newest 31 evenings). If you turn on Cloud Sync, the most recent
+  evening's lines are also stored in your own Firestore account data so your
+  other devices can show them, and are deleted with it. They are not in the
+  backup file and are never sent to any AI service.
 - **Recall notes.** The lines you write after a focus block are kept in
   WakeProof's private storage on that device. They are not synced. They are
   included in the JSON backup file you can export yourself. A recall note is
@@ -189,7 +195,9 @@ Material changes will be posted at this URL with an updated effective date.
 
 **13 November 2026** — added session-summary photos, taken after a
 focus session and stored on the device only; removed the day-plan alarm and
-its photo library, and the evening review.
+its photo library, and the evening review. Later the same day: added
+tomorrow's top three, written in the evening, stored on the device and, with
+Cloud Sync on, synced to your other devices.
 
 **12 November 2026** — removed water-drinking verification altogether, and
 with it the only case in which a photo taken at an alarm could be sent to

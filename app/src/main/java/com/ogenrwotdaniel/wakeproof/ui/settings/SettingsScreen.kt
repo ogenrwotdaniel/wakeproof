@@ -103,8 +103,12 @@ fun SettingsScreen(
             SwitchSetting(
                 label = "Ring alarms on this device",
                 description = "Alarms are shared across your devices, but only the ones with " +
-                    "this switch on actually ring. Leave it off on a tablet so a single " +
-                    "05:00 alarm does not go off twice in the same room. Off here means " +
+                    "this switch on actually ring. Leave it off on a tablet so the " +
+                    // The locked alarm's own time, in the device's clock format: a
+                    // made-up hour here read as a second alarm.
+                    formatAlarmTime(
+                        LocalContext.current, StrictAlarm.SLOTS.first().hour, StrictAlarm.SLOTS.first().minute
+                    ) + " alarm does not go off twice in the same room. Off here means " +
                     "nothing is armed at all — the alarms still list, and editing them still " +
                     "reaches your phone.",
                 checked = ringsAlarms,
@@ -120,7 +124,9 @@ fun SettingsScreen(
             }
             val lockedIds = viewModel.strictAlarmSyncIds
             alarms.forEach { alarm ->
-                if (alarm.syncId in lockedIds) {
+                // The top-three alarm is fixed on every device: on the tablet the
+                // phone's row is not locked here, and must not look editable.
+                if (alarm.syncId in lockedIds || alarm.type == AlarmType.SHUTDOWN) {
                     LockedAlarmRow(alarm)
                     return@forEach
                 }
@@ -999,15 +1005,21 @@ private fun LockedAlarmRow(alarm: com.ogenrwotdaniel.wakeproof.data.db.Alarm) {
             text = formatAlarmTime(context, alarm.hour, alarm.minute),
             style = MaterialTheme.typography.headlineSmall
         )
+        // Fixed, not hard: the top three keeps the ordinary snooze and emergency dismiss.
+        val hard = alarm.type != AlarmType.SHUTDOWN
         Text(
             text = (if (isStrictLabel(alarm.label)) "" else alarm.label).ifBlank { "Locked" } +
-                " · ${StrictAlarm.REPS} pushups · every day",
+                (if (hard) " · ${StrictAlarm.REPS} pushups" else " · tomorrow's top three") + " · every day",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
-                "no emergency dismiss, and keeps ringing after a restart until it is done.",
+            text = if (hard) {
+                "Locked. It cannot be changed, switched off or deleted, has no snooze and " +
+                    "no emergency dismiss, and keeps ringing after a restart until it is done."
+            } else {
+                "Fixed. It cannot be changed, switched off or deleted. Write at least one line to silence it."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary
         )

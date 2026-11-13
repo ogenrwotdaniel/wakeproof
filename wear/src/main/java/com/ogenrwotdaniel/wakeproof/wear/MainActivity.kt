@@ -296,8 +296,9 @@ class MainActivity : ComponentActivity() {
         // the phone left behind, and a block finished on both is recorded once.
         timer.session?.takeIf { timer.running }?.let { session ->
             addButton("Continue here") {
-                if (WatchTimerEngine.summaryOwed(applicationContext)) {
-                    android.widget.Toast.makeText(this, SUMMARY_OWED_TEXT, android.widget.Toast.LENGTH_LONG).show()
+                val refusal = WatchTimerEngine.startRefusal(applicationContext)
+                if (refusal != null) {
+                    android.widget.Toast.makeText(this, refusal, android.widget.Toast.LENGTH_LONG).show()
                 } else {
                     WatchTimerEngine.follow(applicationContext, session)
                 }
@@ -347,8 +348,9 @@ class MainActivity : ComponentActivity() {
         buttons.removeAllViews()
         for (session in WatchSession.entries) {
             addButton(session.label) {
-                if (WatchTimerEngine.summaryOwed(applicationContext)) {
-                    android.widget.Toast.makeText(this, SUMMARY_OWED_TEXT, android.widget.Toast.LENGTH_LONG).show()
+                val refusal = WatchTimerEngine.startRefusal(applicationContext)
+                if (refusal != null) {
+                    android.widget.Toast.makeText(this, refusal, android.widget.Toast.LENGTH_LONG).show()
                 } else {
                     WatchTimerEngine.start(applicationContext, session)
                 }
@@ -469,10 +471,9 @@ class MainActivity : ComponentActivity() {
         button.setOnClickListener {
             scope.launch {
                 // The phone would refuse it with a message nobody at the watch sees.
-                if (command == TimerCommands.START && WatchTimerEngine.summaryOwed(applicationContext)) {
-                    android.widget.Toast.makeText(
-                        this@MainActivity, SUMMARY_OWED_TEXT, android.widget.Toast.LENGTH_LONG
-                    ).show()
+                val refusal = if (command == TimerCommands.START) WatchTimerEngine.startRefusal(applicationContext) else null
+                if (refusal != null) {
+                    android.widget.Toast.makeText(this@MainActivity, refusal, android.widget.Toast.LENGTH_LONG).show()
                     return@launch
                 }
                 setButtonsEnabled(false)

@@ -60,9 +60,14 @@ class StrictAlarmTest {
     }
 
     @Test
-    fun `only the 03 00 pushups stay locked, under the storage key they always had`() {
-        assertEquals(listOf(StrictAlarm.Slot(3, 0)), StrictAlarm.SLOTS)
-        assertEquals(listOf(0), StrictAlarm.PINNED.map { it.index })
+    fun `the 03 00 pushups and the 19 50 top three are pinned, under keys never reused`() {
+        assertEquals(
+            listOf(StrictAlarm.Slot(3, 0), StrictAlarm.Slot(19, 50, AlarmType.SHUTDOWN, hard = false)),
+            StrictAlarm.SLOTS
+        )
+        // Key 3 was the 19:30 review: the top three takes a new one.
+        assertEquals(listOf(0, 4), StrictAlarm.PINNED.map { it.index })
+        assertTrue(StrictAlarm.PINNED.none { it.index in StrictAlarm.DROPPED_KEYS })
         // 05:40 pushups, the 08:20 day plan and the 19:30 review: their rows are deleted, their keys never reused.
         assertEquals(listOf(1, 2, 3), StrictAlarm.DROPPED_KEYS)
         // An old copy of the 05:40 pushups synced back stays silent.
@@ -70,9 +75,25 @@ class StrictAlarmTest {
     }
 
     @Test
-    fun `day-plan and evening-review alarms are retired like water`() {
+    fun `day-plan alarms are retired like water, and the top three lives only on its slot`() {
         assertTrue(AlarmType.PLAN.retired)
-        assertTrue(AlarmType.SHUTDOWN.retired)
+        assertFalse(AlarmType.SHUTDOWN.retired)
+        val rows = listOf(
+            // The old 19:30 evening review, synced back: a stray.
+            alarm(1, type = AlarmType.SHUTDOWN, hour = 19, minute = 30),
+            // On the slot's minute: this device's locked row, or the phone's seen from the tablet.
+            alarm(2, type = AlarmType.SHUTDOWN, hour = 19, minute = 50),
+            alarm(3, type = AlarmType.SHUTDOWN, hour = 21, minute = 0)
+        )
+        assertEquals(listOf(1L, 3L), retiredAlarms(rows).map { it.id })
+        // Two devices each made the 19:50 row before syncing: one is kept, the same everywhere.
+        val twice = rows + alarm(4, type = AlarmType.SHUTDOWN, hour = 19, minute = 50)
+        assertEquals("s2", fixedSlotRow(twice, StrictAlarm.SLOTS[1])?.syncId)
+        assertEquals(listOf(1L, 3L, 4L), retiredAlarms(twice).map { it.id })
+        assertEquals(2L, strictAlarmCandidate(twice.reversed(), StrictAlarm.SLOTS[1])?.id)
+        // A fixed slot adopts only the row on its own minute.
+        assertEquals(2L, strictAlarmCandidate(rows, StrictAlarm.SLOTS[1])?.id)
+        assertNull(strictAlarmCandidate(rows.filter { it.id != 2L }, StrictAlarm.SLOTS[1]))
         assertEquals(listOf(1L), retiredAlarms(listOf(alarm(1, type = AlarmType.PLAN, hour = 8, minute = 20), alarm(2))).map { it.id })
     }
 
@@ -136,7 +157,7 @@ class StrictAlarmTest {
 
     @Test
     fun `the one morning alarm is 03 00, at 10 pushups`() {
-        assertEquals(listOf(StrictAlarm.Slot(3, 0)), StrictAlarm.SLOTS)
+        assertEquals(listOf(StrictAlarm.Slot(3, 0)), StrictAlarm.SLOTS.filter { it.hard })
         assertEquals(10, StrictAlarm.REPS)
     }
 

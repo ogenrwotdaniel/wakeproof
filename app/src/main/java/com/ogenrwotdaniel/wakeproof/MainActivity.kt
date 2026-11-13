@@ -51,9 +51,13 @@ class MainActivity : ComponentActivity() {
     /** Counts the asks to open the focus timer (the session-summary notification's tap). */
     private val timerAsks = MutableStateFlow(0)
 
+    /** Counts the breaks that ended and brought the timer back ([landTimerIntent]). */
+    private val timerLands = MutableStateFlow(0)
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_TIMER, false)) timerAsks.update { it + 1 }
+        if (intent.getBooleanExtra(EXTRA_LAND_TIMER, false)) timerLands.update { it + 1 }
     }
 
     override fun onStart() {
@@ -110,6 +114,9 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromRecents && intent.getBooleanExtra(EXTRA_OPEN_TIMER, false)) {
             timerAsks.value = 1
         }
+        if (savedInstanceState == null && !fromRecents && intent.getBooleanExtra(EXTRA_LAND_TIMER, false)) {
+            timerLands.value = 1
+        }
         // "Can't use the phone during a session": pin the app (lock task / screen
         // pinning) while a countdown runs — breaks included — and release it only
         // on pause/stop.
@@ -148,7 +155,8 @@ class MainActivity : ComponentActivity() {
                     true -> WakeProofNavGraph(
                         startDestination = HomeRoute,
                         immersiveFocus = immersiveFocus,
-                        openTimer = openTimer
+                        openTimer = openTimer,
+                        landTimer = timerLands.collectAsStateWithLifecycle().value
                     )
                     false -> WakeProofNavGraph(startDestination = OnboardingRoute)
                 }
@@ -158,6 +166,18 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_OPEN_TIMER = "open_timer"
+        private const val EXTRA_LAND_TIMER = "land_timer"
+
+        /**
+         * Brings the app forward on the focus timer as a break ends. Unlike
+         * [timerIntent] it leaves a screen the user is working on where it is
+         * (flashcards, a summary photo, the top three): see `WakeProofNavGraph`.
+         */
+        fun landTimerIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_LAND_TIMER, true)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
 
         /**
          * Opens the app on the focus timer, with Home under it. The running

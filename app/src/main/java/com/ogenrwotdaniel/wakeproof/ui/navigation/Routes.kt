@@ -45,6 +45,14 @@ data object ForestRoute
 @Serializable
 data object SummaryCaptureRoute
 
+/** The 19:50 alarm: tomorrow's top three, written to silence it. */
+@Serializable
+data object TopThreeVerifyRoute
+
+/** Writing tomorrow's top three from Home, with no alarm behind it. */
+@Serializable
+data object TopThreeRoute
+
 /** The library of session-summary photos. */
 @Serializable
 data object SessionSummariesRoute

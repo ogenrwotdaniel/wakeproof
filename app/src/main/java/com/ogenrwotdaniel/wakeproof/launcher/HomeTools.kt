@@ -36,7 +36,7 @@ private const val UNIST_SMART_CHECK = AppGate.UNIST_SMART_CHECK
  * Samsung's Expert RAW camera. The package name is from memory, not read off
  * the device, so [pinnedApps] also finds it by its label.
  */
-private const val EXPERT_RAW = "com.samsung.android.app.galaxyraw"
+const val EXPERT_RAW = "com.samsung.android.app.galaxyraw"
 private const val EXPERT_RAW_LABEL = "Expert RAW"
 
 /**

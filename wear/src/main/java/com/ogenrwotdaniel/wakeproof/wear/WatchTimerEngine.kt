@@ -44,6 +44,16 @@ object WatchTimerEngine {
 
     fun state(context: Context): WatchTimerState = WatchTimerStore.read(context)
 
+    /** Bed hours now: nothing starts here ([bedHours]). */
+    fun bedNow(): Boolean = java.time.LocalTime.now().let { bedHours(it.hour * 60 + it.minute) }
+
+    /** Why nothing may start here right now, to show on the wrist; null when a start is fine. */
+    suspend fun startRefusal(context: Context): String? = when {
+        bedNow() -> BED_HOURS_TEXT
+        summaryOwed(context) -> SUMMARY_OWED_TEXT
+        else -> null
+    }
+
     /** The phone's last session still owes its summary: nothing starts here until it is in. */
     suspend fun summaryOwed(context: Context): Boolean =
         summaryHolds(WearStatsReader.read(context).summaryUntilMillis, System.currentTimeMillis())
@@ -53,7 +63,7 @@ object WatchTimerEngine {
         if (it.active) return@mutate it
         val stats = WearStatsReader.read(context)
         val now = System.currentTimeMillis()
-        if (summaryHolds(stats.summaryUntilMillis, now)) return@mutate it
+        if (bedNow() || summaryHolds(stats.summaryUntilMillis, now)) return@mutate it
         WatchTimer.start(stats.durations, stats.subject, now, session)
     }
 
@@ -69,7 +79,7 @@ object WatchTimerEngine {
             val now = System.currentTimeMillis()
             val minutes = WatchTimer.eventFocusMinutes(beginMillis, endMillis, now) ?: return@mutate it
             val stats = WearStatsReader.read(context)
-            if (summaryHolds(stats.summaryUntilMillis, now)) return@mutate it
+            if (bedNow() || summaryHolds(stats.summaryUntilMillis, now)) return@mutate it
             started = true
             WatchTimer.startExact(minutes, stats.subject, now)
         }
@@ -86,7 +96,7 @@ object WatchTimerEngine {
         var joined = false
         mutate(context) {
             if (it.active) return@mutate it
-            if (summaryOwed(context)) return@mutate it
+            if (bedNow() || summaryOwed(context)) return@mutate it
             val state = WatchTimer.follow(session, System.currentTimeMillis()) ?: return@mutate it
             joined = true
             state

@@ -54,8 +54,17 @@ class HomeViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     liveCloudFeed: LiveCloudFeed,
     wallRulesRepository: WallRulesRepository,
-    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore,
+    topThreeStore: com.ogenrwotdaniel.wakeproof.plan.TopThreeStore
 ) : ViewModel() {
+
+    /** Every evening's top three; the screen picks today's and this evening's. */
+    val topThrees: StateFlow<com.ogenrwotdaniel.wakeproof.plan.TopThrees> = topThreeStore.evenings
+
+    init {
+        // The store reads lazily; without this Home would show nothing until the writing screen opened.
+        viewModelScope.launch { runCatching { topThreeStore.load() } }
+    }
 
     /** The session summary still owed its photo; the screen decides if it is still due. */
     val summary: StateFlow<com.ogenrwotdaniel.wakeproof.study.SummaryState> = summaryStore.state

@@ -249,8 +249,8 @@ enum class GateVerdict {
  *    app the caller names (all of them on the sideloaded build, gated and capped
  *    ones on Play): all the walls below it read that clock. Inside one it is left
  *    to the walls below, because Settings is walled and the fix could not be made.
- * 3. The night's sleep wall over every non-essential app (except focus-list apps
- *    during an active session).
+ * 3. The night's sleep wall over every non-essential app (except, outside bed
+ *    hours, focus-list apps during an active session).
  * 4. During a focus session, anything not on the focus list is walled — the
  *    whole session, breaks included, across all of the user's devices.
  * 5. An app in its first week ([quarantined]).
@@ -273,6 +273,11 @@ fun gateVerdict(
     bedtime: Boolean = false,
     examWeek: Boolean = false,
     sleeping: Boolean = false,
+    /**
+     * A running session keeps its focus-list apps through the night wall. False
+     * in bed hours ([bedHoursShutWork]), when nothing is kept.
+     */
+    sleepKeepsSession: Boolean = true,
     quarantined: Boolean = false,
     clockUntrusted: Boolean = false,
     historyOn: Boolean = false,
@@ -295,8 +300,8 @@ fun gateVerdict(
     essential && quarantined && !focusSessionActive -> GateVerdict.QUARANTINE_WALL
     essential -> GateVerdict.ALLOW
     clockUntrusted && !focusSessionActive -> GateVerdict.CLOCK_WALL
-    // Every app, gated or not; a focus session into the night keeps its list.
-    sleeping && !(focusSessionActive && onFocusList) -> GateVerdict.SLEEP_WALL
+    // Every app, gated or not; outside bed hours a focus session keeps its list.
+    sleeping && !(sleepKeepsSession && focusSessionActive && onFocusList) -> GateVerdict.SLEEP_WALL
     focusSessionActive && !onFocusList -> GateVerdict.FOCUS_WALL
     summaryOwed && !onFocusList -> GateVerdict.SUMMARY_WALL
     quarantined -> GateVerdict.QUARANTINE_WALL

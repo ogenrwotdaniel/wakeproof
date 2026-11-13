@@ -66,6 +66,7 @@ fun HomeScreen(
     onOpenFlashcards: () -> Unit,
     onOpenForest: () -> Unit,
     onOpenSummaries: () -> Unit,
+    onOpenTopThree: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -136,6 +137,13 @@ fun HomeScreen(
                     }
                 }
             }
+
+            TopThreeCards(
+                all = viewModel.topThrees.collectAsStateWithLifecycle().value,
+                // Asked where the alarm rings; the list itself syncs and shows everywhere.
+                asks = ringsAlarms,
+                onWrite = onOpenTopThree
+            )
 
             // A countdown running in the foreground service, surfaced where the
             // app opens. Above the goal cards because it is the only thing on
@@ -765,6 +773,55 @@ private fun MorningAlarmsWeek(week: List<DayStat>, modifier: Modifier = Modifier
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * What last evening put first for today, and from 19:50 the ask for
+ * tomorrow's. Read against the clock once a minute, so the evening card
+ * appears on a Home left open.
+ */
+@Composable
+private fun TopThreeCards(all: com.ogenrwotdaniel.wakeproof.plan.TopThrees, asks: Boolean, onWrite: () -> Unit) {
+    val now by androidx.compose.runtime.produceState(java.time.LocalDateTime.now()) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000L - System.currentTimeMillis() % 60_000L)
+            value = java.time.LocalDateTime.now()
+        }
+    }
+    val today = now.toLocalDate().toEpochDay()
+    val todays = com.ogenrwotdaniel.wakeproof.plan.topThreeFor(all, today)
+    if (todays.isNotEmpty()) {
+        androidx.compose.material3.Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "Today's top three", style = MaterialTheme.typography.titleMedium)
+                todays.forEachIndexed { index, item ->
+                    Text(text = "${index + 1}. $item", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+    }
+    val tomorrows = com.ogenrwotdaniel.wakeproof.plan.topThreeWrittenOn(all, today)
+    val evening = com.ogenrwotdaniel.wakeproof.plan.topThreeEvening(now.hour * 60 + now.minute)
+    if ((asks && evening) || tomorrows.isNotEmpty()) {
+        androidx.compose.material3.Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "Tomorrow's top three", style = MaterialTheme.typography.titleMedium)
+                if (tomorrows.isEmpty()) {
+                    Text(
+                        text = "Write the three things that matter most tomorrow before bed.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    tomorrows.forEachIndexed { index, item ->
+                        Text(text = "${index + 1}. $item", style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                Button(onClick = onWrite, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (tomorrows.isEmpty()) "Write them" else "Change")
                 }
             }
         }

@@ -77,6 +77,7 @@ fun AlarmRingingScreen(
             Text(
                 text = when (alarm?.type) {
                     AlarmType.REVIEW -> "Answer your due flashcards."
+                    AlarmType.SHUTDOWN -> "Ten minutes to bed. Write the three things that matter most tomorrow."
                     AlarmType.PUSHUP -> "Do your pushups in front of the camera."
                     AlarmType.MATH -> "Solve a few sums. Works in the dark, no camera."
                     else -> "Complete your verification to silence the alarm."

@@ -46,8 +46,17 @@ class LauncherViewModel @Inject constructor(
     private val agendaRepository: AgendaRepository,
     private val wallRulesRepository: WallRulesRepository,
     limitRepository: DistractionLimitRepository,
-    statsRepository: StatsRepository
+    statsRepository: StatsRepository,
+    private val topThreeStore: com.ogenrwotdaniel.wakeproof.plan.TopThreeStore
 ) : ViewModel() {
+
+    /** Every evening's top three; the screen picks what today shows. */
+    val topThrees: StateFlow<com.ogenrwotdaniel.wakeproof.plan.TopThrees> = topThreeStore.evenings
+
+    /** Reads the stored lists; called on each resume, as the file loads lazily. */
+    fun loadTopThree() {
+        viewModelScope.launch { runCatching { topThreeStore.load() } }
+    }
 
     private val _apps = MutableStateFlow<List<InstalledApp>>(emptyList())
 

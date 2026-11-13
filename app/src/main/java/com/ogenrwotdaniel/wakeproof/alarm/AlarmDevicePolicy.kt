@@ -53,11 +53,17 @@ class AlarmDevicePolicy @Inject constructor(
 
     /**
      * Returns false, changing nothing, when switching the role off is refused:
-     * a device holding the [StrictAlarm] keeps ringing — otherwise the switch
+     * a phone holding the [StrictAlarm] keeps ringing — otherwise the switch
      * would be the "turn it off" the locked alarm exists to rule out.
      */
     fun setRingsAlarms(value: Boolean): Boolean {
-        if (!value && StrictAlarm.syncIds(context).isNotEmpty()) return false
+        if (!value && StrictAlarm.syncIds(context).isNotEmpty()) {
+            // Only a phone is held to it. A tablet whose switch was turned on by
+            // mistake had locked the alarms too and could never be made quiet
+            // again (the user's report, 2026-11-13): it lets them go instead.
+            if (isPhoneDevice(context)) return false
+            StrictAlarm.release(context)
+        }
         prefs.edit().putBoolean(KEY_RINGS, value).apply()
         _ringsAlarms.value = value
         return true
@@ -72,17 +78,25 @@ class AlarmDevicePolicy @Inject constructor(
      * two, and both together are wrong only for a phone with no SIM support at
      * all, which then simply needs the switch turning on once.
      */
-    private fun defaultForThisDevice(): Boolean {
-        val hasTelephony = context.packageManager
-            .hasSystemFeature(PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION)
-        val phoneSized = context.resources.configuration.smallestScreenWidthDp < TABLET_SW_DP
-        return hasTelephony && phoneSized
-    }
+    private fun defaultForThisDevice(): Boolean = isPhoneDevice(context)
 
     private companion object {
         const val KEY_RINGS = "rings_alarms"
-
-        /** Android's own definition of "large screen" for resource qualifiers. */
-        const val TABLET_SW_DP = 600
     }
+}
+
+/** Android's own definition of "large screen" for resource qualifiers. */
+private const val TABLET_SW_DP = 600
+
+/**
+ * Whether this device is a phone: telephony and a phone-sized shortest edge
+ * (a cellular tablet has telephony too). A fact about the hardware, unlike
+ * [AlarmDevicePolicy.ringsAlarms], which is a switch: the phone's longer night
+ * wall reads this, so no setting moves it.
+ */
+fun isPhoneDevice(context: Context): Boolean {
+    val hasTelephony = context.packageManager
+        .hasSystemFeature(PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION)
+    val phoneSized = context.resources.configuration.smallestScreenWidthDp < TABLET_SW_DP
+    return hasTelephony && phoneSized
 }

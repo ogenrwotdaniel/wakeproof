@@ -20,6 +20,43 @@ class NightRulesTest {
     }
 
     @Test
+    fun `the phone's night wall runs 18 00 to 08 00 and the tablet keeps the sleep wall's hours`() {
+        assertFalse(nightWallActive(hm(17, 59), phone = true))
+        assertTrue(nightWallActive(hm(18, 0), phone = true))
+        assertTrue(nightWallActive(hm(0, 0), phone = true))
+        assertTrue(nightWallActive(hm(7, 59), phone = true))
+        assertFalse(nightWallActive(hm(8, 0), phone = true))
+        assertFalse(nightWallActive(hm(12, 0), phone = true))
+        // The tablet: exactly the sleep wall, at every minute of the day.
+        for (minute in 0 until 24 * 60) {
+            assertEquals(sleepWallActive(minute), nightWallActive(minute, phone = false))
+        }
+    }
+
+    @Test
+    fun `the phone's extra hours shut the app and leave its notifications`() {
+        assertFalse(nightWallStrips(hm(18, 30)))
+        assertTrue(nightWallStrips(hm(20, 0)))
+        assertTrue(nightWallStrips(hm(2, 59)))
+        assertFalse(nightWallStrips(hm(3, 0)))
+        assertFalse(nightWallStrips(hm(7, 30)))
+    }
+
+    @Test
+    fun `the night wall says go to bed only in bed hours`() {
+        val clock = { m: Int -> "%02d:%02d".format(m / 60, m % 60) }
+        val evening = nightWallCopy(hm(18, 30), phone = true, formatClock = clock)
+        assertEquals("Phone shut for the night", evening.first)
+        assertTrue(evening.second.contains("18:00") && evening.second.contains("08:00"))
+        val bed = nightWallCopy(hm(22, 0), phone = true, formatClock = clock)
+        assertEquals("Time to sleep", bed.first)
+        assertTrue(bed.second.contains("08:00"))
+        val tablet = nightWallCopy(hm(22, 0), phone = false, formatClock = clock)
+        assertTrue(tablet.second.contains("03:00"))
+        assertFalse(tablet.second.contains("tablet"))
+    }
+
+    @Test
     fun `quiet hours start with the wall at 20 00 and end at the last alarm`() {
         assertFalse(nightQuiet(hm(19, 59), lastSlotMinutes = hm(5, 40)))
         assertTrue(nightQuiet(hm(20, 0), lastSlotMinutes = hm(5, 40)))
@@ -38,6 +75,24 @@ class NightRulesTest {
         assertEquals(GateVerdict.SLEEP_WALL, v(gated = true))
         assertEquals(GateVerdict.ALLOW, v(essential = true))
         assertEquals(GateVerdict.ALLOW, v(session = true, onList = true))
+        // Bed hours take no work: the session's own list is shut too.
+        assertEquals(
+            GateVerdict.SLEEP_WALL,
+            gateVerdict(
+                essential = false, focusSessionActive = true, onFocusList = true,
+                capSpent = false, gated = false, sleeping = true, sleepKeepsSession = false
+            )
+        )
+        assertTrue(bedHoursShutWork(hm(20, 0)))
+        assertTrue(bedHoursShutWork(hm(2, 59)))
+        assertFalse(bedHoursShutWork(hm(3, 0)))
+        assertFalse(bedHoursShutWork(hm(18, 30)))
+        // Nothing starts that would still be running at 20:00.
+        assertFalse(sessionReachesBed(hm(18, 0), minutes = 120))
+        assertTrue(sessionReachesBed(hm(18, 1), minutes = 120))
+        assertTrue(sessionReachesBed(hm(19, 30), minutes = 180))
+        assertTrue(sessionReachesBed(hm(21, 0), minutes = 0))
+        assertFalse(sessionReachesBed(hm(4, 0), minutes = 180))
         assertEquals(GateVerdict.SLEEP_WALL, v(session = true, onList = false).let {
             // Off the list in a session: the focus wall would also stand; sleep comes first.
             it

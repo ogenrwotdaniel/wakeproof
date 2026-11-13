@@ -28,10 +28,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
-import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.SIDELOADED_BUILD
 import com.ogenrwotdaniel.wakeproof.distraction.clockUntrusted
-import com.ogenrwotdaniel.wakeproof.distraction.sleepWallActive
+import com.ogenrwotdaniel.wakeproof.distraction.longNightDevice
+import com.ogenrwotdaniel.wakeproof.distraction.nightWallActive
+import com.ogenrwotdaniel.wakeproof.distraction.nightWallEnd
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import java.time.LocalDate
 import java.time.LocalTime
@@ -158,6 +159,7 @@ class StudyBrowserActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        inFront = true
         resumedAt = SystemClock.elapsedRealtime()
         // Left on the sleep screen overnight: the morning brings the page back.
         if (web == null && !asleep()) {
@@ -172,6 +174,7 @@ class StudyBrowserActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
+        inFront = false
         // Only time on the page counts; the sleep screen is not Blackboard.
         if (web != null) {
             StudyBrowserTime.add(this, LocalDate.now().toEpochDay(), SystemClock.elapsedRealtime() - resumedAt)
@@ -203,7 +206,10 @@ class StudyBrowserActivity : ComponentActivity() {
      */
     private fun asleep(): Boolean = clockDoubted() || nightNow()
 
-    private fun nightNow(): Boolean = LocalTime.now().let { sleepWallActive(it.hour * 60 + it.minute) }
+    // The night wall's own hours, the phone's longer ones included (the user,
+    // 2026-11-13: "treat it as the rest, after 6pm, shut it down too").
+    private fun nightNow(): Boolean =
+        LocalTime.now().let { nightWallActive(it.hour * 60 + it.minute, longNightDevice(this)) }
 
     /** On screen at all, split screen and pop-up view included. */
     private fun visible(): Boolean = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
@@ -234,8 +240,8 @@ class StudyBrowserActivity : ComponentActivity() {
                 "The phone's clock can't be trusted. Turn on automatic date, time and time zone " +
                     "and connect to the internet, then open Blackboard again."
             } else {
-                "Time to sleep. Blackboard opens again at " +
-                    "${formatAlarmTime(context, SLEEP_END_MINUTES / 60, SLEEP_END_MINUTES % 60)}."
+                val end = nightWallEnd(longNightDevice(context))
+                "Shut for the night. Blackboard opens again at ${formatAlarmTime(context, end / 60, end % 60)}."
             }
             setTextColor(Color.WHITE)
             textSize = 20f
@@ -297,6 +303,10 @@ class StudyBrowserActivity : ComponentActivity() {
 
     companion object {
         private const val SLEEP_CHECK_MILLIS = 30_000L
+
+        /** Blackboard is the screen in front: coursework the focus timer must not cover. */
+        @Volatile var inFront = false
+            private set
         /** How long a doubted clock must last before it closes a page out of sight. */
         private const val DOUBT_OUT_OF_SIGHT_MILLIS = 5 * 60_000L
 

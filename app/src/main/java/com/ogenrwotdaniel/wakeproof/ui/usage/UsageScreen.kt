@@ -135,8 +135,13 @@ fun UsageScreen(
             if (!hasAccess) {
                 Text(
                     text = "Euler's Lab needs usage access to show how you've been " +
-                        "using your phone. Nothing leaves the device.",
+                        "using your phone and to keep gated apps behind their walls. Nothing leaves the device.",
                     style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "If the toggle is greyed out, open App info → ⋮ (top right) → Allow restricted settings first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Button(
                     onClick = {
@@ -144,6 +149,17 @@ fun UsageScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Grant usage access") }
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:${context.packageName}")
+                            )
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Open App info (restricted settings)") }
             } else {
                 snapshot?.let { snap ->
                     TodayCard(snapshot = snap, study = studyTime, focusMinutes = today.focusMinutes)

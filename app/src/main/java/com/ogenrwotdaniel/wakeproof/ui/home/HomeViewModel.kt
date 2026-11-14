@@ -22,6 +22,7 @@ import com.ogenrwotdaniel.wakeproof.data.sync.LiveCloudFeed
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimerRules
 import com.ogenrwotdaniel.wakeproof.wear.WatchSessionFeed
+import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import com.ogenrwotdaniel.wakeproof.distraction.WallRulesRepository
 import com.ogenrwotdaniel.wakeproof.distraction.WindowNotificationGuard
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroState
@@ -40,7 +41,27 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** Special grants Home asks for; true = needed and missing. */
-data class MissingGrants(val dnd: Boolean = false, val notifications: Boolean = false)
+data class MissingGrants(
+    val usageAccess: Boolean = false,
+    val overlay: Boolean = false,
+    val dnd: Boolean = false,
+    val notifications: Boolean = false
+) {
+    val any: Boolean get() = usageAccess || overlay || dnd || notifications
+}
+
+internal fun missingGrantsFrom(
+    usageAccess: Boolean,
+    overlay: Boolean,
+    dnd: Boolean,
+    notifications: Boolean,
+    sessionDnd: Boolean
+) = MissingGrants(
+    usageAccess = !usageAccess,
+    overlay = !overlay,
+    dnd = sessionDnd && !dnd,
+    notifications = !notifications
+)
 
 /** Home dashboard state: alarms, today's goals, streak, 7-day history. */
 @HiltViewModel
@@ -54,6 +75,7 @@ class HomeViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     liveCloudFeed: LiveCloudFeed,
     wallRulesRepository: WallRulesRepository,
+    private val usageStatsRepository: UsageStatsRepository,
     private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore,
     topThreeStore: com.ogenrwotdaniel.wakeproof.plan.TopThreeStore
 ) : ViewModel() {
@@ -93,10 +115,21 @@ class HomeViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    private data class GrantSnapshot(
+        val usageAccess: Boolean,
+        val overlay: Boolean,
+        val dnd: Boolean,
+        val notifications: Boolean
+    )
+
     private val grants = MutableStateFlow(readGrants())
 
-    private fun readGrants() =
-        SessionDnd.hasAccess(context) to WindowNotificationGuard.hasAccess(context)
+    private fun readGrants() = GrantSnapshot(
+        usageAccess = usageStatsRepository.hasAccess(),
+        overlay = android.provider.Settings.canDrawOverlays(context),
+        dnd = SessionDnd.hasAccess(context),
+        notifications = WindowNotificationGuard.hasAccess(context)
+    )
 
     /** Re-reads the special grants; called on every resume, since they change in Settings. */
     fun refreshGrants() {
@@ -104,14 +137,20 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * Special grants a wall needs and does not have (2026-11-01). Do Not
-     * Disturb during a session had never been granted, so it silently did
-     * nothing and read as broken; notification access is what keeps a walled
-     * app from peeking through the shade, the Edge panel and icon previews.
+     * Special grants a wall needs and does not have (2026-11-01). Without
+     * usage access or display-over-other-apps the wall service stops itself;
+     * Do Not Disturb during a session follows focus blocks; notification access
+     * keeps a walled app from peeking through the shade, Edge panel and icon previews.
      */
     val missingGrants: StateFlow<MissingGrants> =
-        combine(grants, wallRulesRepository.rules) { (dnd, notifications), rules ->
-            MissingGrants(dnd = rules.sessionDnd && !dnd, notifications = !notifications)
+        combine(grants, wallRulesRepository.rules) { g, rules ->
+            missingGrantsFrom(
+                usageAccess = g.usageAccess,
+                overlay = g.overlay,
+                dnd = g.dnd,
+                notifications = g.notifications,
+                sessionDnd = rules.sessionDnd
+            )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MissingGrants())
 
     /**

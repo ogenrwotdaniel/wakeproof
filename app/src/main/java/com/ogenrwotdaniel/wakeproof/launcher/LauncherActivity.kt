@@ -65,6 +65,7 @@ class LauncherActivity : ComponentActivity() {
     private fun launch(packageName: String) {
         lifecycleScope.launch {
             val wall = AppBlockService.wallBefore(packageName)
+                ?: if (!AppBlockService.isRunning()) viewModel.fallbackWallBefore(packageName) else null
             if (wall != null) {
                 runCatching { startActivity(wall.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 return@launch

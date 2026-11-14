@@ -409,14 +409,49 @@ private fun WatchSessionCard(timer: LiveWatchTimer?, modifier: Modifier = Modifi
  */
 @Composable
 private fun MissingGrantsCard(missing: MissingGrants, modifier: Modifier = Modifier) {
-    if (!missing.dnd && !missing.notifications) return
+    if (!missing.any) return
     val context = LocalContext.current
+    val packageUri = android.net.Uri.parse("package:${context.packageName}")
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text = "Some walls are switched off", style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = if (missing.usageAccess || missing.overlay) "Your walls are switched off"
+                else "Some walls are switched off",
+                style = MaterialTheme.typography.titleSmall
+            )
+            if (missing.usageAccess) {
+                Text(
+                    text = "Usage access is off, so gated apps (including weekend-only apps) stay open. " +
+                        "If the switch is greyed out, open App info → ⋮ (top right) → Allow restricted settings first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri))
+                    }
+                }) { Text("Open App info (restricted settings)") }
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    }
+                }) { Text("Allow usage access") }
+            }
+            if (missing.overlay) {
+                Text(
+                    text = "Display over other apps is off, so Euler's Lab cannot cover blocked apps.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, packageUri))
+                    }
+                }) { Text("Allow display over other apps") }
+            }
             if (missing.dnd) {
                 Text(
                     text = "Do Not Disturb can't follow your focus sessions without access.",

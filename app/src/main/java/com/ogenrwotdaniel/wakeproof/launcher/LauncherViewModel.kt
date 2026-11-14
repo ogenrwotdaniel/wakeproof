@@ -169,6 +169,56 @@ class LauncherViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Fallback wall check for [LauncherActivity] when [AppBlockService] is not
+     * running (for instance before usage access is granted). Enforces the
+     * weekend/window, bedtime, and night walls over gated apps so tapping one
+     * on Euler's Lab Home still hits [BlockedActivity].
+     */
+    suspend fun fallbackWallBefore(packageName: String): android.content.Intent? {
+        if (packageName !in _gated.value) return null
+        val rules = wallRulesRepository.current()
+        val now = java.time.LocalDateTime.now()
+        val minuteOfDay = now.hour * 60 + now.minute
+        val label = usageStatsRepository.appLabel(packageName)
+        fun clock(m: Int): String = com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime(context, m / 60, m % 60)
+        val phone = com.ogenrwotdaniel.wakeproof.distraction.longNightDevice(context)
+        if (com.ogenrwotdaniel.wakeproof.distraction.nightWallActive(minuteOfDay, phone)) {
+            val copy = com.ogenrwotdaniel.wakeproof.distraction.nightWallCopy(minuteOfDay, phone, ::clock)
+            return com.ogenrwotdaniel.wakeproof.distraction.BlockedActivity.ruleIntent(context, copy.first, copy.second)
+        }
+        val windowOpen = com.ogenrwotdaniel.wakeproof.distraction.gatedOpenWindow(rules)
+            ?: (com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF_MINUTES to com.ogenrwotdaniel.wakeproof.distraction.RULE_OFF_MINUTES)
+        if (com.ogenrwotdaniel.wakeproof.distraction.windowShutActive(
+                dayOfWeek = now.dayOfWeek,
+                minuteOfDay = minuteOfDay,
+                weekendShut = rules.weekendShut,
+                startMinutes = windowOpen.first,
+                endMinutes = windowOpen.second
+            )
+        ) {
+            val (headline, body) = com.ogenrwotdaniel.wakeproof.distraction.windowWallCopy(
+                label = label,
+                today = now.dayOfWeek,
+                minuteOfDay = minuteOfDay,
+                weekendShut = rules.weekendShut,
+                startMinutes = windowOpen.first,
+                endMinutes = windowOpen.second,
+                formatClock = ::clock
+            )
+            return com.ogenrwotdaniel.wakeproof.distraction.BlockedActivity.ruleIntent(context, headline, body)
+        }
+        if (com.ogenrwotdaniel.wakeproof.distraction.bedtimeActive(minuteOfDay, rules.bedtimeStartMinutes)) {
+            return com.ogenrwotdaniel.wakeproof.distraction.BlockedActivity.ruleIntent(
+                context,
+                "Bedtime",
+                "$label and every other gated app are behind the bedtime wall until " +
+                    "${clock(com.ogenrwotdaniel.wakeproof.distraction.BEDTIME_END_MINUTES)}."
+            )
+        }
+        return null
+    }
+
     /** Starts a session for what is left of [event]; see [startEventFocus]. */
     fun focusForEvent(event: AgendaEvent): Boolean = startEventFocus(context, event)
 

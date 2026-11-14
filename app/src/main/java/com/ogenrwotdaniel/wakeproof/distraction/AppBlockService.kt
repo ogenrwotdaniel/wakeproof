@@ -1895,6 +1895,9 @@ class AppBlockService : Service() {
          */
         suspend fun wallBefore(packageName: String): Intent? = instance?.wallBefore(packageName)
 
+        /** Whether the foreground wall service is currently running. */
+        fun isRunning(): Boolean = instance != null
+
         /**
          * Whether [packageName] is walled right now; null when the service is
          * not running (the caller falls back to the open window alone). Main

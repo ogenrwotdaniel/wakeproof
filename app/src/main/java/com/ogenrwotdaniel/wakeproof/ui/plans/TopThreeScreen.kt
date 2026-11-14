@@ -79,18 +79,31 @@ fun TopThreeScreen(
             }
             Text(text = "Tomorrow's top three", style = MaterialTheme.typography.headlineSmall)
             Text(
-                text = "The three things that matter most tomorrow, most important first. " +
-                    "They wait on Home in the morning.",
+                text = "Lock in your three highest-leverage deliverables before bed: " +
+                    "(1) Primary Research / Proof / Experiment, " +
+                    "(2) Core Engineering / Coursework Deliverable, and " +
+                    "(3) Deep Reading & Paper Synthesis. They wait on Home in the morning.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
+            )
+            val slotLabels = listOf(
+                "1 · Primary Research / Proof / Experiment",
+                "2 · Core Engineering / Coursework Deliverable",
+                "3 · Deep Reading & Paper Synthesis"
+            )
+            val slotPlaceholders = listOf(
+                "e.g. Graphene defect barrier / CV ablation / theorem proof",
+                "e.g. Continuum mechanics problem set / lab derivation",
+                "e.g. 1 arXiv paper + closed-book Euler derivation"
             )
             state.items.forEachIndexed { index, item ->
                 OutlinedTextField(
                     value = item,
                     onValueChange = { viewModel.setItem(index, it) },
                     enabled = state.loaded,
-                    label = { Text("${index + 1}") },
+                    label = { Text(slotLabels.getOrElse(index) { "${index + 1}" }) },
+                    placeholder = { Text(slotPlaceholders.getOrElse(index) { "" }) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,

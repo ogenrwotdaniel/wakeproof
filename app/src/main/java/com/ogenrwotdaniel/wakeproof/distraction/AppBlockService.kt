@@ -38,10 +38,8 @@ import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimer
 import com.ogenrwotdaniel.wakeproof.data.sync.LiveWatchTimerRules
 import com.ogenrwotdaniel.wakeproof.wear.WatchSessionFeed
 import com.ogenrwotdaniel.wakeproof.wear.WatchSessionNotifier
-import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import com.ogenrwotdaniel.wakeproof.pomodoro.SessionDnd
-import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -120,7 +118,7 @@ class AppBlockService : Service() {
      */
     @Volatile private var blockedLimits: Map<String, AppLimit> = emptyMap()
 
-    /** The focus list (study apps, plus Spotify when it is the study sound). */
+    /** The focus list (Settings → Study apps). */
     @Volatile private var focusList: Set<String> = emptySet()
 
     @Volatile private var rules: WallRules = WallRules()
@@ -151,21 +149,20 @@ class AppBlockService : Service() {
     private val phone by lazy { longNightDevice(this) }
 
     /**
-     * Open through the phone's longer night as well as [sleepExempt]: the
-     * cameras (the user's list, 2026-11-13). Its own set, because [sleepExempt]
-     * is also what the clock wall spares, and that list must not grow by this.
-     * Every preinstalled app that answers the camera intent, not the resolved
-     * default: with two of them and no default the answer is the chooser, and
-     * the camera would be shut fourteen hours a day.
+     * Open between 03:00 and 20:00 (including through the phone's 03:00–08:00
+     * and 18:00–20:00 hours and during focus sessions): Camera, Notes, Claude,
+     * Gemini, Smart-Check, AnyOTP, Outlook, KakaoBank, Clock, Calendar, and
+     * system file/photo pickers. Between 20:00 and 03:00 ([sleepWallActive]),
+     * only [sleepExempt] remains open.
      */
-    private val nightExempt: Set<String>
+    private val dayToolsExempt: Set<String>
         get() {
-            if (!phone) return sleepExempt
             nightCameras?.let { return it }
-            // No camera found yet: asked again at most every 15 s, not on every verdict.
             val now = SystemClock.elapsedRealtime()
-            // Never less than the clock and calendar: another thread may ask mid-lookup.
-            if (now - nightCamerasTriedAt < NIGHT_CAMERAS_RETRY_MILLIS) return nightCamerasGuess ?: sleepExempt
+            val base = sleepExempt +
+                com.ogenrwotdaniel.wakeproof.launcher.NAMED_TOOLS +
+                com.ogenrwotdaniel.wakeproof.launcher.SYSTEM_DOCUMENT_PICKERS
+            if (now - nightCamerasTriedAt < NIGHT_CAMERAS_RETRY_MILLIS) return nightCamerasGuess ?: base
             nightCamerasTriedAt = now
             val cameras = runCatching {
                 packageManager.queryIntentActivities(
@@ -174,23 +171,24 @@ class AppBlockService : Service() {
                     .filter { it.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0 }
                     .map { it.packageName }
             }.getOrNull().orEmpty()
-            val all = sleepExempt + cameras + com.ogenrwotdaniel.wakeproof.launcher.EXPERT_RAW
-            // Kept only once a camera was found: a PackageManager hiccup after boot
-            // must not shut the camera until the service next restarts.
+            val all = base + cameras
             if (cameras.isNotEmpty()) nightCameras = all
             nightCamerasGuess = all
             return all
         }
 
+    private fun nightExemptAt(minuteOfDay: Int): Set<String> =
+        if (sleepWallActive(minuteOfDay)) sleepExempt else dayToolsExempt
+
     @Volatile private var nightCamerasTriedAt = -NIGHT_CAMERAS_RETRY_MILLIS
     @Volatile private var nightCamerasGuess: Set<String>? = null
 
-    /** [nightExempt] once it has been read with a camera in it. */
+    /** [dayToolsExempt] once it has been read with a camera in it. */
     @Volatile private var nightCameras: Set<String>? = null
 
-    /** Open through the sleep wall: the clock (to check the alarm) and the calendar. */
+    /** Open through the 20:00–03:00 sleep wall: the clock (to check the alarm) and the calendar. */
     private val sleepExempt: Set<String> by lazy {
-        listOfNotNull(
+        (listOfNotNull(
             runCatching {
                 packageManager.resolveActivity(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS), 0)
                     ?.activityInfo?.packageName
@@ -200,7 +198,12 @@ class AppBlockService : Service() {
                     Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR), 0
                 )?.activityInfo?.packageName
             }.getOrNull()
-        ).filter { it != "android" }.toSet()
+        ).filter { it != "android" } + listOf(
+            com.ogenrwotdaniel.wakeproof.launcher.SAMSUNG_CLOCK,
+            com.ogenrwotdaniel.wakeproof.launcher.GOOGLE_CLOCK,
+            com.ogenrwotdaniel.wakeproof.launcher.SAMSUNG_CALENDAR,
+            com.ogenrwotdaniel.wakeproof.launcher.GOOGLE_CALENDAR
+        )).toSet()
     }
 
     /** Never quarantined: losing them costs more than any app is worth. See [refreshDefaults]. */
@@ -382,14 +385,7 @@ class AppBlockService : Service() {
         )
         scope.launch {
             settingsRepository.settings.collect { cfg ->
-                // Spotify as the study sound is part of the session: its
-                // "Open playlist" button lands in Spotify, and walling that
-                // would leave a session with music that cannot be chosen.
-                focusList = if (FocusSound.isSpotify(cfg.focusSoundId)) {
-                    cfg.studyApps + SpotifyController.SPOTIFY_PACKAGE
-                } else {
-                    cfg.studyApps
-                }
+                focusList = cfg.studyApps
             }
         }
         scope.launch {
@@ -848,7 +844,7 @@ class AppBlockService : Service() {
             // Never for a notification: a removed one is lost for good, and the
             // summary shuts apps for half an hour, it does not cost a bank alert.
             summaryOwed = !forNotification && summaryOwed(),
-            onFocusList = current in focusList,
+            onFocusList = current in focusList || current in dayToolsExempt,
             capSpent = capSpent,
             gated = gated,
             outsideWindow = gated && windowShutActive(
@@ -865,7 +861,7 @@ class AppBlockService : Service() {
                 startMinutes = rules.bedtimeStartMinutes
             ),
             sleeping = nightWallActive(minuteOfDay, phone) &&
-                (wholeNight || nightWallStrips(minuteOfDay)) && current !in nightExempt &&
+                (wholeNight || nightWallStrips(minuteOfDay)) && current !in nightExemptAt(minuteOfDay) &&
                 !(clockDoubted && current in CAPTIVE_PORTAL_PACKAGES),
             // Bed hours take no work: a session's list is open only in the phone's extra hours.
             sleepKeepsSession = !bedHoursShutWork(minuteOfDay),
@@ -990,7 +986,7 @@ class AppBlockService : Service() {
             GateVerdict.ADMIN_LOCK_WALL -> BlockedActivity.ruleIntent(
                 this,
                 "Uninstall lock is on",
-                "WakeProof stays a device admin, so it cannot be uninstalled from the phone."
+                "Euler's Lab stays a device admin, so it cannot be uninstalled from the phone."
             )
             GateVerdict.HISTORY_WALL -> BlockedActivity.ruleIntent(
                 this,
@@ -1869,14 +1865,14 @@ class AppBlockService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID, "Distraction wall", NotificationManager.IMPORTANCE_MIN
-            ).apply { description = "Shown while WakeProof keeps distracting apps behind a wall" }
+            ).apply { description = "Shown while Euler's Lab keeps distracting apps behind a wall" }
         )
     }
 
     private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_launcher_foreground)
         .setContentTitle("Distractions are behind a wall")
-        .setContentText("Gated apps open Mon–Thu ${clock(WallRule.OPEN_WINDOW_START_MINUTES.default)}–" +
+        .setContentText("Gated apps open Sat–Sun ${clock(WallRule.OPEN_WINDOW_START_MINUTES.default)}–" +
                 "${clock(WallRule.OPEN_WINDOW_END_MINUTES.default)} only. Spent and off-focus apps stay shut.")
         .setOngoing(true)
         .setContentIntent(
@@ -2076,7 +2072,7 @@ class AppBlockService : Service() {
             // moments later: that is an update to the same news, not a second ring.
             val justRang = treeLost && now - lastAt in 0 until ALERT_UPDATE_SILENT_MILLIS
             if (!held) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
-            val text = "WakeProof lost usage access or draw-over-apps, so nothing is walled. " +
+            val text = "Euler's Lab lost usage access or draw-over-apps, so nothing is walled. " +
                 "Give it back to raise the walls." +
                 if (treeLost) " This focus block's tree withered." else ""
             val channel = if (held) {
@@ -2084,7 +2080,7 @@ class AppBlockService : Service() {
             } else {
                 NotificationChannel(
                     ALERT_CHANNEL_ID, "Walls switched off", NotificationManager.IMPORTANCE_HIGH
-                ).apply { description = "When WakeProof loses the access its walls need" }
+                ).apply { description = "When Euler's Lab loses the access its walls need" }
             }
             manager.createNotificationChannel(channel)
             // Cancelled first so the alert rings again; [justRang] updates it in place.

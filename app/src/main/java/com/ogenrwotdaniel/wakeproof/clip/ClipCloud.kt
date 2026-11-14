@@ -55,13 +55,14 @@ class ClipCloud(private val db: FirebaseFirestore, private val uid: String) {
         ).await()
     }
 
-    /** Fetches and joins the chunks of a header; null if any is missing. */
+    /** Fetches and joins the chunks of a header; null if out of bounds or any chunk is missing. */
     suspend fun download(header: CloudClipHeader): ByteArray? {
+        if (header.chunks !in 1..ClipCodec.MAX_CHUNKS) return null
         val parts = (0 until header.chunks).map { i ->
             val doc = clips.document(chunkDoc(header.id, i)).get().await()
             doc.getBlob(F_DATA)?.toBytes() ?: return null
         }
-        return ClipCodec.join(parts)
+        return runCatching { ClipCodec.join(parts) }.getOrNull()
     }
 
     /** Deletes this device's own expired clips and all but its 10 newest (header first). */

@@ -26,15 +26,20 @@ service cloud.firestore {
       ];
     }
 
-    // Every document WakeProof writes is a flat record of a few dozen fields at
-    // most; a clip chunk is one field. Firestore caps a document at 1 MiB anyway.
-    function reasonableShape() {
-      return request.resource.data.keys().size() <= 64;
+    // Every document Euler's Lab (WakeProof) writes is a flat record of a few dozen
+    // fields at most; a clip chunk is one field. Firestore caps a document at 1 MiB
+    // anyway, and clip headers cap chunk count (<= 32) and total byte size (<= 21 MiB).
+    function reasonableShape(collection) {
+      return request.resource.data.keys().size() <= 64
+        && (collection != 'clips' || (
+          (!('chunks' in request.resource.data) || (request.resource.data.chunks is int && request.resource.data.chunks >= 1 && request.resource.data.chunks <= 32))
+          && (!('size' in request.resource.data) || (request.resource.data.size is int && request.resource.data.size >= 0 && request.resource.data.size <= 21037056))
+        ));
     }
 
     match /users/{userId}/{collection}/{docId} {
       allow read, delete: if owner(userId) && knownCollection(collection);
-      allow create, update: if owner(userId) && knownCollection(collection) && reasonableShape();
+      allow create, update: if owner(userId) && knownCollection(collection) && reasonableShape(collection);
     }
 
     // Anything not matched above is denied. Firestore denies by default, but

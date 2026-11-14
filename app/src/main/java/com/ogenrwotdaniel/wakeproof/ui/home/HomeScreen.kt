@@ -82,6 +82,8 @@ fun HomeScreen(
     val timer by viewModel.timer.collectAsStateWithLifecycle()
     val watchTimer by viewModel.watchTimer.collectAsStateWithLifecycle()
     val missingGrants by viewModel.missingGrants.collectAsStateWithLifecycle()
+    val summariesThisWeek by viewModel.summariesThisWeek.collectAsStateWithLifecycle()
+    val summariesBySubject by viewModel.summariesBySubjectThisWeek.collectAsStateWithLifecycle()
     LifecycleResumeEffect(Unit) {
         viewModel.refreshGrants()
         onPauseOrDispose { }
@@ -102,7 +104,7 @@ fun HomeScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(text = "WakeProof", style = MaterialTheme.typography.displaySmall)
+            Text(text = "Euler's Lab", style = MaterialTheme.typography.displaySmall)
             Text(
                 text = "🔥 ${streak.days}-day focus streak" +
                     if (streak.best > streak.days) "  ·  best ${streak.best}" else "",
@@ -265,10 +267,32 @@ fun HomeScreen(
             Button(onClick = onOpenPomodoro, modifier = Modifier.fillMaxWidth()) {
                 Text(if (timer.active) "Back to the timer" else "Start a study session")
             }
+            NavigationRow(
+                title = "Blackboard & Research",
+                subtitle = "Blackboard, arXiv (Materials · CV · DL), Scholar & peer-reviewed journals",
+                onClick = {
+                    summaryContext.startActivity(
+                        com.ogenrwotdaniel.wakeproof.study.StudyBrowserActivity.intent(summaryContext)
+                    )
+                }
+            )
             NavigationRow("Forest", "A tree for every focus block", onOpenForest)
-            NavigationRow("Flashcards", "Review what's due today", onOpenFlashcards)
+            NavigationRow("Flashcards", "Review proof skeletons, conditions & formulas due today", onOpenFlashcards)
             NavigationRow("Agenda", "Today's calendar events", onOpenAgenda)
-            NavigationRow("Session summaries", "The page written after each focus session", onOpenSummaries)
+            val perCourseText = summariesBySubject.entries
+                .sortedByDescending { it.value }
+                .joinToString(", ") { "${it.key} ${it.value}" }
+            NavigationRow(
+                title = "Session summaries & derivations",
+                subtitle = if (summariesThisWeek > 0) {
+                    "$summariesThisWeek derivation ${if (summariesThisWeek == 1) "page" else "pages"} this week" +
+                        (if (perCourseText.isNotEmpty()) " ($perCourseText)" else "") +
+                        " — closed-book after each session"
+                } else {
+                    "Closed-book paper derivations written after each focus session"
+                },
+                onClick = onOpenSummaries
+            )
             NavigationRow("Screen time", "Usage and daily app limits", onOpenUsage)
             NavigationRow("Settings", "Alarms, focus, sync, data", onOpenSettings)
             NavigationRow("Setup check", "Permissions and reliability", onOpenOnboarding)

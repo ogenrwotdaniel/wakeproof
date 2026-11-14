@@ -57,6 +57,7 @@ INTROSPECTION = f"""
       <arg type="s" name="qrText" direction="out"/>
     </method>
     <method name="CancelPairing"/>
+    <method name="ForgetPairing"/>
     <method name="RenderQr">
       <arg type="s" name="text" direction="in"/>
       <arg type="s" name="pngPath" direction="out"/>
@@ -114,10 +115,10 @@ def pictures_dir() -> Path:
 
         d = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
         if d:
-            return Path(d) / "WakeProof Clip"
+            return Path(d) / "Euler's Lab Clip"
     except Exception:
         pass
-    return Path.home() / "Pictures" / "WakeProof Clip"
+    return Path.home() / "Pictures" / "Euler's Lab Clip"
 
 
 def image_filename(created_at_ms: int, sender: str, mime: str) -> str:
@@ -630,6 +631,37 @@ class ClipEngine:
         log.info("pairing cancelled")
         self.check_status()
 
+    def forget_pairing(self) -> None:
+        """Revokes the current pairing on this laptop (and wipes cloud presence/clips if signed in)."""
+        self.cancel_pairing()
+        _, fs = self.creds(force=True)
+        if fs is not None:
+            try:
+                fs.wipe()
+            except CloudError as e:
+                log.warning("cloud wipe during forget failed: %s", e)
+                try:
+                    fs.delete_presence(self.install_id)
+                except CloudError:
+                    pass
+        try:
+            self.store.delete(st.ITEM_KEY)
+            self.store.delete(st.ITEM_ACCOUNT)
+        except Exception as e:
+            log.warning("keyring delete failed: %s", e)
+        with self.lock:
+            self.cfg["peers"] = {}
+            self.lan_seen.clear()
+            self.lan_names.clear()
+            self.learned.clear()
+            self._presence = []
+            self._presence_at = 0.0
+            if self.save_cfg is not None:
+                self.save_cfg(self.cfg)
+        self.creds(force=True)
+        log.info("pairing revoked: clip key, account and peers removed")
+        self.check_status()
+
     def _close_session(self, session: PairingSession, flush_s: float = 0.0):
         if session.timer is not None:
             session.timer.cancel()
@@ -763,6 +795,8 @@ def run_daemon() -> int:
             reply_later(invocation, engine.start_pairing, "(s)")
         elif method == "CancelPairing":
             reply_later(invocation, engine.cancel_pairing, None)
+        elif method == "ForgetPairing":
+            reply_later(invocation, engine.forget_pairing, None)
         elif method == "RenderQr":
             text = params.get_child_value(0).get_string()
             reply_later(invocation, lambda: render_qr(text), "(s)")

@@ -48,7 +48,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -73,8 +72,8 @@ import java.util.Calendar
 
 /**
  * Pomodoro study mode: 25/5 cycles with a long break every 4th, running in a
- * foreground service. The AI study chat (needs a Kimi key) is deliberately
- * locked during focus phases — that's the point of the app.
+ * foreground service. The Google Gemini study chat (Coach or Socratic Referee)
+ * is deliberately locked during focus phases — that's the point of the app.
  *
  * While a focus block is counting down the screen collapses to [FocusMode]:
  * the timer, and nothing else, until the break. See
@@ -92,7 +91,7 @@ fun PomodoroScreen(
     val chat by viewModel.chat.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val thoughts by viewModel.thoughts.collectAsStateWithLifecycle()
-    val spotifyError by viewModel.spotifyError.collectAsStateWithLifecycle()
+    val activeConjecture by viewModel.activeConjecture.collectAsStateWithLifecycle()
     val quote = remember(timer.completedFocusSessions) {
         FocusQuotes.forBlock(java.time.LocalDate.now().toEpochDay(), timer.completedFocusSessions)
     }
@@ -107,7 +106,7 @@ fun PomodoroScreen(
         com.ogenrwotdaniel.wakeproof.study.SteadyClock(android.os.SystemClock.elapsedRealtime(), bootCount)
     )
 
-    val chatAllowed = viewModel.hasKimiKey && (!timer.active || !timer.running ||
+    val chatAllowed = viewModel.hasGeminiKey && (!timer.active || !timer.running ||
         timer.phase != PomodoroPhase.FOCUS)
 
     // Same condition MainViewModel uses to hide the tablet's navigation column,
@@ -125,9 +124,11 @@ fun PomodoroScreen(
             FocusMode(
                 timer = timer,
                 subject = settings.activeSubject,
+                activeConjecture = activeConjecture,
                 quote = quote.takeIf { settings.focusQuotes },
                 showTree = settings.deepFocus,
                 onPark = viewModel::parkThought,
+                onLogConjecture = { q -> viewModel.logConjecture(settings.activeSubject, q) },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
@@ -228,12 +229,21 @@ fun PomodoroScreen(
                 )
                 Spacer(Modifier.height(8.dp))
             }
+            activeConjecture?.let { conjecture ->
+                Text(
+                    text = "🔬 Active problem: $conjecture",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             val peer = rememberJoinablePeer()
             if (!timer.active && summary != null) {
                 // No next session until this one's summary is in: starting one
                 // would be the way to never write it.
                 Text(
-                    text = "The next session opens once the summary is photographed.",
+                    text = "The next session opens once the derivation page is photographed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -282,7 +292,11 @@ fun PomodoroScreen(
             Spacer(Modifier.height(12.dp))
             ThoughtParking(
                 thoughts = thoughts,
+                activeSubject = settings.activeSubject,
+                activeConjecture = activeConjecture,
                 onPark = viewModel::parkThought,
+                onLogConjecture = { q -> viewModel.logConjecture(settings.activeSubject, q) },
+                onSelectConjecture = viewModel::selectActiveConjecture,
                 onToggle = viewModel::setThoughtDone,
                 onClearDone = viewModel::clearDoneThoughts
             )
@@ -292,29 +306,18 @@ fun PomodoroScreen(
                 focusEnabled = settings.focusMusicEnabled,
                 breakEnabled = settings.breakMusicEnabled,
                 soundId = settings.focusSoundId,
-                spotifyInstalled = viewModel.spotifyInstalled,
                 onFocusChange = viewModel::setMusicEnabled,
                 onBreakChange = viewModel::setBreakMusicEnabled,
                 onSoundChange = viewModel::setFocusSound
             )
 
-            Spacer(Modifier.height(8.dp))
-            SpotifyControls(
-                installed = viewModel.spotifyInstalled,
-                hasPlaylist = settings.spotifyPlaylistUri.isNotBlank(),
-                followsTimer = FocusSound.isSpotify(settings.focusSoundId),
-                error = spotifyError,
-                onOpen = viewModel::openSpotify,
-                onPlayPause = viewModel::spotifyPlayPause,
-                onNext = viewModel::spotifyNext,
-                onPrevious = viewModel::spotifyPrevious
-            )
             if (settings.focusLockPhone) {
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = if (timer.active && timer.running) {
-                        "🔒 Phone is pinned to WakeProof until the session ends"
+                        "🔒 Phone is pinned to Euler's Lab until the session ends"
                     } else {
-                        "🔒 Phone locks to WakeProof for a whole session, breaks " +
+                        "🔒 Phone locks to Euler's Lab for a whole session, breaks " +
                             "included (Settings)"
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -324,23 +327,35 @@ fun PomodoroScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            if (viewModel.hasKimiKey) {
+            if (viewModel.hasGeminiKey) {
                 StudyChatPanel(
                     messages = chat.messages,
                     sending = chat.sending,
+                    socratic = chat.socratic,
                     error = chat.error,
                     enabled = chatAllowed,
+                    onToggleSocratic = viewModel::setSocraticMode,
                     onSend = viewModel::sendChat,
                     // A fixed height, not weight(1f): inside a scrolling column
                     // the available height is infinite, so a weight is a crash
                     // and an unbounded LazyColumn would be one too.
-                    modifier = Modifier.height(340.dp)
+                    modifier = Modifier.height(380.dp)
                 )
             }
             Spacer(Modifier.height(16.dp))
 
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(
+                        com.ogenrwotdaniel.wakeproof.study.StudyBrowserActivity.intent(context)
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Blackboard & Research")
+            }
             OutlinedButton(onClick = onOpenSummaries, modifier = Modifier.fillMaxWidth()) {
-                Text("Session summaries")
+                Text("Session summaries & derivations")
             }
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
                 Text("Back")
@@ -350,9 +365,10 @@ fun PomodoroScreen(
 }
 
 /**
- * After a session: everything it taught, written on a page from memory for at
- * least ten minutes ([writeLeftSeconds] of them still to go), then
- * photographed. There is no skip; the focus wall holds until the photo is kept.
+ * After a session: Euler's 3-step closed-book derivation protocol written on a
+ * page from memory for at least ten minutes ([writeLeftSeconds] of them still
+ * to go), then photographed. There is no skip; the focus wall holds until the
+ * photo is kept.
  */
 @Composable
 private fun SummaryPrompt(
@@ -363,10 +379,15 @@ private fun SummaryPrompt(
 ) {
     androidx.compose.material3.Card(modifier = modifier.widthIn(max = 560.dp).fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(text = "Session done. Now summarize it", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Ten minutes, on paper, from memory: everything you studied this session " +
-                    "($subject). Then photograph the page.",
+                text = "Session done — Euler Derivation Protocol ($subject)",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "Ten minutes, closed-book, on paper from memory:\n" +
+                    "1. Definitions & Theorems: state the core result or mechanism.\n" +
+                    "2. Derivation / Counterexample: re-derive the crux step or construct a boundary example.\n" +
+                    "3. Next Open Question: write one unresolved question at the bottom of the page.",
                 style = MaterialTheme.typography.bodyMedium
             )
             if (writeLeftSeconds > 0) {
@@ -376,7 +397,7 @@ private fun SummaryPrompt(
                 )
             }
             Button(onClick = onPhotograph, enabled = writeLeftSeconds <= 0, modifier = Modifier.fillMaxWidth()) {
-                Text(if (writeLeftSeconds > 0) "Keep writing" else "Photograph the summary")
+                Text(if (writeLeftSeconds > 0) "Keep deriving on paper" else "Photograph the derivation page")
             }
             Text(
                 text = "Your apps stay shut until the photo is kept, half an hour after the " +
@@ -393,34 +414,34 @@ private fun SummaryPrompt(
  * The screen during a focus block: the countdown, and as close to nothing else
  * as the app can honestly get away with.
  *
- * "Lock phone during focus" already stops you leaving WakeProof. That left the
+ * "Lock phone during focus" already stops you leaving Euler's Lab. That left the
  * app itself as the last thing to fiddle with mid-block — a study chat, a sound
  * picker, a subject list, five other screens — so a pinned phone became a phone
  * pinned to a menu. This is the other half of that lock.
  *
  * What survives, and why:
  *
- * * **Parking a thought.** The one interaction that exists *because* you are
- *   mid-focus: it is how a distraction gets written down in two taps instead of
- *   being chased. Removing it would push people back to the thing it replaces.
- *
- * Pause and stop used to survive here too, as plain text at the bottom. They
- * are gone (2026-10-27, the user's call): a session now runs to its end with
- * no way out. A phone call still works — the dialer and in-call screen are
- * essential apps that no wall ever covers.
+ * * **Parking a thought or logging an Adversaria conjecture.** The one
+ *   interaction that exists *because* you are mid-focus: it is how a
+ *   distraction or sudden mathematical question gets written down in two taps
+ *   instead of being chased.
  *
  * Everything else comes back by itself at the break.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FocusMode(
     timer: PomodoroState,
     subject: String,
+    activeConjecture: String?,
     quote: FocusQuote?,
     showTree: Boolean,
     onPark: (String) -> Unit,
+    onLogConjecture: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var parking by remember { mutableStateOf(false) }
+    var isConjecture by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     val context = LocalContext.current
 
@@ -445,6 +466,16 @@ private fun FocusMode(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        activeConjecture?.let { conjecture ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "🔬 $conjecture",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 420.dp)
+            )
+        }
 
         Spacer(Modifier.height(32.dp))
         CountdownRing(timer = timer, size = 300.dp)
@@ -466,29 +497,58 @@ private fun FocusMode(
 
         Spacer(Modifier.height(32.dp))
         if (parking) {
-            Row(
+            Column(
                 modifier = Modifier.widthIn(max = 420.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Park it for later…") },
-                    singleLine = true
-                )
-                Spacer(Modifier.size(8.dp))
-                Button(
-                    onClick = {
-                        onPark(input)
-                        input = ""
-                        parking = false
-                    },
-                    enabled = input.isNotBlank()
-                ) { Text("Park") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(
+                                if (isConjecture) "Open problem or conjecture ($subject)…"
+                                else "Park a distracting thought…"
+                            )
+                        },
+                        singleLine = true
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Button(
+                        onClick = {
+                            if (isConjecture) onLogConjecture(input) else onPark(input)
+                            input = ""
+                            parking = false
+                        },
+                        enabled = input.isNotBlank()
+                    ) { Text(if (isConjecture) "Log" else "Park") }
+                }
             }
         } else {
-            TextButton(onClick = { parking = true }) { Text("💭 Park a thought") }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                TextButton(onClick = { isConjecture = true; parking = true }) {
+                    Text("🔬 Log open question")
+                }
+                TextButton(onClick = { isConjecture = false; parking = true }) {
+                    Text("💭 Park a thought")
+                }
+                TextButton(
+                    onClick = {
+                        context.startActivity(
+                            com.ogenrwotdaniel.wakeproof.study.StudyBrowserActivity.intent(context)
+                        )
+                    }
+                ) {
+                    Text("📚 Blackboard & Research")
+                }
+            }
         }
 
         Spacer(Modifier.height(24.dp))
@@ -640,7 +700,7 @@ private fun SubjectPicker(
                     value = nameInput,
                     onValueChange = { nameInput = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("e.g. Calculus") },
+                    placeholder = { Text("e.g. Graphene, Computer Vision, Mechanics") },
                     singleLine = true
                 )
                 Spacer(Modifier.size(8.dp))
@@ -658,21 +718,29 @@ private fun SubjectPicker(
 }
 
 /**
- * Deep-work "thought parking": dump a distracting thought in two taps and get
- * back to work; deal with the list on a break. Collapsed to one line until
- * tapped.
+ * Euler's *Adversaria* (Open Problems & Conjectures) + deep-work "thought parking":
+ * log an open mathematical/scientific question tagged with the active subject, pin
+ * an open conjecture as the session's target, or dump a distracting thought in two
+ * taps and return to work.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThoughtParking(
     thoughts: List<com.ogenrwotdaniel.wakeproof.data.db.ParkedThought>,
+    activeSubject: String,
+    activeConjecture: String?,
     onPark: (String) -> Unit,
+    onLogConjecture: (String) -> Unit,
+    onSelectConjecture: (String?) -> Unit,
     onToggle: (com.ogenrwotdaniel.wakeproof.data.db.ParkedThought, Boolean) -> Unit,
     onClearDone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var isConjectureMode by remember { mutableStateOf(true) }
     var input by remember { mutableStateOf("") }
-    val open = thoughts.count { !it.done }
+    val openConjectures = thoughts.count { !it.done && it.isAdversaria() }
+    val openThoughts = thoughts.count { !it.done && !it.isAdversaria() }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -680,8 +748,12 @@ private fun ThoughtParking(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val counts = buildList {
+                if (openConjectures > 0) add("$openConjectures open")
+                if (openThoughts > 0) add("$openThoughts parked")
+            }.joinToString(", ")
             Text(
-                text = "💭 Parked thoughts" + if (open > 0) " ($open)" else "",
+                text = "🔬 Euler's Adversaria & Thoughts" + if (counts.isNotEmpty()) " ($counts)" else "",
                 style = MaterialTheme.typography.bodyLarge
             )
             TextButton(onClick = { expanded = !expanded }) {
@@ -689,24 +761,43 @@ private fun ThoughtParking(
             }
         }
         if (expanded) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = isConjectureMode,
+                    onClick = { isConjectureMode = true },
+                    label = { Text("🔬 Open Conjecture ($activeSubject)") }
+                )
+                FilterChip(
+                    selected = !isConjectureMode,
+                    onClick = { isConjectureMode = false },
+                    label = { Text("💭 Distracting Thought") }
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Park it for later…") },
+                    placeholder = {
+                        Text(
+                            if (isConjectureMode) "e.g. Stone–Wales defect energy barrier vs. strain rate…"
+                            else "Park a distraction for later…"
+                        )
+                    },
                     singleLine = true
                 )
                 Spacer(Modifier.size(8.dp))
                 Button(
                     onClick = {
-                        onPark(input)
+                        if (isConjectureMode) onLogConjecture(input) else onPark(input)
                         input = ""
                     },
                     enabled = input.isNotBlank()
-                ) { Text("Park") }
+                ) { Text(if (isConjectureMode) "Log" else "Park") }
             }
-            thoughts.take(6).forEach { thought ->
+            thoughts.take(8).forEach { thought ->
+                val isConjecture = thought.isAdversaria()
+                val isPinned = activeConjecture == thought.text
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -717,26 +808,37 @@ private fun ThoughtParking(
                     )
                     Text(
                         text = thought.text,
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
                         textDecoration = if (thought.done) TextDecoration.LineThrough else null,
-                        color = if (thought.done) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.onSurface
+                        color = when {
+                            thought.done -> MaterialTheme.colorScheme.onSurfaceVariant
+                            isConjecture -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
                     )
+                    if (isConjecture && !thought.done) {
+                        TextButton(
+                            onClick = {
+                                onSelectConjecture(if (isPinned) null else thought.text)
+                            }
+                        ) {
+                            Text(if (isPinned) "Pinned" else "Focus")
+                        }
+                    }
                 }
             }
             if (thoughts.any { it.done }) {
-                TextButton(onClick = onClearDone) { Text("Clear done") }
+                TextButton(onClick = onClearDone) { Text("Clear resolved") }
             }
         }
     }
 }
 
 /**
- * Study-sound controls: independent focus/break toggles plus the source picker
- * (shown while either toggle is on). The picker is exclusive — one of the
- * bundled loops *or* Spotify, never both — so choosing Spotify silences the
- * ambient loop and hands the same phase toggles to Spotify instead. Turning
- * both toggles off frees the audio output entirely.
+ * Study-sound controls: independent focus/break toggles plus the bundled
+ * ambient loop picker (shown while either toggle is on). Turning both toggles
+ * off frees the audio output entirely.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -744,13 +846,12 @@ private fun MusicControls(
     focusEnabled: Boolean,
     breakEnabled: Boolean,
     soundId: String,
-    spotifyInstalled: Boolean,
     onFocusChange: (Boolean) -> Unit,
     onBreakChange: (Boolean) -> Unit,
     onSoundChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val spotifyPicked = FocusSound.isSpotify(soundId)
+    val picked = FocusSound.fromId(soundId)
     Column(modifier = modifier.fillMaxWidth()) {
         Text(text = "Study sound", style = MaterialTheme.typography.titleSmall)
         Row(
@@ -773,102 +874,16 @@ private fun MusicControls(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FocusSound.entries.forEach { sound ->
                     FilterChip(
-                        selected = sound.id == soundId,
+                        selected = sound == picked,
                         onClick = { onSoundChange(sound.id) },
                         label = { Text(sound.label) }
                     )
                 }
-                // Spotify sits in the same row as the loops because it is the
-                // same choice: whatever is selected here is the only sound.
-                // Kept visible when already picked, even if Spotify got removed.
-                if (spotifyInstalled || spotifyPicked) {
-                    FilterChip(
-                        selected = spotifyPicked,
-                        onClick = { onSoundChange(FocusSound.SPOTIFY_ID) },
-                        label = { Text("🎧 Spotify") }
-                    )
-                }
             }
-            if (spotifyPicked) {
-                Text(
-                    text = "Spotify is your study sound — no ambient loop plays. Open the " +
-                        "playlist once below so Spotify owns playback; after that the timer " +
-                        "plays and pauses it for you.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                // Seven chips of two words each say nothing about what they
-                // sound like, and there is no auditioning a loop without
-                // starting a session. One line under the picker is the cheapest
-                // honest answer to "which of these do I want?".
-                FocusSound.fromId(soundId)?.let { picked ->
-                    Text(
-                        text = picked.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Spotify hand-off row: one button to jump into the saved playlist (or the app),
- * plus transport keys that work without leaving WakeProof — the useful half when
- * "Lock phone during focus" makes switching apps impossible. Media keys reach
- * whichever app currently owns the media session, so they only hit Spotify while
- * Spotify is the phone's active player.
- */
-@Composable
-private fun SpotifyControls(
-    installed: Boolean,
-    hasPlaylist: Boolean,
-    followsTimer: Boolean,
-    error: String?,
-    onOpen: () -> Unit,
-    onPlayPause: () -> Unit,
-    onNext: () -> Unit,
-    onPrevious: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(onClick = onOpen) {
-                Text(
-                    when {
-                        !installed -> "Get Spotify"
-                        hasPlaylist -> "🎧 Focus playlist"
-                        else -> "🎧 Spotify"
-                    }
-                )
-            }
-            if (installed) {
-                OutlinedButton(onClick = onPrevious) { Text("⏮") }
-                OutlinedButton(onClick = onPlayPause) { Text("⏯") }
-                OutlinedButton(onClick = onNext) { Text("⏭") }
-            }
-        }
-        Text(
-            text = when {
-                !installed -> "Spotify isn't installed on this phone."
-                followsTimer -> "Spotify is your study sound: it plays and pauses with the timer."
-                hasPlaylist -> "Controls work while the phone is pinned to WakeProof."
-                else -> "Set a focus playlist in Settings to open it in one tap."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        error?.let {
             Text(
-                text = it,
+                text = picked.description,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -919,24 +934,47 @@ private fun QuoteLine(quote: FocusQuote, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StudyChatPanel(
     messages: List<ChatMessage>,
     sending: Boolean,
+    socratic: Boolean,
     error: String?,
     enabled: Boolean,
+    onToggleSocratic: (Boolean) -> Unit,
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = if (enabled) "AI study coach (break time)"
-            else "AI study coach — locked during focus",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (enabled) "Google Gemini study assistant (break time)"
+                else "Google Gemini assistant — locked during focus",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !socratic,
+                onClick = { onToggleSocratic(false) },
+                enabled = enabled,
+                label = { Text("Explain / Quiz") }
+            )
+            FilterChip(
+                selected = socratic,
+                onClick = { onToggleSocratic(true) },
+                enabled = enabled,
+                label = { Text("Euler Referee (Socratic)") }
+            )
+        }
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -944,8 +982,13 @@ private fun StudyChatPanel(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(messages) { message ->
+                val speaker = when {
+                    message.role == "user" -> "You: "
+                    socratic -> "Referee: "
+                    else -> "Coach: "
+                }
                 Text(
-                    text = (if (message.role == "user") "You: " else "Coach: ") + message.text,
+                    text = speaker + message.text,
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (message.role == "user") MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.primary
@@ -961,7 +1004,12 @@ private fun StudyChatPanel(
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
                 enabled = enabled && !sending,
-                placeholder = { Text("Quiz me / explain…") },
+                placeholder = {
+                    Text(
+                        if (socratic) "State your proof idea or conjecture…"
+                        else "Quiz me / explain…"
+                    )
+                },
                 singleLine = true
             )
             Spacer(Modifier.size(8.dp))
@@ -977,17 +1025,19 @@ private fun StudyChatPanel(
 }
 
 /**
- * Active recall at the end of a focus block: two lines, from memory, on what
- * it taught. Saved lines wait on the Flashcards screen to become cards.
+ * Active recall at the end of a focus block: proof skeleton, key trick, or
+ * boundary counterexample from memory. Saved lines wait on the Flashcards
+ * screen to become cards.
  */
 @Composable
 private fun RecallPrompt(subject: String, onSave: (String) -> Unit, onSkip: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     androidx.compose.material3.Card(modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(text = "What did you just learn?", style = MaterialTheme.typography.titleMedium)
+            Text(text = "Closed-Book Proof & Recall ($subject)", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Two lines from memory, without looking ($subject). They become flashcards.",
+                text = "Without looking at your notes: write the proof skeleton, crux step, " +
+                    "or a boundary counterexample from this block. It queues for your Flashcards deck.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

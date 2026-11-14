@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -34,6 +35,8 @@ data class WakeProofSettings(
     val pushupTarget: Int = MAX_PUSHUP_TARGET,
     /** Problems in a row a math alarm demands; see [com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge]. */
     val mathProblems: Int = 3,
+    /** Tiered Euler Mental-Calculation Dojo mode for math alarms (cubes, powers of 2, totients φ(n), mod, series). */
+    val mathEulerMode: Boolean = true,
     val emergencyHoldSeconds: Int = 60,
     val focusMinutes: Int = 25,
     val shortBreakMinutes: Int = 5,
@@ -48,22 +51,18 @@ data class WakeProofSettings(
      * The fade-out is pre-rolled, so this is also how long before the phase
      * boundary the loop starts receding — a 60 s fade only makes sense on a
      * phase comfortably longer than a minute.
-     *
-     * Spotify is driven by media keys, which carry no volume, so it is unaffected.
      */
     val soundFadeSeconds: Int = 5,
     /**
-     * The single study-sound source: a [com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound]
-     * id, or `spotify` to let Spotify be the sound instead of a bundled loop.
-     * The 1.5 own-music id `library` also reads as Spotify — see `FocusSound.isSpotify`.
+     * The bundled study-sound loop id ([com.ogenrwotdaniel.wakeproof.pomodoro.FocusSound]).
      */
     val focusSoundId: String = "focus_ambient",
     /**
-     * Pin the phone to WakeProof (screen pinning) while a session runs — focus
+     * Pin the phone to Euler's Lab (screen pinning) while a session runs — focus
      * *and* break phases, released only by pause or stop. The break is part of
      * the session, so handing the phone back for it defeated the lock.
      */
-    val focusLockPhone: Boolean = true,
+    val focusLockPhone: Boolean = false,
     /**
      * While a focus countdown runs, the app shows the timer and nothing else:
      * no chat, no sound picker, no navigation, no way on to another screen
@@ -75,17 +74,16 @@ data class WakeProofSettings(
     val focusFloatingTimer: Boolean = true,
     /** Screen never times out while a session runs — focus *and* break phases. */
     val sessionKeepScreenOn: Boolean = true,
-    /** Playlist/album link or `spotify:` URI the Spotify button opens; blank = just the app. */
-    val spotifyPlaylistUri: String = "",
     val dailyFocusGoalMinutes: Int = 120,
-    val studySubjects: Set<String> = setOf("General"),
-    val activeSubject: String = "General",
+    val studySubjects: Set<String> = DEFAULT_STUDY_SUBJECTS,
+    val activeSubject: String = DEFAULT_ACTIVE_SUBJECT,
     /** Credits per course, for the weekly balance; a course without any is left out of it. */
     val subjectCredits: Map<String, Int> = emptyMap(),
     /**
-     * Apps that ARE studying — Samsung Notes by default. Time in them during a
+     * Apps that ARE studying — Samsung Notes, Claude, Gemini, Smart-Check, AnyOTP,
+     * Camera, Clock, Calendar, and Outlook by default. Time in them during a
      * session counts as study, not as screen time against you, and leaving
-     * WakeProof for one of them does not wither the session's tree.
+     * Euler's Lab for one of them does not wither the session's tree.
      */
     val studyApps: Set<String> = DEFAULT_STUDY_APPS,
     /**
@@ -107,8 +105,42 @@ data class WakeProofSettings(
 ) {
     companion object {
         const val SAMSUNG_NOTES = "com.samsung.android.app.notes"
-        val DEFAULT_STUDY_APPS = setOf(SAMSUNG_NOTES)
+        const val SAMSUNG_NOTES_ADDONS = "com.samsung.android.app.notes.addons"
+        const val CLAUDE = "com.anthropic.claude"
+        const val GEMINI = "com.google.android.apps.bard"
+        const val OUTLOOK = "com.microsoft.office.outlook"
+        const val UNIST_SMART_CHECK = "kr.ac.unist.atdc"
+        const val ANY_OTP = "com.dreammirae.otp.android.mirae.multiid.market"
+        const val SAMSUNG_CAMERA = "com.sec.android.app.camera"
+        const val EXPERT_RAW = "com.samsung.android.app.galaxyraw"
+        const val SAMSUNG_CLOCK = "com.sec.android.app.clockpackage"
+        const val GOOGLE_CLOCK = "com.google.android.deskclock"
+        const val SAMSUNG_CALENDAR = "com.samsung.android.calendar"
+        const val GOOGLE_CALENDAR = "com.google.android.calendar"
+        val DEFAULT_STUDY_APPS = setOf(
+            SAMSUNG_NOTES,
+            SAMSUNG_NOTES_ADDONS,
+            CLAUDE,
+            GEMINI,
+            OUTLOOK,
+            UNIST_SMART_CHECK,
+            ANY_OTP,
+            SAMSUNG_CAMERA,
+            EXPERT_RAW,
+            SAMSUNG_CLOCK,
+            GOOGLE_CLOCK,
+            SAMSUNG_CALENDAR,
+            GOOGLE_CALENDAR
+        )
         const val DEFAULT_FOCUS_CREDIT_APP = SAMSUNG_NOTES
+        const val DEFAULT_ACTIVE_SUBJECT = "Graphene & 2D Materials"
+        val DEFAULT_STUDY_SUBJECTS = setOf(
+            "Graphene & 2D Materials",
+            "Deep Learning",
+            "Computer Vision",
+            "Mechanical Engineering",
+            "Materials Science"
+        )
     }
 }
 
@@ -123,6 +155,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             pushupTarget = (prefs[PUSHUP_TARGET] ?: MAX_PUSHUP_TARGET)
                 .coerceIn(MIN_PUSHUP_TARGET, MAX_PUSHUP_TARGET),
             mathProblems = prefs[MATH_PROBLEMS] ?: 3,
+            mathEulerMode = prefs[MATH_EULER_MODE] ?: true,
             emergencyHoldSeconds = prefs[EMERGENCY_HOLD_SECONDS] ?: 60,
             focusMinutes = prefs[FOCUS_MINUTES] ?: 25,
             shortBreakMinutes = prefs[SHORT_BREAK_MINUTES] ?: 5,
@@ -130,17 +163,20 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             focusMusicEnabled = prefs[FOCUS_MUSIC_ENABLED] ?: true,
             breakMusicEnabled = prefs[BREAK_MUSIC_ENABLED] ?: false,
             soundFadeSeconds = prefs[SOUND_FADE_SECONDS] ?: 5,
-            focusSoundId = prefs[FOCUS_SOUND_ID] ?: "focus_ambient",
-            focusLockPhone = prefs[FOCUS_LOCK_PHONE] ?: true,
+            focusSoundId = FocusSound.normalizedId(prefs[FOCUS_SOUND_ID]),
+            focusLockPhone = prefs[FOCUS_LOCK_PHONE] ?: false,
             focusImmersiveTimer = prefs[FOCUS_IMMERSIVE_TIMER] ?: true,
             focusFloatingTimer = prefs[FOCUS_FLOATING_TIMER] ?: true,
             sessionKeepScreenOn = prefs[SESSION_KEEP_SCREEN_ON] ?: true,
-            spotifyPlaylistUri = prefs[SPOTIFY_PLAYLIST_URI] ?: "",
             dailyFocusGoalMinutes = prefs[DAILY_FOCUS_GOAL_MINUTES] ?: 120,
-            studySubjects = prefs[STUDY_SUBJECTS]?.takeIf { it.isNotEmpty() } ?: setOf("General"),
-            activeSubject = prefs[ACTIVE_SUBJECT] ?: "General",
+            studySubjects = prefs[STUDY_SUBJECTS]
+                ?.takeIf { it.isNotEmpty() && it != setOf("General") }
+                ?: WakeProofSettings.DEFAULT_STUDY_SUBJECTS,
+            activeSubject = prefs[ACTIVE_SUBJECT]
+                ?.takeUnless { it == "General" && prefs[STUDY_SUBJECTS] == setOf("General") }
+                ?: WakeProofSettings.DEFAULT_ACTIVE_SUBJECT,
             subjectCredits = decodeSubjectCredits(prefs[SUBJECT_CREDITS]),
-            studyApps = prefs[STUDY_APPS] ?: WakeProofSettings.DEFAULT_STUDY_APPS,
+            studyApps = (prefs[STUDY_APPS] ?: emptySet()) + WakeProofSettings.DEFAULT_STUDY_APPS,
             focusCreditApp = prefs[FOCUS_CREDIT_APP] ?: WakeProofSettings.DEFAULT_FOCUS_CREDIT_APP,
             focusQuotes = prefs[FOCUS_QUOTES] ?: true,
             deepFocus = prefs[DEEP_FOCUS] ?: true,
@@ -155,6 +191,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun reviewPrompted(): Boolean = dataStore.data.first()[REVIEW_PROMPTED] ?: false
     suspend fun markReviewPrompted() = dataStore.edit { it[REVIEW_PROMPTED] = true }
     suspend fun setMathProblems(value: Int) = dataStore.edit { it[MATH_PROBLEMS] = value }
+    suspend fun setMathEulerMode(value: Boolean) = dataStore.edit { it[MATH_EULER_MODE] = value }
     suspend fun setEmergencyHoldSeconds(value: Int) = dataStore.edit { it[EMERGENCY_HOLD_SECONDS] = value }
     suspend fun setFocusMinutes(value: Int) = dataStore.edit { it[FOCUS_MINUTES] = value }
     suspend fun setShortBreakMinutes(value: Int) = dataStore.edit { it[SHORT_BREAK_MINUTES] = value }
@@ -162,15 +199,14 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     suspend fun setFocusMusicEnabled(value: Boolean) = dataStore.edit { it[FOCUS_MUSIC_ENABLED] = value }
     suspend fun setBreakMusicEnabled(value: Boolean) = dataStore.edit { it[BREAK_MUSIC_ENABLED] = value }
     suspend fun setSoundFadeSeconds(value: Int) = dataStore.edit { it[SOUND_FADE_SECONDS] = value }
-    suspend fun setFocusSoundId(value: String) = dataStore.edit { it[FOCUS_SOUND_ID] = value }
+    suspend fun setFocusSoundId(value: String) =
+        dataStore.edit { it[FOCUS_SOUND_ID] = FocusSound.normalizedId(value) }
     suspend fun setFocusLockPhone(value: Boolean) = dataStore.edit { it[FOCUS_LOCK_PHONE] = value }
     suspend fun setFocusImmersiveTimer(value: Boolean) =
         dataStore.edit { it[FOCUS_IMMERSIVE_TIMER] = value }
     suspend fun setFocusFloatingTimer(value: Boolean) = dataStore.edit { it[FOCUS_FLOATING_TIMER] = value }
     suspend fun setSessionKeepScreenOn(value: Boolean) =
         dataStore.edit { it[SESSION_KEEP_SCREEN_ON] = value }
-    suspend fun setSpotifyPlaylistUri(value: String) =
-        dataStore.edit { it[SPOTIFY_PLAYLIST_URI] = value.trim() }
     /**
      * Study apps chosen on THIS device, stamped like the focus goal so cloud
      * sync lets the newest list win (2026-11-01: the focus list is shared by
@@ -184,7 +220,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     /** The study apps and when they were last changed here (0 = never). */
     suspend fun studyAppsStamp(): Pair<Set<String>, Long> {
         val prefs = dataStore.data.first()
-        return (prefs[STUDY_APPS] ?: WakeProofSettings.DEFAULT_STUDY_APPS) to
+        return ((prefs[STUDY_APPS] ?: emptySet()) + WakeProofSettings.DEFAULT_STUDY_APPS) to
             (prefs[STUDY_APPS_UPDATED_AT] ?: 0L)
     }
 
@@ -232,14 +268,20 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         dataStore.edit { prefs ->
-            prefs[STUDY_SUBJECTS] = (prefs[STUDY_SUBJECTS] ?: setOf("General")) + trimmed
+            val current = prefs[STUDY_SUBJECTS]
+                ?.takeIf { it.isNotEmpty() && it != setOf("General") }
+                ?: WakeProofSettings.DEFAULT_STUDY_SUBJECTS
+            prefs[STUDY_SUBJECTS] = current + trimmed
             prefs[ACTIVE_SUBJECT] = trimmed
         }
     }
 
     suspend fun removeStudySubject(name: String) = dataStore.edit { prefs ->
-        val remaining = ((prefs[STUDY_SUBJECTS] ?: setOf("General")) - name)
-            .ifEmpty { setOf("General") }
+        val current = prefs[STUDY_SUBJECTS]
+            ?.takeIf { it.isNotEmpty() && it != setOf("General") }
+            ?: WakeProofSettings.DEFAULT_STUDY_SUBJECTS
+        val remaining = (current - name)
+            .ifEmpty { WakeProofSettings.DEFAULT_STUDY_SUBJECTS }
         prefs[STUDY_SUBJECTS] = remaining
         if (prefs[ACTIVE_SUBJECT] !in remaining) prefs[ACTIVE_SUBJECT] = remaining.first()
     }
@@ -257,6 +299,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     private companion object {
         val PUSHUP_TARGET = intPreferencesKey("pushup_target")
         val MATH_PROBLEMS = intPreferencesKey("math_problems")
+        val MATH_EULER_MODE = booleanPreferencesKey("math_euler_mode")
         val REVIEW_PROMPTED = booleanPreferencesKey("review_prompted")
         val EMERGENCY_HOLD_SECONDS = intPreferencesKey("emergency_hold_seconds")
         val FOCUS_MINUTES = intPreferencesKey("focus_minutes")
@@ -272,9 +315,6 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         // Key name kept from when this only covered focus phases, so existing
         // installs keep their choice.
         val SESSION_KEEP_SCREEN_ON = booleanPreferencesKey("focus_keep_screen_on")
-        // Survived the 1.5 own-music detour untouched, so a playlist saved
-        // before it is still there when Spotify comes back.
-        val SPOTIFY_PLAYLIST_URI = stringPreferencesKey("spotify_playlist_uri")
         val STUDY_APPS = stringSetPreferencesKey("study_apps")
         val STUDY_APPS_UPDATED_AT = longPreferencesKey("study_apps_updated_at")
         val FOCUS_CREDIT_APP = stringPreferencesKey("focus_credit_app")

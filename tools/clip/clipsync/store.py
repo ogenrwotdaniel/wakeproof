@@ -50,7 +50,7 @@ class KeyringStore:
     def set(self, item: str, value: str) -> None:
         ok = self._service.store_sync(
             self._schema, {"item": item}, self._Secret.COLLECTION_DEFAULT,
-            f"WakeProof Clip ({item})", self._Secret.Value.new(value, -1, "text/plain"), None,
+            f"Euler's Lab Clip ({item})", self._Secret.Value.new(value, -1, "text/plain"), None,
         )
         if not ok:
             raise RuntimeError(f"keyring refused to store {item}")

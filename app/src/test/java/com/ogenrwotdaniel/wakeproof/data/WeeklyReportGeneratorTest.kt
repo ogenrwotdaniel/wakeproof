@@ -198,4 +198,20 @@ class WeeklyReportGeneratorTest {
         assertTrue(text.contains("45 min"))
         assertFalse(text.contains("45 minutes of focused"))
     }
+
+    @Test
+    fun `handwritten derivation pages are celebrated in wins with per-course breakdown`() {
+        val single = generator.report(stats().copy(summaryPages = 1))
+        assertTrue(single.substringBefore("Watch out:").contains("1 handwritten derivation page photographed from memory."))
+        val multi = generator.report(
+            stats().copy(
+                summaryPages = 5,
+                summaryPagesBySubject = mapOf("Calculus" to 3, "Physics" to 2)
+            )
+        )
+        assertTrue(
+            multi.substringBefore("Watch out:")
+                .contains("5 handwritten derivation pages (Calculus 3, Physics 2) photographed from memory.")
+        )
+    }
 }

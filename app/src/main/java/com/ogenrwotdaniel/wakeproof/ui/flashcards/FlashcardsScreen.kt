@@ -16,9 +16,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -170,6 +173,7 @@ private fun ReviewPane(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DeckPane(
     subjects: List<SubjectCardCount>,
@@ -180,6 +184,7 @@ private fun DeckPane(
     modifier: Modifier = Modifier
 ) {
     val recallNotes by viewModel.recallNotes.collectAsStateWithLifecycle()
+    val studySubjects by viewModel.studySubjects.collectAsStateWithLifecycle()
     var subjectInput by rememberSaveable { mutableStateOf("") }
     var notesInput by rememberSaveable { mutableStateOf("") }
     var frontInput by rememberSaveable { mutableStateOf("") }
@@ -259,11 +264,23 @@ private fun DeckPane(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(text = "Add cards", style = MaterialTheme.typography.titleMedium)
+                val quickSubjects = (studySubjects + subjects.map { it.subject }).sorted()
+                if (quickSubjects.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        quickSubjects.forEach { subj ->
+                            FilterChip(
+                                selected = subjectInput == subj,
+                                onClick = { subjectInput = subj },
+                                label = { Text(subj) }
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = subjectInput,
                     onValueChange = { subjectInput = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Subject (e.g. Calculus)") },
+                    label = { Text("Subject (e.g. Graphene & 2D Materials, Computer Vision, Mechanics)") },
                     singleLine = true
                 )
 

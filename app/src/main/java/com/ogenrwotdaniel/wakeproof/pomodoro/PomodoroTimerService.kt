@@ -11,6 +11,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.IBinder
 import android.os.PowerManager
@@ -100,7 +102,6 @@ class PomodoroTimerService : Service() {
     @Inject lateinit var completionRepository: CompletionRepository
     @Inject lateinit var wearTimerSync: WearTimerSync
     @Inject lateinit var wearStatsSync: WearStatsSync
-    @Inject lateinit var spotify: SpotifyController
     @Inject lateinit var usageStatsRepository: UsageStatsRepository
     @Inject lateinit var wallRules: WallRulesRepository
     @Inject lateinit var liveFocusSession: LiveFocusSession
@@ -144,6 +145,7 @@ class PomodoroTimerService : Service() {
     /** Where this session started: here ([SharedSession.ORIGIN_SELF]), the watch or another install. */
     private var sessionOrigin = SharedSession.ORIGIN_SELF
     private var musicPlayer: MediaPlayer? = null
+    private var musicFocusRequest: AudioFocusRequest? = null
     private var currentSound: FocusSound? = null
     /** Volume ramp in flight; cancelled whenever the target volume changes. */
     private var fadeJob: Job? = null
@@ -153,20 +155,17 @@ class PomodoroTimerService : Service() {
     private var latestSettings = WakeProofSettings()
     /** Short-lived player for the transition chime; released on completion. */
     private var chimePlayer: MediaPlayer? = null
-    /** Last play/pause we sent Spotify; null = we have never touched playback. */
-    private var spotifyPlaying: Boolean? = null
     private val overlay by lazy { FloatingTimerOverlay(this) }
 
     override fun onCreate() {
         super.onCreate()
         // Ambient sound rides the timer: focus and break phases each have their
-        // own toggle, and switching the selected sound swaps the loop live. A
-        // null sound means Spotify is the chosen source — no loop at all.
+        // own toggle, and switching the selected sound swaps the loop live.
         scope.launch { settingsRepository.settings.collect { latestSettings = it } }
         scope.launch {
             combine(state, settingsRepository.settings) { s, cfg ->
                 val sound = FocusSound.fromId(cfg.focusSoundId)
-                Triple(sound != null && soundWanted(s, cfg), sound, cfg.soundFadeSeconds)
+                Triple(soundWanted(s, cfg), sound, cfg.soundFadeSeconds)
             }.distinctUntilChanged().collect { (shouldPlay, sound, fade) ->
                 if (sound != currentSound) {
                     fadeJob?.cancel()
@@ -175,24 +174,10 @@ class PomodoroTimerService : Service() {
                     musicVolume = 0f
                     currentSound = sound
                 }
-                if (shouldPlay && sound != null) startMusic(sound, fade) else pauseMusic(fade)
+                if (shouldPlay) startMusic(sound, fade) else pauseMusic(fade)
             }
         }
-        // Spotify picked as the study sound: it rides the timer through the very
-        // same phase toggles the loops use. Media keys only — playback resumes
-        // when the phase wants sound and pauses on break/pause/stop. We never
-        // send a pause before having sent a play, so a timer cannot silence
-        // music the user started for something else.
-        scope.launch {
-            combine(state, settingsRepository.settings) { s, cfg ->
-                FocusSound.isSpotify(cfg.focusSoundId) && soundWanted(s, cfg)
-            }.distinctUntilChanged().collect { shouldPlay ->
-                if (shouldPlay == spotifyPlaying) return@collect
-                if (spotifyPlaying == null && !shouldPlay) return@collect
-                spotifyPlaying = shouldPlay
-                if (shouldPlay) spotify.play() else spotify.pause()
-            }
-        }
+
         // Forest-style stakes: while a focus block runs, leaving for anything
         // that is not a study app starts a grace period, and staying away past
         // it withers the block's tree. collectLatest cancels the guard the
@@ -372,11 +357,6 @@ class PomodoroTimerService : Service() {
         // that is cancelled immediately below.
         CoroutineScope(Dispatchers.IO).launch { runCatching { wearTimerSync.clear() } }
         scope.cancel()
-        // Session over: stop the music we started, but never touch playback we didn't.
-        if (spotifyPlaying == true) {
-            spotify.pause()
-            spotifyPlaying = false
-        }
         clearTreeWarning()
         overlay.hide()
         // Stopping shouldn't cut the loop dead either, but [scope] is cancelled
@@ -390,6 +370,7 @@ class PomodoroTimerService : Service() {
                 runCatching { dying.release() }
             }
         }
+        abandonMusicFocus()
         // The session-complete chime starts just before stopSelf; releasing it
         // here would cut it off. It releases itself on completion or error, and
         // this late release (a no-op after those) catches one that never got there.
@@ -450,7 +431,11 @@ class PomodoroTimerService : Service() {
 
     private fun startMusic(sound: FocusSound, fadeSeconds: Int) {
         runCatching {
-            val player = musicPlayer ?: createLoopPlayer(sound)?.also { musicPlayer = it } ?: return
+            if (!requestMusicFocus()) return@runCatching
+            val player = musicPlayer ?: createLoopPlayer(sound)?.also { musicPlayer = it } ?: run {
+                abandonMusicFocus()
+                return@runCatching
+            }
             val peak = peakVolumeOf(sound)
             fadeJob?.cancel()
             if (!player.isPlaying) {
@@ -460,6 +445,26 @@ class PomodoroTimerService : Service() {
                 player.start()
             }
             fadeJob = scope.launch { ramp(player, peak, fadeSeconds) }
+        }
+    }
+
+    private fun requestMusicFocus(): Boolean {
+        if (musicFocusRequest != null) return true
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(MUSIC_AUDIO_ATTRIBUTES)
+            .setWillPauseWhenDucked(true)
+            .setOnAudioFocusChangeListener { }
+            .build()
+        val manager = getSystemService(AudioManager::class.java)
+        if (manager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
+        musicFocusRequest = request
+        return true
+    }
+
+    private fun abandonMusicFocus() {
+        musicFocusRequest?.let { request ->
+            getSystemService(AudioManager::class.java).abandonAudioFocusRequest(request)
+            musicFocusRequest = null
         }
     }
 
@@ -527,7 +532,9 @@ class PomodoroTimerService : Service() {
             // Unknown decides nothing, so a running away timer is not reset by it either.
             if (essentials == null) continue
             val allowed = current == null || current in essentials ||
-                current in latestSettings.studyApps
+                current in latestSettings.studyApps ||
+                current in com.ogenrwotdaniel.wakeproof.launcher.NAMED_TOOLS ||
+                current in com.ogenrwotdaniel.wakeproof.launcher.SYSTEM_DOCUMENT_PICKERS
             if (allowed) {
                 if (awaySince != null) clearTreeWarning()
                 awaySince = null
@@ -596,6 +603,7 @@ class PomodoroTimerService : Service() {
             if (runCatching { player.isPlaying }.getOrDefault(false)) {
                 ramp(player, 0f, fadeSeconds)
                 runCatching { player.pause() }
+                abandonMusicFocus()
             }
         }
     }
@@ -1089,7 +1097,7 @@ class PomodoroTimerService : Service() {
         if (outcome.witheredBlock || resume.treeWithered) {
             notifyTree(
                 "Session resumed",
-                "Closing WakeProof doesn't end a session — it cost this block's tree.",
+                "Closing Euler's Lab doesn't end a session — it cost this block's tree.",
                 // Often after a reboot in the night: a notice, not a reason to sound
                 // the alarm stream through Do Not Disturb.
                 sound = null

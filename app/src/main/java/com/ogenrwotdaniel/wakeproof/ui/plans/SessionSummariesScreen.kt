@@ -78,10 +78,12 @@ fun SessionSummariesScreen(
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(text = "Session summaries", style = MaterialTheme.typography.headlineMedium)
+                    Text(text = "Session summaries & derivations", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        text = "The page you write in the ten minutes after each focus session. " +
-                            "Kept on this device only, for the latest 90 days of summaries.",
+                        text = "The closed-book Euler Derivation Protocol page you write in the ten " +
+                            "minutes after each focus session (1. Theorems & definitions, 2. Crux " +
+                            "derivation or counterexample, 3. Next open question). Kept on this " +
+                            "device for the latest 90 days.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -100,7 +102,7 @@ fun SessionSummariesScreen(
             items(summaries.orEmpty(), key = { it.file.name }) { photo ->
                 PhotoThumbnail(
                     photo = photo,
-                    note = null,
+                    note = photo.subject,
                     openLabel = "Open this summary",
                     onOpen = { open = photo }
                 )

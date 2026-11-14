@@ -177,10 +177,14 @@ class SessionSummaryStore @Inject constructor(@ApplicationContext private val co
         return asked
     }
 
-    /** Keeps [jpeg] as a summary. Throws when storage cannot be written. */
-    suspend fun submit(jpeg: ByteArray, now: Long = System.currentTimeMillis()): PagePhoto {
+    /** Keeps [jpeg] as a summary, stamping the owed session's subject if present. Throws when storage cannot be written. */
+    suspend fun submit(
+        jpeg: ByteArray,
+        now: Long = System.currentTimeMillis(),
+        subject: String? = store.value.value.pending?.subject
+    ): PagePhoto {
         val day = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay()
-        val saved = shelf.save(jpeg, day, now)
+        val saved = shelf.save(jpeg, day, now, subject)
         settle { withSummaryKept(it, now, steadyClock(context)) }
         return saved
     }

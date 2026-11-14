@@ -174,7 +174,7 @@ class SyncViewModel @Inject constructor(
                     if (watchSignIn.send(token) > 0) {
                         "Sent to the watch. Its home screen shows ☁ and your account once it's signed in."
                     } else {
-                        "No watch in reach. Open WakeProof on the watch and try again."
+                        "No watch in reach. Open Euler's Lab on the watch and try again."
                     }
                 },
                 onFailure = { error ->

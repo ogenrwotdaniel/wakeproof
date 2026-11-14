@@ -10,22 +10,50 @@ import org.junit.Test
 class MathChallengeTest {
 
     @Test
-    fun `every answer is positive and fits the keypad`() {
+    fun `every answer is positive and fits the keypad in both modes`() {
         val random = Random(7)
         repeat(10_000) {
-            val problem = MathChallenge.next(random)
-            assertTrue(problem.prompt, problem.answer > 0)
-            assertTrue(problem.prompt, problem.answer.toString().length <= MathChallenge.MAX_ANSWER_DIGITS)
+            val eulerProblem = MathChallenge.next(random, eulerMode = true)
+            assertTrue(eulerProblem.prompt, eulerProblem.answer > 0)
+            assertTrue(eulerProblem.prompt, eulerProblem.answer.toString().length <= MathChallenge.MAX_ANSWER_DIGITS)
+
+            val standardProblem = MathChallenge.next(random, eulerMode = false)
+            assertTrue(standardProblem.prompt, standardProblem.answer > 0)
+            assertTrue(standardProblem.prompt, standardProblem.answer.toString().length <= MathChallenge.MAX_ANSWER_DIGITS)
         }
     }
 
     @Test
-    fun `the prompt evaluates to the stated answer`() {
+    fun `the prompt evaluates to the stated answer across all Euler Dojo families`() {
         val random = Random(11)
-        repeat(2_000) {
-            val problem = MathChallenge.next(random)
+        val seenShapes = mutableSetOf<String>()
+        repeat(3_000) {
+            val problem = MathChallenge.next(random, eulerMode = true)
             assertEquals(problem.prompt, problem.answer, evaluate(problem.prompt))
+            when {
+                problem.prompt.contains("² +") -> seenShapes += "square"
+                problem.prompt.contains("³") -> seenShapes += "cube"
+                problem.prompt.startsWith("2^") -> seenShapes += "power2"
+                problem.prompt.contains("mod") -> seenShapes += "mod"
+                problem.prompt.startsWith("φ(") -> seenShapes += "totient"
+                problem.prompt.endsWith(") k") -> seenShapes += "gauss_k"
+                problem.prompt.endsWith(") k²") -> seenShapes += "gauss_k2"
+            }
         }
+        assertEquals(
+            setOf("square", "cube", "power2", "mod", "totient", "gauss_k", "gauss_k2"),
+            seenShapes
+        )
+    }
+
+    @Test
+    fun `eulerTotient computes canonical values`() {
+        assertEquals(1, MathChallenge.eulerTotient(1))
+        assertEquals(1, MathChallenge.eulerTotient(2))
+        assertEquals(4, MathChallenge.eulerTotient(10))
+        assertEquals(12, MathChallenge.eulerTotient(13))
+        assertEquals(24, MathChallenge.eulerTotient(72))
+        assertEquals(40, MathChallenge.eulerTotient(100))
     }
 
     @Test
@@ -68,15 +96,54 @@ class MathChallengeTest {
         assertEquals(done, submitAnswer(done, null, random))
     }
 
-    /** Left-to-right with × before +/−, which is all the generator emits. */
+    /** Evaluates every prompt shape emitted by [MathChallenge]. */
     private fun evaluate(prompt: String): Int {
+        // 2^n
+        if (prompt.startsWith("2^")) {
+            val exp = prompt.removePrefix("2^").toInt()
+            return 1 shl exp
+        }
+        // φ(n)
+        if (prompt.startsWith("φ(")) {
+            val n = prompt.removePrefix("φ(").removeSuffix(")").toInt()
+            return MathChallenge.eulerTotient(n)
+        }
+        // (a × b) mod m
+        if (prompt.startsWith("(") && prompt.contains(") mod ")) {
+            val parts = prompt.removePrefix("(").split(") mod ")
+            val m = parts[1].toInt()
+            val mul = parts[0].split(" × ")
+            return (mul[0].toInt() * mul[1].toInt()) % m
+        }
+        // ∑(k=1..n) k or ∑(k=1..n) k²
+        if (prompt.startsWith("∑(k=1..")) {
+            val inside = prompt.removePrefix("∑(k=1..")
+            val n = inside.substringBefore(")").toInt()
+            return if (inside.endsWith("k²")) {
+                n * (n + 1) * (2 * n + 1) / 6
+            } else {
+                n * (n + 1) / 2
+            }
+        }
+        // Standard arithmetic with optional ² or ³ on operands
+        fun parseTerm(token: String): Int = when {
+            token.endsWith("²") -> {
+                val base = token.removeSuffix("²").toInt()
+                base * base
+            }
+            token.endsWith("³") -> {
+                val base = token.removeSuffix("³").toInt()
+                base * base * base
+            }
+            else -> token.toInt()
+        }
         val tokens = prompt.split(" ")
-        val terms = mutableListOf(tokens[0].toInt())
+        val terms = mutableListOf(parseTerm(tokens[0]))
         val ops = mutableListOf<String>()
         var i = 1
         while (i < tokens.size) {
             val op = tokens[i]
-            val value = tokens[i + 1].toInt()
+            val value = parseTerm(tokens[i + 1])
             if (op == "×") terms[terms.lastIndex] = terms.last() * value
             else { ops += op; terms += value }
             i += 2

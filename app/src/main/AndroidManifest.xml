@@ -39,15 +39,12 @@
         android:required="false" />
 
     <!-- Visibility of launcher apps: labels screen-time entries and lists apps on
-         the minimalist home screen. Spotify is named explicitly so the
-         study-music button can tell whether it is installed and deep-link
-         straight into it. -->
+         the minimalist home screen. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
-        <package android:name="com.spotify.music" />
         <!-- WakeProof Clip: "Open in Notes" on a received image. -->
         <package android:name="com.samsung.android.app.notes" />
         <!-- Finding the browsers, which are gated like social apps. -->
@@ -58,12 +55,14 @@
         </intent>
     </queries>
 
-    <!-- allowBackup=false: restoring EncryptedSharedPreferences from a backup of another
-         device install crashes on first key access, and alarm state must not survive
-         a restore anyway (alarms are rescheduled from Room on boot). -->
+    <!-- allowBackup=false + dataExtractionRules: restoring EncryptedSharedPreferences from a
+         backup of another device install crashes on first key access, and alarm state must not
+         survive a restore anyway (alarms are rescheduled from Room on boot). -->
     <application
         android:name=".WakeProofApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -80,15 +79,15 @@
             </intent-filter>
         </activity>
 
-        <!-- Opt-in minimalist home screen: inert until the user picks WakeProof as
+        <!-- Opt-in minimalist home screen: inert until the user picks Euler's Lab as
              the home app (Settings → Minimalist home screen, or the system's own
              default-apps screen). Its own taskAffinity so pressing Home never
-             drags the main WakeProof task forward. -->
+             drags the main task forward. -->
         <activity
             android:name=".launcher.LauncherActivity"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:label="WakeProof Home"
+            android:label="Euler's Lab Home"
             android:launchMode="singleTask"
             android:stateNotNeeded="true"
             android:taskAffinity="com.ogenrwotdaniel.wakeproof.home"

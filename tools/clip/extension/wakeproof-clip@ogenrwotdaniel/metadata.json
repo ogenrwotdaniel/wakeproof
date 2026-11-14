@@ -1,10 +1,10 @@
 {
   "uuid": "wakeproof-clip@ogenrwotdaniel",
-  "name": "WakeProof Clip",
-  "description": "One clipboard across this laptop and the WakeProof phone and tablet. Hands clipboard changes to the local clipsync daemon over D-Bus and applies what it receives, and adds a Quick Settings tile to switch it on or off and pair a device. Does no networking itself.",
+  "name": "Euler's Lab Clip",
+  "description": "One clipboard across this laptop and the Euler's Lab phone and tablet. Hands clipboard changes to the local clipsync daemon over D-Bus and applies what it receives, and adds a Quick Settings tile to switch it on or off and pair a device. Does no networking itself.",
   "shell-version": [
     "50"
   ],
   "url": "https://github.com/ogenrwotdaniel/wakeproof",
-  "version-name": "1.1"
+  "version-name": "2.0"
 }

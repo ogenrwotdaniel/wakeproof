@@ -127,9 +127,9 @@ class AgendaTileService : TileService() {
         column.addContent(spacer())
 
         val empty = when {
-            !agenda.present -> "Open WakeProof on the phone"
+            !agenda.present -> "Open Euler's Lab on the phone"
             !agenda.allowed -> "Calendar access is off on the phone"
-            agenda.epochDay != today -> "Not synced today yet. Open WakeProof on the phone"
+            agenda.epochDay != today -> "Not synced today yet. Open Euler's Lab on the phone"
             shown.isEmpty() && todays.isEmpty() -> "Nothing timed on the calendar today"
             shown.isEmpty() -> "Nothing left today"
             else -> null

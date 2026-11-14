@@ -135,7 +135,7 @@ private fun ShellNavigation(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = "WakeProof",
+                text = "Euler's Lab",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )

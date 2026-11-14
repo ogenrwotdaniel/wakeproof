@@ -86,6 +86,7 @@ object ClipCodec {
     const val TAG_BITS = 128
     const val KEY_BYTES = 32
     const val CHUNK_BYTES = 700 * 1024
+    const val MAX_CHUNKS = 32
     const val MAX_TEXT_BYTES = 256 * 1024
     const val MAX_IMAGE_BYTES = 20 * 1024 * 1024
     const val CLOUD_REENCODE_ABOVE_BYTES = 2 * 1024 * 1024
@@ -184,7 +185,9 @@ object ClipCodec {
     }
 
     fun join(chunks: List<ByteArray>): ByteArray {
-        val out = ByteArray(chunks.sumOf { it.size })
+        val total = chunks.sumOf { it.size.toLong() }
+        require(total <= MAX_IMAGE_BYTES + 64 * 1024) { "joined clip too large: $total" }
+        val out = ByteArray(total.toInt())
         var at = 0
         chunks.forEach { it.copyInto(out, at); at += it.size }
         return out

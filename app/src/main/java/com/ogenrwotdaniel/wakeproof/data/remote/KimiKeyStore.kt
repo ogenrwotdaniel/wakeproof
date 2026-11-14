@@ -17,12 +17,12 @@ interface ApiKeyStore {
 
 /**
  * Stores the Gemini key in EncryptedSharedPreferences — never in code, never in
- * regular (backup-able) prefs. Keeps the historical file name (`kimi_secure_prefs`)
- * and entry name (`api_key_gemini`) so existing Gemini keys saved before Kimi was
- * removed keep working without re-entry.
+ * regular (backup-able) prefs. Keeps the preference file name (`kimi_secure_prefs`)
+ * and entry name (`api_key_gemini`) so existing Gemini keys on device keep
+ * working without re-entry.
  */
 @Singleton
-class KimiKeyStore @Inject constructor(
+class GeminiKeyStore @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ApiKeyStore {
 
@@ -55,3 +55,5 @@ class KimiKeyStore @Inject constructor(
         const val KEY_GEMINI = "api_key_gemini"
     }
 }
+
+typealias KimiKeyStore = GeminiKeyStore

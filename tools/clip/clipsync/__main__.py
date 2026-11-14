@@ -8,7 +8,7 @@ import sys
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="clipsync", description="WakeProof Clip, laptop side")
+    parser = argparse.ArgumentParser(prog="clipsync", description="Euler's Lab Clip, laptop side")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("daemon", help="run the D-Bus/LAN/cloud daemon (systemd runs this)")
     sub.add_parser("pair", help="show a QR and pair one phone or tablet")

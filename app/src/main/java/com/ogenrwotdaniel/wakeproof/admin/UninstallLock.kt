@@ -39,13 +39,21 @@ object UninstallLock {
         context.getSystemService(DevicePolicyManager::class.java).isAdminActive(component(context))
     }.getOrDefault(false)
 
+    /** Releases active-admin status from inside our own UID so `adb shell cmd package uninstall -k` succeeds. */
+    fun releaseAdmin(context: Context) {
+        runCatching {
+            context.getSystemService(DevicePolicyManager::class.java)
+                ?.removeActiveAdmin(component(context))
+        }
+    }
+
     /** The system's own "activate this admin" screen. */
     fun enableIntent(context: Context): Intent =
         Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component(context))
             .putExtra(
                 DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                "WakeProof asks for no device policies. While it is an active admin, " +
+                "Euler's Lab asks for no device policies. While it is an active admin, " +
                     "Android will not uninstall it."
             )
 
@@ -115,5 +123,5 @@ class WakeProofAdmin : DeviceAdminReceiver() {
 
     /** Shown on Android's own confirm step, should one ever get past the cover. */
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence =
-        "Turning this off lets WakeProof be uninstalled, and every wall with it."
+        "Turning this off lets Euler's Lab be uninstalled, and every wall with it."
 }

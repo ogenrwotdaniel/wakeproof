@@ -1,1 +1,1 @@
-"""WakeProof Clip, laptop side. Wire protocol: docs/CLIPBOARD.md."""
+"""Euler's Lab Clip, laptop side. Wire protocol: docs/CLIPBOARD.md."""

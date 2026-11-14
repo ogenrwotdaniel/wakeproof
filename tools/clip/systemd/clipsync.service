@@ -1,5 +1,5 @@
 [Unit]
-Description=WakeProof Clip daemon (clipboard across laptop, phone and tablet)
+Description=Euler's Lab Clip daemon (clipboard across laptop, phone and tablet)
 Documentation=file://%h/AndroidStudioProjects/wakeproof/docs/CLIPBOARD.md
 PartOf=graphical-session.target
 After=graphical-session.target

@@ -56,6 +56,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_RELEASE_ADMIN, false)) {
+            com.ogenrwotdaniel.wakeproof.admin.UninstallLock.releaseAdmin(applicationContext)
+        }
         if (intent.getBooleanExtra(EXTRA_OPEN_TIMER, false)) timerAsks.update { it + 1 }
         if (intent.getBooleanExtra(EXTRA_LAND_TIMER, false)) timerLands.update { it + 1 }
     }
@@ -108,6 +111,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_RELEASE_ADMIN, false)) {
+            com.ogenrwotdaniel.wakeproof.admin.UninstallLock.releaseAdmin(applicationContext)
+        }
         // Not after a rotation: the restored back stack already holds the timer.
         // Nor from Recents, which hands the notification's old intent over again.
         val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
@@ -167,6 +173,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_OPEN_TIMER = "open_timer"
         private const val EXTRA_LAND_TIMER = "land_timer"
+        private const val EXTRA_RELEASE_ADMIN = "release_admin"
 
         /**
          * Brings the app forward on the focus timer as a break ends. Unlike

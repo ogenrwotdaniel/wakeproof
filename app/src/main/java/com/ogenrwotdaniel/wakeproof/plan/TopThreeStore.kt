@@ -10,8 +10,8 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
 
-/** Ten minutes before bed: when tomorrow's top three are asked for. */
-const val TOP_THREE_MINUTES = BEDTIME_MINUTES - 10
+/** Twenty minutes before bed (19:40): when tomorrow's top three are asked for. */
+const val TOP_THREE_MINUTES = BEDTIME_MINUTES - 20
 
 /** Evenings kept: enough to look back over a month. */
 const val MAX_TOP_THREE_DAYS = 31

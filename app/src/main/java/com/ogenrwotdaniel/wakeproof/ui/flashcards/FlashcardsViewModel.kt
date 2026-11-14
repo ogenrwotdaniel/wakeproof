@@ -9,8 +9,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ogenrwotdaniel.wakeproof.data.FlashcardDraft
 import com.ogenrwotdaniel.wakeproof.data.FlashcardRepository
-import com.ogenrwotdaniel.wakeproof.data.KimiRepository
-import com.ogenrwotdaniel.wakeproof.data.KimiResult
+import com.ogenrwotdaniel.wakeproof.data.GeminiRepository
+import com.ogenrwotdaniel.wakeproof.data.GeminiResult
 import com.ogenrwotdaniel.wakeproof.data.ReviewGrade
 import com.ogenrwotdaniel.wakeproof.data.db.Flashcard
 import com.ogenrwotdaniel.wakeproof.data.db.SubjectCardCount
@@ -33,12 +33,21 @@ import kotlinx.coroutines.withContext
 class FlashcardsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: FlashcardRepository,
-    private val kimiRepository: KimiRepository,
+    private val geminiRepository: GeminiRepository,
     private val recallStore: RecallStore,
+    settingsRepository: com.ogenrwotdaniel.wakeproof.data.SettingsRepository,
     keyStore: ApiKeyStore
 ) : ViewModel() {
 
     val hasApiKey: Boolean = keyStore.hasKey()
+
+    val studySubjects: StateFlow<Set<String>> = settingsRepository.settings
+        .map { it.studySubjects }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            com.ogenrwotdaniel.wakeproof.data.WakeProofSettings.DEFAULT_STUDY_SUBJECTS
+        )
 
     val subjects: StateFlow<List<SubjectCardCount>> = repository.observeSubjectCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -128,29 +137,29 @@ class FlashcardsViewModel @Inject constructor(
 
     fun generateFromText(text: String) {
         if (text.isBlank()) return
-        generate { kimiRepository.generateFlashcards(sourceText = text, notesPhoto = null) }
+        generate { geminiRepository.generateFlashcards(sourceText = text, notesPhoto = null) }
     }
 
     fun generateFromPhoto(uri: Uri) {
         generate {
             val bytes = withContext(Dispatchers.IO) {
                 context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            } ?: return@generate KimiResult.ApiError(null, "Could not read the selected photo")
-            kimiRepository.generateFlashcards(sourceText = null, notesPhoto = bytes)
+            } ?: return@generate GeminiResult.ApiError(null, "Could not read the selected photo")
+            geminiRepository.generateFlashcards(sourceText = null, notesPhoto = bytes)
         }
     }
 
-    private fun generate(block: suspend () -> KimiResult<List<FlashcardDraft>>) {
+    private fun generate(block: suspend () -> GeminiResult<List<FlashcardDraft>>) {
         if (_drafts.value.generating) return
         _drafts.value = DraftState(generating = true)
         viewModelScope.launch {
             _drafts.value = when (val result = block()) {
-                is KimiResult.Success ->
+                is GeminiResult.Success ->
                     if (result.value.isEmpty()) DraftState(error = "No cards could be drafted.")
                     else DraftState(drafts = result.value)
-                is KimiResult.ApiError -> DraftState(error = "AI error: ${result.message}")
-                KimiResult.NetworkError -> DraftState(error = "Network error — try again.")
-                KimiResult.NoKey -> DraftState(error = "Add an API key in Settings first.")
+                is GeminiResult.ApiError -> DraftState(error = "AI error: ${result.message}")
+                GeminiResult.NetworkError -> DraftState(error = "Network error — try again.")
+                GeminiResult.NoKey -> DraftState(error = "Add an API key in Settings first.")
             }
         }
     }

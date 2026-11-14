@@ -192,3 +192,21 @@ def test_render_qr_writes_png(tmp_path):
     assert img.size[0] == img.size[1] >= 400
     # Quiet zone: the corners are white.
     assert img.getpixel((0, 0)) == 255 and img.getpixel((img.size[0] - 1, img.size[1] - 1)) == 255
+
+
+def test_forget_pairing_clears_key_account_peers_and_emits_status(tmp_path):
+    fs = FakeFirestore()
+    saved, signals = [], []
+    eng, _, _ = make_engine(tmp_path, fs=fs, peers={"phone-1": {"name": "Galaxy S25 Edge", "addrs": ["10.0.0.5"]}})
+    st.save_account(eng.store, {"refreshToken": "r", "uid": "u", "email": "a@b.c", "apiKey": "k", "projectId": "p"})
+    eng.creds(force=True)
+    eng.save_cfg = lambda c: saved.append(dict(c))
+    eng.on_status = lambda js: signals.append(json.loads(js))
+
+    eng.forget_pairing()
+    status = eng.status()
+    assert status["paired"] is False and status["signedIn"] is False
+    assert status["peers"] == [] and eng.cfg["peers"] == {}
+    assert st.load_key(eng.store) is None and st.load_account(eng.store) is None
+    assert saved[-1]["peers"] == {}
+    assert signals[-1]["paired"] is False

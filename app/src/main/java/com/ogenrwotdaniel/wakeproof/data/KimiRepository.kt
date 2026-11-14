@@ -2,11 +2,11 @@ package com.ogenrwotdaniel.wakeproof.data
 
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.remote.GEMINI_MODEL
+import com.ogenrwotdaniel.wakeproof.data.remote.GeminiApi
+import com.ogenrwotdaniel.wakeproof.data.remote.GeminiChatRequest
+import com.ogenrwotdaniel.wakeproof.data.remote.GeminiMessage
+import com.ogenrwotdaniel.wakeproof.data.remote.GeminiResponseFormat
 import com.ogenrwotdaniel.wakeproof.data.remote.ImageCompressor
-import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
-import com.ogenrwotdaniel.wakeproof.data.remote.KimiChatRequest
-import com.ogenrwotdaniel.wakeproof.data.remote.KimiMessage
-import com.ogenrwotdaniel.wakeproof.data.remote.KimiResponseFormat
 import com.ogenrwotdaniel.wakeproof.data.remote.imagesWithTextContent
 import com.ogenrwotdaniel.wakeproof.data.remote.textContent
 import java.io.IOException
@@ -17,13 +17,15 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** Outcome of a Gemini API call; UI decides fallbacks per case. */
-sealed interface KimiResult<out T> {
-    data class Success<T>(val value: T) : KimiResult<T>
-    data class ApiError(val code: Int?, val message: String) : KimiResult<Nothing>
-    data object NetworkError : KimiResult<Nothing>
-    data object NoKey : KimiResult<Nothing>
+/** Outcome of a Google Gemini API call; UI decides fallbacks per case. */
+sealed interface GeminiResult<out T> {
+    data class Success<T>(val value: T) : GeminiResult<T>
+    data class ApiError(val code: Int?, val message: String) : GeminiResult<Nothing>
+    data object NetworkError : GeminiResult<Nothing>
+    data object NoKey : GeminiResult<Nothing>
 }
+
+typealias KimiResult<T> = GeminiResult<T>
 
 /** One AI-drafted flashcard, reviewed by the user before saving. */
 @Serializable
@@ -33,38 +35,41 @@ data class FlashcardDraft(val front: String = "", val back: String = "")
 private data class FlashcardEnvelope(val cards: List<FlashcardDraft> = emptyList())
 
 /**
- * Gemini API calls (`gemini-3.8-flash`): flashcard drafting and the Pomodoro study
- * chat. One retry with backoff on
- * 429/5xx; malformed responses become [KimiResult.ApiError], never a crash.
+ * Google Gemini API calls (`gemini-3.8-flash`): researcher-grade flashcard
+ * drafting and the Pomodoro study chat (Coach & Socratic Referee modes). One
+ * retry with backoff on 429/5xx; malformed responses become
+ * [GeminiResult.ApiError], never a crash.
  *
  * Motivational lines and the weekly report live on-device — see
  * [com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation] and
  * [WeeklyReportGenerator]. Neither needs a key, a network, or a round trip.
  */
 @Singleton
-class KimiRepository @Inject constructor(
-    private val api: KimiApi,
+class GeminiRepository @Inject constructor(
+    private val api: GeminiApi,
     private val keyStore: ApiKeyStore,
     private val imageCompressor: ImageCompressor
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
-    /** Multi-turn study chat for the Pomodoro assistant. Roles: "user"/"assistant". */
-    suspend fun studyChat(history: List<Pair<String, String>>): KimiResult<String> {
-        val request = KimiChatRequest(
+    /**
+     * Multi-turn study chat for the Pomodoro assistant. Roles: "user"/"assistant".
+     * When [socratic] is true, acts as an Euler-style Socratic Referee that probes
+     * assumptions, edge cases, and proof steps rather than handing out direct answers.
+     */
+    suspend fun studyChat(
+        history: List<Pair<String, String>>,
+        socratic: Boolean = false
+    ): GeminiResult<String> {
+        val systemPrompt = if (socratic) SOCRATIC_SYSTEM_PROMPT else COACH_SYSTEM_PROMPT
+        val request = GeminiChatRequest(
             model = GEMINI_MODEL,
             maxTokens = 4096,
             reasoningEffort = REASONING_LOW,
             messages = listOf(
-                KimiMessage(
-                    "system",
-                    textContent(
-                        "You are a concise study coach inside a Pomodoro timer app. Explain " +
-                            "concepts, quiz the user on request, keep answers short."
-                    )
-                )
-            ) + history.map { (role, text) -> KimiMessage(role, textContent(text)) }
+                GeminiMessage("system", textContent(systemPrompt))
+            ) + history.map { (role, text) -> GeminiMessage(role, textContent(text)) }
         )
         return call(request) { it.trim() }
     }
@@ -77,7 +82,7 @@ class KimiRepository @Inject constructor(
     suspend fun generateFlashcards(
         sourceText: String?,
         notesPhoto: ByteArray?
-    ): KimiResult<List<FlashcardDraft>> {
+    ): GeminiResult<List<FlashcardDraft>> {
         val instruction = "Create study flashcards from these notes." +
             (sourceText?.takeIf { it.isNotBlank() }?.let { "\n\nNOTES:\n$it" } ?: "")
         val userContent = if (notesPhoto != null) {
@@ -88,14 +93,14 @@ class KimiRepository @Inject constructor(
         } else {
             textContent(instruction)
         }
-        val request = KimiChatRequest(
+        val request = GeminiChatRequest(
             model = GEMINI_MODEL,
             maxTokens = 8192,
             reasoningEffort = REASONING_LOW,
             responseFormat = JSON_OBJECT_FORMAT,
             messages = listOf(
-                KimiMessage("system", textContent(FLASHCARD_SYSTEM_PROMPT)),
-                KimiMessage("user", userContent)
+                GeminiMessage("system", textContent(FLASHCARD_SYSTEM_PROMPT)),
+                GeminiMessage("user", userContent)
             )
         )
         return call(request) { content ->
@@ -114,49 +119,49 @@ class KimiRepository @Inject constructor(
      * low reasoning (the minimum supported on `gemini-3.8-flash`) and 1 output
      * token; HTTP 200 proves the key and model work.
      */
-    suspend fun testConnection(): KimiResult<Unit> {
-        val request = KimiChatRequest(
+    suspend fun testConnection(): GeminiResult<Unit> {
+        val request = GeminiChatRequest(
             model = GEMINI_MODEL,
             maxTokens = 1,
             reasoningEffort = REASONING_LOW,
-            messages = listOf(KimiMessage("user", textContent("ping")))
+            messages = listOf(GeminiMessage("user", textContent("ping")))
         )
         return when (val result = call(request, allowEmpty = true) { }) {
-            is KimiResult.Success -> KimiResult.Success(Unit)
-            is KimiResult.ApiError -> result
-            KimiResult.NetworkError -> KimiResult.NetworkError
-            KimiResult.NoKey -> KimiResult.NoKey
+            is GeminiResult.Success -> GeminiResult.Success(Unit)
+            is GeminiResult.ApiError -> result
+            GeminiResult.NetworkError -> GeminiResult.NetworkError
+            GeminiResult.NoKey -> GeminiResult.NoKey
         }
     }
 
     private suspend fun <T> call(
-        request: KimiChatRequest,
+        request: GeminiChatRequest,
         allowEmpty: Boolean = false,
         transform: (String) -> T
-    ): KimiResult<T> {
-        if (!keyStore.hasKey()) return KimiResult.NoKey
-        var lastFailure: KimiResult<Nothing> = KimiResult.NetworkError
+    ): GeminiResult<T> {
+        if (!keyStore.hasKey()) return GeminiResult.NoKey
+        var lastFailure: GeminiResult<Nothing> = GeminiResult.NetworkError
         repeat(MAX_ATTEMPTS) { attempt ->
             try {
                 val response = api.chatCompletions(request)
                 if (response.isSuccessful) {
                     val content = response.body()?.choices?.firstOrNull()?.message?.content
-                        ?: if (allowEmpty) "" else return KimiResult.ApiError(null, "Empty response from model")
+                        ?: if (allowEmpty) "" else return GeminiResult.ApiError(null, "Empty response from model")
                     return try {
-                        KimiResult.Success(transform(content))
+                        GeminiResult.Success(transform(content))
                     } catch (e: Exception) {
-                        KimiResult.ApiError(null, "Unparseable model response: ${e.message}")
+                        GeminiResult.ApiError(null, "Unparseable model response: ${e.message}")
                     }
                 }
                 val code = response.code()
-                val failure = KimiResult.ApiError(
+                val failure = GeminiResult.ApiError(
                     code,
                     response.errorBody()?.string()?.take(200) ?: "HTTP $code"
                 )
                 if (code != 429 && code < 500) return failure
                 lastFailure = failure
             } catch (e: IOException) {
-                lastFailure = KimiResult.NetworkError
+                lastFailure = GeminiResult.NetworkError
             }
             if (attempt < MAX_ATTEMPTS - 1) delay(RETRY_BACKOFF_MS * (attempt + 1))
         }
@@ -181,14 +186,32 @@ class KimiRepository @Inject constructor(
 
         // gemini-3.8-flash accepts "low", "medium", "high" ("minimal" returns HTTP 400).
         const val REASONING_LOW = "low"
-        val JSON_OBJECT_FORMAT = KimiResponseFormat("json_object")
+        val JSON_OBJECT_FORMAT = GeminiResponseFormat("json_object")
+
+        const val COACH_SYSTEM_PROMPT =
+            "You are a concise study and research coach inside Euler's Lab (specializing in " +
+                "Mechanical Engineering, Deep Learning, Graphene & Materials Science, Computer Vision, " +
+                "and Mathematics). Explain concepts, quiz the user on request, and keep answers short."
+
+        val SOCRATIC_SYSTEM_PROMPT = """
+            You are an Euler-caliber mathematical, mechanical engineering, materials/graphene, computer vision, and deep learning referee inside Euler's Lab.
+            Rules:
+            - Do NOT hand over complete solutions immediately. Ask the user to state their definitions, governing equations, physical/geometric assumptions, or proof idea first.
+            - Challenge unstated assumptions, boundary cases (n -> 0, n -> infinity, singular Jacobians/Hessians, continuum vs. atomistic limits, degenerate camera poses), and necessary vs. sufficient conditions.
+            - If the user makes a loose claim, offer a concrete counterexample or ask what breaks when a hypothesis or physical constraint is dropped.
+            - Keep every response sharp, rigorous, and under 4 sentences.
+        """.trimIndent()
 
         val FLASHCARD_SYSTEM_PROMPT = """
-            You turn study notes (text or a photo of notes) into concise flashcards for
-            spaced repetition. Rules:
-            - Each card tests ONE fact, definition, formula or concept.
-            - front: a clear question or prompt. back: the short answer (1-3 lines).
-            - Prefer "why/how" and formula cards over trivia for STEM material.
+            You turn study notes, papers, or derivations (text or a photo of handwritten notes across Mechanical Engineering, Deep Learning, Graphene/Materials, Computer Vision, and Mathematics) into
+            researcher-grade flashcards for spaced repetition in Euler's Lab. Rules:
+            - Generate cards across four deep-learning archetypes:
+              1. Proof Skeleton / Derivation Crux Step ("How do you derive/prove X, and what is the crux step or conservation law?")
+              2. Hypothesis & Boundary-Case Audit ("Why is condition/assumption Y required in X? What physical regime or counterexample breaks it if dropped?")
+              3. Method Trigger ("When you see problem structure, PDE, lattice defect, or loss landscape Z, what transformation, invariant, or architecture applies?")
+              4. Core Definition, Governing Equation, or Theorem
+            - Each card tests ONE concept, derivation step, boundary condition, or formula.
+            - front: a clear question or prompt. back: the concise, rigorous answer (1-3 lines).
             - Produce between 5 and 20 cards depending on how much material there is.
             - Write math in plain text (e.g. "integral of x^2 dx = x^3/3 + C").
             Respond with ONLY this JSON object, no markdown, no extra text:
@@ -196,3 +219,5 @@ class KimiRepository @Inject constructor(
         """.trimIndent()
     }
 }
+
+typealias KimiRepository = GeminiRepository

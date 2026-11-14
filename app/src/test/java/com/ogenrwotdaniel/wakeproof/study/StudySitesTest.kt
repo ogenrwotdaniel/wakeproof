@@ -6,8 +6,18 @@ import org.junit.Test
 
 class StudySitesTest {
     @Test
-    fun `blackboard, unist and the sign-in hops open`() {
+    fun `blackboard, unist, research repositories and the sign-in hops open`() {
         assertTrue(studySiteAllowed(BLACKBOARD_URL))
+        assertTrue(studySiteAllowed(ARXIV_MATERIALS_URL))
+        assertTrue(studySiteAllowed(ARXIV_CV_URL))
+        assertTrue(studySiteAllowed(ARXIV_DL_URL))
+        assertTrue(studySiteAllowed(SCHOLAR_URL))
+        assertTrue(studySiteAllowed("https://arxiv.org/pdf/2401.00001.pdf"))
+        assertTrue(studySiteAllowed("https://www.nature.com/articles/s41586-024-00001-x"))
+        assertTrue(studySiteAllowed("https://journals.aps.org/prb/abstract/10.1103/PhysRevB.109.014101"))
+        assertTrue(studySiteAllowed("https://pubs.acs.org/doi/10.1021/acsnano.4c00001"))
+        assertTrue(studySiteAllowed("https://openaccess.thecvf.com/CVPR2024"))
+        assertTrue(studySiteAllowed("https://openreview.net/forum?id=abc"))
         assertTrue(studySiteAllowed("https://portal.unist.ac.kr/irj/portal"))
         assertTrue(studySiteAllowed("https://unist.ac.kr/"))
         assertTrue(studySiteAllowed("https://eu-lti.bbcollab.com/collab/ui/session/join/x"))
@@ -23,7 +33,10 @@ class StudySitesTest {
         assertFalse(studySiteAllowed("https://unist.ac.kr.example.com/"))
         assertFalse(studySiteAllowed("http://blackboard.unist.ac.kr/"))
         assertFalse(studySiteAllowed("https://www.office.com/"))
+        // General Google Search is blocked even though scholar.google.com is allowed.
         assertFalse(studySiteAllowed("https://www.google.com/search?q=unist.ac.kr"))
+        assertFalse(studySiteAllowed("https://news.google.com/"))
+        assertFalse(studySiteAllowed("https://www.reddit.com/r/MachineLearning"))
         assertFalse(studySiteAllowed("intent://x#Intent;end"))
         assertFalse(studySiteAllowed("javascript:alert(1)"))
         assertFalse(studySiteAllowed("not a url"))

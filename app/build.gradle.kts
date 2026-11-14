@@ -68,8 +68,8 @@ android {
         targetSdk = 36
         // 2 was consumed by an upload Play already holds, and a versionCode can
         // never be reused. The build it names is what matters, not the number.
-        versionCode = 13
-        versionName = "1.9.2"
+        versionCode = 14
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -160,7 +160,7 @@ dependencies {
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.play.review.ktx)
 
-    // Networking (Kimi API)
+    // Networking (Google Gemini API)
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.kotlinx.serialization)
     implementation(libs.okhttp)

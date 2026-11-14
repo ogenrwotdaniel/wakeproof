@@ -134,7 +134,7 @@ fun UsageScreen(
 
             if (!hasAccess) {
                 Text(
-                    text = "WakeProof needs usage access to show how you've been " +
+                    text = "Euler's Lab needs usage access to show how you've been " +
                         "using your phone. Nothing leaves the device.",
                     style = MaterialTheme.typography.bodyLarge
                 )
@@ -467,7 +467,7 @@ private fun TodayCard(snapshot: UsageSnapshot, study: StudyTimeSummary?, focusMi
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = "WakeProof itself (the home screen, the timer) was on screen " +
+                text = "Euler's Lab itself (the home screen, the timer) was on screen " +
                     "${formatMinutes(snapshot.ownMinutes)} and counts as neither. A focus session " +
                     "counts once, whichever device ran it and whatever the phone showed.",
                 style = MaterialTheme.typography.bodySmall,
@@ -709,11 +709,11 @@ private fun ScheduleCard(
             label = "Gated apps open",
             value = when {
                 open == null -> "Never"
-                rules.weekendShut -> "Mon–Thu ${clock(open.first)}–${clock(open.second)}"
+                rules.weekendShut -> "Sat–Sun ${clock(open.first)}–${clock(open.second)}"
                 else -> "${clock(open.first)}–${clock(open.second)}"
             }
         )
-        if (rules.weekendShut) ScheduleRow(swatch = shutColor, label = "Friday to Sunday", value = "Shut all day")
+        if (rules.weekendShut) ScheduleRow(swatch = shutColor, label = "Monday to Friday", value = "Shut all day")
         if (rules.bedtimeStartMinutes >= 0) {
             ScheduleRow(
                 swatch = shutColor,
@@ -729,7 +729,7 @@ private fun ScheduleCard(
         Text(
             text = "Gated apps are social, video, messaging, the Play Store and every browser. " +
                 "The night wall shuts every app but calls, " + (if (phone) "the camera, " else "") +
-                "Clock, Calendar, WakeProof and a running focus session's apps. In a focus session Do Not Disturb is on.",
+                "Clock, Calendar, Euler's Lab and a running focus session's apps. In a focus session Do Not Disturb is on.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -810,7 +810,7 @@ private fun OtherProfileWarning(apps: List<String>) {
             )
             Text(
                 text = "${apps.joinToString()} ${if (apps.size == 1) "is" else "are"} also " +
-                    "installed in Secure Folder, Dual Messenger or a work profile. WakeProof " +
+                    "installed in Secure Folder, Dual Messenger or a work profile. Euler's Lab " +
                     "can't see that copy, so it bypasses the schedule and focus walls. " +
                     "Uninstall it there.",
                 style = MaterialTheme.typography.bodyMedium,

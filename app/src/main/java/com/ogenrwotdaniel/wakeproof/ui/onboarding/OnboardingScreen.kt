@@ -65,9 +65,9 @@ fun OnboardingScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(text = "Welcome to WakeProof", style = MaterialTheme.typography.headlineMedium)
+            Text(text = "Welcome to Euler's Lab", style = MaterialTheme.typography.headlineMedium)
             Text(
-                text = "Alarms here can only be dismissed with camera proof. For the 5 AM " +
+                text = "Alarms here can only be dismissed with proof. For the morning " +
                     "alarm to actually fire, grant each of these:",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -100,7 +100,7 @@ fun OnboardingScreen(
             )
             OnboardingStep(
                 title = "Exact alarms",
-                description = "Required — WakeProof is an alarm clock and needs exact timing.",
+                description = "Required — Euler's Lab is an alarm clock and needs exact timing.",
                 granted = status.exactAlarm,
                 actionLabel = "Open settings",
                 onAction = {
@@ -111,7 +111,7 @@ fun OnboardingScreen(
             )
             OnboardingStep(
                 title = "Battery: unrestricted",
-                description = "Strongly recommended — otherwise One UI can silently kill the 5 AM alarm.",
+                description = "Strongly recommended — otherwise One UI can silently kill the morning alarm.",
                 granted = status.batteryUnrestricted,
                 actionLabel = "Request",
                 onAction = {
@@ -126,8 +126,8 @@ fun OnboardingScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(text = "Samsung extra steps", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        text = "Settings → Apps → WakeProof → Battery → Unrestricted\n" +
-                            "Settings → Battery → Background usage limits → remove WakeProof " +
+                        text = "Settings → Apps → Euler's Lab → Battery → Unrestricted\n" +
+                            "Settings → Battery → Background usage limits → remove Euler's Lab " +
                             "from \"Sleeping apps\" / \"Deep sleeping apps\"",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

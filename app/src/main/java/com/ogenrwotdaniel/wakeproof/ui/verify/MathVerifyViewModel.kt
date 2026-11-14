@@ -61,13 +61,21 @@ class MathVerifyViewModel @Inject constructor(
     )
     val uiState: StateFlow<UiState> = _uiState
 
+    @Volatile private var eulerMode: Boolean = true
+
     init {
         viewModelScope.launch {
             val settings = runCatching { settingsRepository.settings.first() }.getOrNull()
                 ?: return@launch
+            eulerMode = settings.mathEulerMode
             _uiState.update {
                 it.copy(
                     progress = it.progress.copy(
+                        problem = if (it.progress.solved == 0 && it.progress.mistakes == 0) {
+                            MathChallenge.next(random, eulerMode)
+                        } else {
+                            it.progress.problem
+                        },
                         required = if (strict) {
                             maxOf(settings.mathProblems, StrictAlarm.MATH_FALLBACK_PROBLEMS)
                         } else {
@@ -127,7 +135,7 @@ class MathVerifyViewModel @Inject constructor(
     fun onSubmit() {
         val state = _uiState.value
         if (state.verified || state.input.isEmpty()) return
-        val next = submitAnswer(state.progress, state.input.toIntOrNull(), random)
+        val next = submitAnswer(state.progress, state.input.toIntOrNull(), random, eulerMode)
         val wrong = next.mistakes > state.progress.mistakes
         _uiState.update {
             it.copy(

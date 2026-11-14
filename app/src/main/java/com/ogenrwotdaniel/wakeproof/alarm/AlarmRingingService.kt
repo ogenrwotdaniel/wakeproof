@@ -237,7 +237,7 @@ class AlarmRingingService : Service() {
             "Alarms",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Ringing WakeProof alarms"
+            description = "Ringing Euler's Lab alarms"
             setSound(null, null) // the service plays audio itself
             enableVibration(false)
         }
@@ -256,7 +256,7 @@ class AlarmRingingService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("WakeProof alarm")
+            .setContentTitle("Euler's Lab alarm")
             .setContentText(text)
             .setCategory(Notification.CATEGORY_ALARM)
             .setOngoing(true)

@@ -79,12 +79,13 @@ class AgendaActivity : ComponentActivity() {
             addView(column, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         setContentView(root)
-        pendingEventKey = intent.getStringExtra(EXTRA_EVENT_KEY)
+        pendingEventKey = intent.getStringExtra(EXTRA_EVENT_KEY)?.take(MAX_EVENT_KEY_LENGTH)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra(EXTRA_EVENT_KEY)?.let { pendingEventKey = it }
+        setIntent(intent)
+        intent.getStringExtra(EXTRA_EVENT_KEY)?.take(MAX_EVENT_KEY_LENGTH)?.let { pendingEventKey = it }
     }
 
     override fun onResume() {
@@ -118,9 +119,9 @@ class AgendaActivity : ComponentActivity() {
             addText("Today", 18f, Color.WHITE)
             status?.let { addText(it, 13f, Color.LTGRAY) }
             when {
-                !agenda.present -> addText("Nothing from the phone yet. Open WakeProof on the phone.", 14f, Color.GRAY)
+                !agenda.present -> addText("Nothing from the phone yet. Open Euler's Lab on the phone.", 14f, Color.GRAY)
                 !agenda.allowed -> addText("Calendar access is off on the phone.", 14f, Color.GRAY)
-                agenda.epochDay != today -> addText("Not synced today yet. Open WakeProof on the phone.", 14f, Color.GRAY)
+                agenda.epochDay != today -> addText("Not synced today yet. Open Euler's Lab on the phone.", 14f, Color.GRAY)
                 events.isEmpty() -> addText("Nothing timed on the calendar today.", 14f, Color.GRAY)
                 else -> events.forEach { addRow(it) }
             }
@@ -280,6 +281,7 @@ class AgendaActivity : ComponentActivity() {
     companion object {
         /** The phone's instance key of an event to open straight to its confirm. */
         const val EXTRA_EVENT_KEY = "event_key"
+        private const val MAX_EVENT_KEY_LENGTH = 256
         private val BACKGROUND = Color.parseColor("#0F1417")
     }
 }

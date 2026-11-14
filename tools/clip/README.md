@@ -1,6 +1,6 @@
-# WakeProof Clip — laptop side
+# Euler's Lab Clip — laptop side
 
-One clipboard across this Ubuntu laptop and the WakeProof phone and tablet (text and
+One clipboard across this Ubuntu laptop and the Euler's Lab phone and tablet (text and
 images). The wire protocol is `docs/CLIPBOARD.md`; it is the contract with the Android
 half, and both test suites read `app/src/test/resources/clip/vectors.json`.
 
@@ -17,7 +17,7 @@ GNOME Shell extension  --Offer(s mime, ay data)-->   clipsync daemon  --LAN :473
   owner change it reads PNG/JPEG, else UTF-8 text, skips password-manager clips
   (`x-kde-passwordManagerHint`) and copied files, and calls `Offer`. It sets the clipboard
   on `Incoming` and skips the owner change that this causes. It also adds the
-  **WakeProof Clip** Quick Settings tile (see below), which talks only to the daemon's
+  **Euler's Lab Clip** Quick Settings tile (see below), which talks only to the daemon's
   local control methods.
 - `clipsync/` (Python, stdlib + cryptography, Pillow, gi; zeroconf and qrcode optional):
   - `codec.py` seal/open (AES-256-GCM), chunking, JPEG re-encode for the cloud, hashes
@@ -28,7 +28,7 @@ GNOME Shell extension  --Offer(s mime, ay data)-->   clipsync daemon  --LAN :473
     (terminal QR) and the daemon's `StartPairing` (QR PNG for the tile)
   - `daemon.py` owns `com.ogenrwotdaniel.WakeProofClip`; polls the cloud every 4 s (30 s
     while the screen is locked). Received images are also saved to
-    `~/Pictures/WakeProof Clip/`.
+    `~/Pictures/Euler's Lab Clip/`.
 - Secrets (clip key, Firebase refresh token) live in GNOME Keyring, schema
   `com.ogenrwotdaniel.WakeProofClip`. `~/.config/wakeproof-clip/config.json` holds only the
   install id, the device name and the addresses of paired devices.
@@ -49,7 +49,7 @@ The unit assumes the repo is at `~/AndroidStudioProjects/wakeproof`.
 
 ## The Quick Settings tile (no terminal needed)
 
-Top-right menu → **WakeProof Clip** tile (clipboard icon), next to GSConnect.
+Top-right menu → **Euler's Lab Clip** tile (clipboard icon), next to GSConnect.
 
 - **Tile** — click to switch sharing on/off. Off means nothing is sent, nothing received
   is applied, the cloud poll stops and the LAN server answers `503` (phones then fall
@@ -60,11 +60,13 @@ Top-right menu → **WakeProof Clip** tile (clipboard icon), next to GSConnect.
 - **Arrow** — every known device with when it was last seen and whether it is on the LAN,
   the cloud account, then:
   - **Pair a device…** opens a QR on screen with a 5-minute countdown. On the phone or
-    tablet: WakeProof → Settings → Clipboard across devices → Pair a computer, scan it.
+    tablet: Euler's Lab → Settings → Clipboard across devices → Pair a computer, scan it.
     The dialog says "Paired with …" and closes itself; the daemon uses the new key at
     once (no restart). Cancel closes the pairing window. While it is open a clipboard
     icon shows in the top bar.
-  - **Open received images** opens `~/Pictures/WakeProof Clip/`.
+  - **Revoke pairing** (when paired) deletes the clip key, cloud account, and peers from
+    this computer and wipes its cloud records.
+  - **Open received images** opens `~/Pictures/Euler's Lab Clip/`.
   - **Start service** (only when the daemon is not running) runs
     `systemctl --user start clipsync`.
 

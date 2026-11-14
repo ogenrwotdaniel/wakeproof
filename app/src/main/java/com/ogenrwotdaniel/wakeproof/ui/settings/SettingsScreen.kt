@@ -64,7 +64,7 @@ import java.time.DayOfWeek
 
 /**
  * Settings: alarm times + enable switches (rescheduled immediately), goal
- * targets, Kimi API key management, emergency-hold duration, about.
+ * targets, Google Gemini API key management, emergency-hold duration, about.
  */
 @Composable
 fun SettingsScreen(
@@ -210,6 +210,14 @@ fun SettingsScreen(
                 onCommit = viewModel::setMathProblems,
                 steps = MathChallenge.MAX_PROBLEMS - MathChallenge.MIN_PROBLEMS - 1
             )
+            SwitchSetting(
+                label = "Euler Mental-Calculation Dojo",
+                description = "Includes cubes (a³ ± b), powers of 2 (up to 2¹³ = 8192), " +
+                    "modular arithmetic (a × b mod m), Euler's totient φ(n), and Gauss/Euler " +
+                    "series (∑ k, ∑ k²) in morning math alarms.",
+                checked = settings.mathEulerMode,
+                onCheckedChange = viewModel::setMathEulerMode
+            )
             SliderSetting(
                 label = "Emergency hold",
                 value = settings.emergencyHoldSeconds,
@@ -270,9 +278,8 @@ fun SettingsScreen(
             )
             SwitchSetting(
                 label = "Study sound",
-                description = "Sound plays automatically during focus phases. Pick the source " +
-                    "on the Pomodoro screen — an ambient loop (rain, fireplace…) or Spotify, " +
-                    "one or the other. Turn off for silence.",
+                description = "Sound plays automatically during focus phases. Pick the ambient " +
+                    "loop (rain, fireplace…) on the Pomodoro screen. Turn off for silence.",
                 checked = settings.focusMusicEnabled,
                 onCheckedChange = viewModel::setFocusMusicEnabled
             )
@@ -289,9 +296,7 @@ fun SettingsScreen(
                         "back down before it ends, instead of snapping on and off. " +
                         "0 turns fading off. The fade-out starts this many seconds " +
                         "before the phase ends, so a long fade wants a long phase — " +
-                        "60 s on a 5 min break spends a fifth of it easing away. " +
-                        "Spotify is controlled with media keys, which carry no " +
-                        "volume, so it is unaffected.",
+                        "60 s on a 5 min break spends a fifth of it easing away.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -315,7 +320,7 @@ fun SettingsScreen(
             )
             SwitchSetting(
                 label = "Lock phone during the session",
-                description = "Pins the phone to WakeProof for the whole session, " +
+                description = "Pins the phone to Euler's Lab for the whole session, " +
                     "breaks included. Pausing or ending the session unpins it.",
                 checked = settings.focusLockPhone,
                 onCheckedChange = viewModel::setFocusLockPhone
@@ -359,7 +364,7 @@ fun SettingsScreen(
             )
             SwitchSetting(
                 label = "Grow a tree each focus block",
-                description = "Forest-style: a tree grows while you focus. Leave WakeProof " +
+                description = "Forest-style: a tree grows while you focus. Leave Euler's Lab " +
                     "for anything that isn't a study app for more than 10 seconds and it " +
                     "withers — that block won't count toward your daily goal. Needs usage " +
                     "access. An alternative to locking the phone that still lets you " +
@@ -375,14 +380,6 @@ fun SettingsScreen(
                 onOpenPicker = viewModel::loadInstalledApps,
                 onToggle = viewModel::toggleStudyApp,
                 onFocusCreditApp = viewModel::setFocusCreditApp
-            )
-
-            HorizontalDivider()
-
-            SpotifySection(
-                playlistUri = settings.spotifyPlaylistUri,
-                installed = viewModel.spotifyInstalled,
-                onPlaylistChange = viewModel::setSpotifyPlaylistUri
             )
 
             HorizontalDivider()
@@ -423,7 +420,7 @@ fun SettingsScreen(
                 ActivityResultContracts.CreateDocument("text/csv")
             ) { uri -> uri?.let(viewModel::exportCsv) }
             OutlinedButton(
-                onClick = { csvLauncher.launch("wakeproof-history.csv") },
+                onClick = { csvLauncher.launch("eulers-lab-history.csv") },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Export history as CSV") }
 
@@ -468,9 +465,9 @@ fun SettingsScreen(
             Text(
                 // Read from BuildConfig so the About line cannot drift from the
                 // version actually shipped.
-                text = "WakeProof ${BuildConfig.VERSION_NAME} — alarms you can only " +
-                    "dismiss by proving it. " +
-                    "Pushups are counted on the device; nothing from the camera leaves it.",
+                text = "Euler's Lab ${BuildConfig.VERSION_NAME} — named after Leonhard Euler " +
+                    "(1707–1783). Alarms you can only dismiss by proving it; pushups are " +
+                    "counted on the device, and nothing from the camera leaves it.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -531,74 +528,9 @@ fun SettingsScreen(
 }
 
 /**
- * Spotify hand-off settings: the playlist the study button opens (paste the
- * "Share → Copy link" URL). Whether playback follows the timer is not a switch
- * here — it follows from picking Spotify as the study sound on the Pomodoro
- * screen. No Spotify login happens either: WakeProof only deep-links out and
- * sends media keys, so there is nothing to authorise.
- */
-@Composable
-private fun SpotifySection(
-    playlistUri: String,
-    installed: Boolean,
-    onPlaylistChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Seeded once per saved value: typing must not be clobbered by DataStore emissions.
-    var draft by remember(playlistUri) { mutableStateOf(playlistUri) }
-
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = "Spotify", style = MaterialTheme.typography.titleMedium)
-        if (!installed) {
-            Text(
-                text = "Spotify isn't installed — the button on the Pomodoro screen will " +
-                    "offer to install it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Focus playlist link") },
-            placeholder = { Text("https://open.spotify.com/playlist/…") },
-            singleLine = true
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { onPlaylistChange(draft) },
-                enabled = draft.trim() != playlistUri
-            ) { Text("Save") }
-            if (playlistUri.isNotBlank()) {
-                OutlinedButton(
-                    onClick = {
-                        draft = ""
-                        onPlaylistChange("")
-                    }
-                ) { Text("Clear") }
-            }
-        }
-        Text(
-            text = "In Spotify: playlist → ⋯ → Share → Copy link, then paste it here. " +
-                "Left blank, the button just opens Spotify.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "To let Spotify be your study sound, pick it in the sound row on the " +
-                "Pomodoro screen. It then plays and pauses with the timer, and no ambient " +
-                "loop plays underneath it.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-/**
- * Opt-in to WakeProof's minimalist home screen. Uses the system's own
+ * Opt-in to Euler's Lab's minimalist home screen. Uses the system's own
  * default-home request rather than a switch of ours, so it is always the phone,
- * not WakeProof, that decides what Home opens — and going back to One UI Home
+ * not Euler's Lab, that decides what Home opens — and going back to One UI Home
  * is the same system screen every other launcher uses.
  */
 @Composable
@@ -625,7 +557,7 @@ private fun LauncherSection(modifier: Modifier = Modifier) {
         )
         if (isHome) {
             Text(
-                text = "✓ WakeProof is your home screen.",
+                text = "✓ Euler's Lab is your home screen.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -645,7 +577,7 @@ private fun LauncherSection(modifier: Modifier = Modifier) {
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Use WakeProof as home screen") }
+            ) { Text("Use Euler's Lab as home screen") }
         }
     }
 }
@@ -667,10 +599,10 @@ private fun UninstallLockSection(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(text = "Uninstall lock", style = MaterialTheme.typography.titleMedium)
         Text(
-            text = "Makes WakeProof a device admin (not device owner, so Samsung services " +
+            text = "Makes Euler's Lab a device admin (not device owner, so Samsung services " +
                 "keep working). Android then refuses to uninstall it, and the screen that " +
                 "switches the admin off is walled, along with other apps' admin screens. " +
-                "There is no off button. A computer (adb), Safe Mode, taking away WakeProof's " +
+                "There is no off button. A computer (adb), Safe Mode, taking away Euler's Lab's " +
                 "usage access or display-over-apps permission, or a factory reset still gets " +
                 "past it.",
             style = MaterialTheme.typography.bodySmall,
@@ -678,7 +610,7 @@ private fun UninstallLockSection(modifier: Modifier = Modifier) {
         )
         if (active) {
             Text(
-                text = "🔒 On. WakeProof cannot be uninstalled.",
+                text = "🔒 On. Euler's Lab cannot be uninstalled.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )

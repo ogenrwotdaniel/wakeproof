@@ -10,8 +10,8 @@ class TopThreeStoreTest {
     private fun hm(h: Int, m: Int) = h * 60 + m
 
     @Test
-    fun `the ask is ten minutes before bed`() {
-        assertEquals(hm(19, 50), TOP_THREE_MINUTES)
+    fun `the ask is twenty minutes before bed at 19 40`() {
+        assertEquals(hm(19, 40), TOP_THREE_MINUTES)
     }
 
     @Test
@@ -63,13 +63,13 @@ class TopThreeStoreTest {
         assertEquals(9L, topThreeEveningDay(today = 10, minuteOfDay = hm(0, 15)))
         assertEquals(9L, topThreeEveningDay(today = 10, minuteOfDay = hm(2, 59)))
         assertEquals(10L, topThreeEveningDay(today = 10, minuteOfDay = hm(3, 0)))
-        assertEquals(10L, topThreeEveningDay(today = 10, minuteOfDay = hm(19, 50)))
+        assertEquals(10L, topThreeEveningDay(today = 10, minuteOfDay = hm(19, 40)))
     }
 
     @Test
-    fun `the evening card shows from 19 50 to midnight`() {
-        assertFalse(topThreeEvening(hm(19, 49)))
-        assertTrue(topThreeEvening(hm(19, 50)))
+    fun `the evening card shows from 19 40 to midnight`() {
+        assertFalse(topThreeEvening(hm(19, 39)))
+        assertTrue(topThreeEvening(hm(19, 40)))
         assertTrue(topThreeEvening(hm(23, 59)))
         assertFalse(topThreeEvening(hm(0, 0)))
     }

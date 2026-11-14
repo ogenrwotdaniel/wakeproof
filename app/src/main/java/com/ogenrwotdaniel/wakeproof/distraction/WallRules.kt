@@ -29,32 +29,32 @@ enum class WallRule(val key: String, val default: Int) {
     GATE_BROWSERS("gate_browsers", RULE_ON),
 
     /**
-     * Gated apps stay completely shut from Friday 00:00 through Sunday 24:00,
-     * reopening Monday at the open window (2026-11-06, user's choice).
+     * Gated apps stay completely shut from Monday 00:00 through Friday 24:00,
+     * opening only on Saturday and Sunday during the open window (2026-11-14,
+     * user's choice).
      */
     WEEKEND_SHUT("weekend_shut", RULE_ON),
 
     /**
      * Minute of the day the bedtime wall starts. It lasts until
-     * [BEDTIME_END_MINUTES] (15:00 to 08:20 since 2026-11-11; 16:00 to 08:40
-     * before that).
+     * [BEDTIME_END_MINUTES] (16:00 to 08:20 since 2026-11-14, starting as the
+     * 14:00–16:00 weekend window closes).
      */
-    BEDTIME_START_MINUTES("bedtime_start_minutes", 15 * 60),
+    BEDTIME_START_MINUTES("bedtime_start_minutes", 16 * 60),
 
     /** Do Not Disturb for the whole of a focus session. */
     SESSION_DND("session_dnd", RULE_ON),
 
     /**
-     * Minute of the day the gated apps' open window starts, Monday to Thursday
-     * ([WEEKEND_SHUT] keeps Friday–Sunday shut). Covers social, video,
-     * messaging, the Google app, Play Store and browsers. 08:20–08:50 since
-     * 2026-11-11 (the user leaves home at 08:20): 30 minutes, with no wait and
-     * no budget.
+     * Minute of the day the gated apps' open window starts, Saturday and Sunday
+     * ([WEEKEND_SHUT] keeps Monday–Friday shut all day). Covers social, video,
+     * messaging, the Google app, Play Store and browsers. 14:00–16:00 (2pm–4pm)
+     * since 2026-11-14 (user's choice).
      */
-    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 8 * 60 + 20),
+    OPEN_WINDOW_START_MINUTES("open_window_start_minutes", 14 * 60),
 
     /** Minute of the day the open window closes (exclusive). */
-    OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 8 * 60 + 50);
+    OPEN_WINDOW_END_MINUTES("open_window_end_minutes", 16 * 60);
 
     /**
      * Pure: what this rule is in force at, given what a device [stored] while
@@ -77,11 +77,13 @@ const val RULE_OFF = 0
 const val RULE_OFF_MINUTES = -1
 const val MINUTES_PER_DAY = 24 * 60
 
-/** Days of the week on which [WallRule.WEEKEND_SHUT] keeps gated apps closed all day. */
+/** Days of the week on which [WallRule.WEEKEND_SHUT] keeps gated apps closed all day (Monday–Friday). */
 val WEEKEND_SHUT_DAYS: Set<DayOfWeek> = setOf(
-    DayOfWeek.FRIDAY,
-    DayOfWeek.SATURDAY,
-    DayOfWeek.SUNDAY
+    DayOfWeek.MONDAY,
+    DayOfWeek.TUESDAY,
+    DayOfWeek.WEDNESDAY,
+    DayOfWeek.THURSDAY,
+    DayOfWeek.FRIDAY
 )
 
 /**
@@ -119,9 +121,9 @@ class WallRulesRepository @Inject constructor(@ApplicationContext private val co
 
 /**
  * Pure: the rules in force given what was [stored] per rule. A stored window
- * that no longer leaves any minute open (one narrowed back when bedtime lifted
- * at 07:00 now sits under the 08:20 end) falls back to the fixed window: with
- * nothing left to edit, it would otherwise shut gated apps for good.
+ * that no longer leaves any minute open (e.g. a morning window from before the
+ * weekend 14:00–16:00 move) falls back to the fixed window: with nothing left
+ * to edit, it would otherwise shut gated apps for good.
  */
 fun fixedRules(stored: (WallRule) -> Int?): WallRules {
     val rules = WallRules(WallRule.entries.associateWith { it.fixedOrStricter(stored(it)) })
@@ -150,8 +152,7 @@ fun gatedOpenWindow(rules: WallRules): Pair<Int, Int>? {
 
 /**
  * The bedtime wall lifts at this minute of the day, alarm or not (user's choice,
- * 2026-11-08). Since 2026-11-11 it is the minute the open window starts, so
- * gated apps have the whole of 08:20–08:50 Monday to Thursday.
+ * 2026-11-08).
  */
 const val BEDTIME_END_MINUTES = 8 * 60 + 20
 
@@ -164,7 +165,7 @@ const val BEDTIME_END_MINUTES = 8 * 60 + 20
 fun bedtimeActive(minuteOfDay: Int, startMinutes: Int): Boolean =
     startMinutes >= 0 && (minuteOfDay >= startMinutes || minuteOfDay < BEDTIME_END_MINUTES)
 
-/** Pure: whether gated apps are shut all day on [dayOfWeek] under [WallRule.WEEKEND_SHUT]. */
+/** Pure: whether gated apps are shut all day on [dayOfWeek] under [WallRule.WEEKEND_SHUT] (Monday–Friday). */
 fun weekendShutActive(dayOfWeek: DayOfWeek, weekendShut: Boolean): Boolean =
     weekendShut && dayOfWeek in WEEKEND_SHUT_DAYS
 
@@ -179,7 +180,7 @@ fun outsideOpenWindow(minuteOfDay: Int, startMinutes: Int, endMinutes: Int): Boo
 
 /**
  * Pure: whether a gated app is shut by the schedule on [dayOfWeek] at
- * [minuteOfDay] — either all day Friday–Sunday ([weekendShutActive]) or
+ * [minuteOfDay] — either all day Monday–Friday ([weekendShutActive]) or
  * outside `[startMinutes, endMinutes)` ([outsideOpenWindow]).
  */
 fun windowShutActive(
@@ -195,8 +196,8 @@ fun windowShutActive(
 /**
  * Pure: when an app whose daily cap is spent on [today] can actually be used
  * again after today. Null means midnight tonight (ordinary countdown); otherwise
- * a concrete phrase such as `"tomorrow at 08:20"`, `"Monday at 08:20"`, or
- * `"Monday"`. An empty window (`endMinutes <= startMinutes` with a non-negative
+ * a concrete phrase such as `"tomorrow at 14:00"`, `"Saturday at 14:00"`, or
+ * `"Saturday"`. An empty window (`endMinutes <= startMinutes` with a non-negative
  * start) returns null rather than promising an opening that will not happen.
  */
 fun nextOpenAfterToday(
@@ -212,8 +213,8 @@ fun nextOpenAfterToday(
     if (hasWindow && endMinutes <= startMinutes) return null
     val shutTomorrow = weekendShutActive(today.plus(1), weekendShut)
     return when {
-        shutTomorrow && hasWindow -> "Monday at ${formatClock(startMinutes)}"
-        shutTomorrow -> "Monday"
+        shutTomorrow && hasWindow -> "Saturday at ${formatClock(startMinutes)}"
+        shutTomorrow -> "Saturday"
         hasWindow -> "tomorrow at ${formatClock(startMinutes)}"
         else -> null
     }
@@ -234,12 +235,12 @@ fun windowWallCopy(
     val validWindow = startMinutes != RULE_OFF_MINUTES && endMinutes > startMinutes
     if (weekendShutActive(today, weekendShut)) {
         val reopens = if (validWindow) {
-            "Monday between ${formatClock(startMinutes)} and ${formatClock(endMinutes)}"
+            "Saturday and Sunday between ${formatClock(startMinutes)} and ${formatClock(endMinutes)}"
         } else {
-            "on Monday"
+            "on Saturday"
         }
-        return "Shut Friday to Sunday" to
-            "$label and every other gated app stay shut from Friday through Sunday. " +
+        return "Shut Monday to Friday" to
+            "$label and every other gated app stay shut from Monday through Friday. " +
             "They open again $reopens. The phone and SMS always work."
     }
     if (!validWindow) {
@@ -247,13 +248,13 @@ fun windowWallCopy(
             "$label and every other gated app are shut right now. The phone and SMS always work."
     }
     val span = "${formatClock(startMinutes)} and ${formatClock(endMinutes)}"
-    val body = if (weekendShut && today == DayOfWeek.THURSDAY && minuteOfDay >= endMinutes) {
-        "$label and every other gated app open Monday to Thursday between $span, " +
-            "and stay shut Friday through Sunday — next open Monday at ${formatClock(startMinutes)}. " +
+    val body = if (weekendShut && today == DayOfWeek.SUNDAY && minuteOfDay >= endMinutes) {
+        "$label and every other gated app open Saturday and Sunday between $span, " +
+            "and stay shut Monday through Friday — next open Saturday at ${formatClock(startMinutes)}. " +
             "The phone and SMS always work."
     } else if (weekendShut) {
-        "$label and every other gated app open Monday to Thursday between $span " +
-            "(shut Friday through Sunday). The phone and SMS always work."
+        "$label and every other gated app open Saturday and Sunday between $span " +
+            "(shut Monday through Friday). The phone and SMS always work."
     } else {
         "$label and every other gated app open only between $span. " +
             "The phone and SMS always work."

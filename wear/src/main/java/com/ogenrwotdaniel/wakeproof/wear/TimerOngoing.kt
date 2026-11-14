@@ -199,7 +199,7 @@ object TimerNotifier {
         }
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("WakeProof")
+            .setContentTitle("Euler's Lab")
             .setContentText(if (snapshot.running) phase else "$phase (paused)")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)

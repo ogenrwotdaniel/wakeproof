@@ -74,10 +74,10 @@ fun nightWallCopy(minuteOfDay: Int, phone: Boolean, formatClock: (Int) -> String
             "Everything but calls, the clock and your alarms is shut until " +
             "${formatClock(SLEEP_END_MINUTES)}. Put it on charge and go to bed."
         sleepWallActive(minuteOfDay) -> "Time to sleep" to
-            "Everything but calls, the camera, the clock, the calendar and WakeProof is shut until " +
+            "Everything but calls, the camera, the clock, the calendar and Euler's Lab is shut until " +
             "${formatClock(PHONE_NIGHT_END_MINUTES)}. Put the phone on charge and go to bed."
         else -> "Phone shut for the night" to
-            "Everything but calls, the camera, the clock, the calendar and WakeProof is shut from " +
+            "Everything but calls, the camera, the clock, the calendar and Euler's Lab is shut from " +
             "${formatClock(PHONE_NIGHT_START_MINUTES)} to ${formatClock(PHONE_NIGHT_END_MINUTES)}."
     }
 

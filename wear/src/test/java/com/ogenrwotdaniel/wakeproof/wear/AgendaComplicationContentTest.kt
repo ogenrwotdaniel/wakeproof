@@ -38,7 +38,7 @@ class AgendaComplicationContentTest {
         assertEquals("Next", c.shortTitle)
         assertEquals("17:30", c.shortText)
         assertEquals("a", c.tapEventKey)
-        assertEquals("WakeProof Today: 17:30 Problem Solving, 19:00 Lecture, 20:00 Lab", c.description)
+        assertEquals("Euler's Lab Today: 17:30 Problem Solving, 19:00 Lecture, 20:00 Lab", c.description)
     }
 
     @Test

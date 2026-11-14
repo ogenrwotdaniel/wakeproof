@@ -1,34 +1,28 @@
 package com.ogenrwotdaniel.wakeproof.pomodoro
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FocusSoundIdTest {
 
     @Test
-    fun `spotify selects no loop`() {
-        assertTrue(FocusSound.isSpotify(FocusSound.SPOTIFY_ID))
-        assertNull(FocusSound.fromId(FocusSound.SPOTIFY_ID))
-    }
-
-    @Test
-    fun `the removed own-music id reads as spotify, not as a loop`() {
-        // An install that picked "My music" in 1.5 wanted music; falling through
-        // to the ambient loop would swap it for rain without saying so.
-        assertTrue(FocusSound.isSpotify("library"))
-        assertNull(FocusSound.fromId("library"))
-    }
-
-    @Test
-    fun `bundled loops and unknown ids are not spotify`() {
+    fun `bundled loops resolve by id`() {
         FocusSound.entries.forEach {
-            assertFalse(FocusSound.isSpotify(it.id))
             assertEquals(it, FocusSound.fromId(it.id))
         }
-        assertFalse(FocusSound.isSpotify("nonsense"))
+    }
+
+    @Test
+    fun `retired or unknown ids fall back to ambient`() {
+        assertEquals(FocusSound.AMBIENT, FocusSound.fromId("spotify"))
+        assertEquals(FocusSound.AMBIENT, FocusSound.fromId("library"))
         assertEquals(FocusSound.AMBIENT, FocusSound.fromId("nonsense"))
+        assertEquals(FocusSound.AMBIENT, FocusSound.fromId(null))
+    }
+
+    @Test
+    fun `removed external sound ids are migrated to ambient`() {
+        assertEquals(FocusSound.AMBIENT.id, FocusSound.normalizedId("spotify"))
+        assertEquals(FocusSound.AMBIENT.id, FocusSound.normalizedId("library"))
     }
 }

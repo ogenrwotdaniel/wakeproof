@@ -265,7 +265,7 @@ fun LauncherScreen(
                 }
                 Spacer(Modifier.height(24.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = onOpenWakeProof) { Text("WakeProof", color = Color.Gray) }
+                    TextButton(onClick = onOpenWakeProof) { Text("Euler's Lab", color = Color.Gray) }
                     TextButton(onClick = { showOthers = true }) { Text("Other apps", color = Color.Gray) }
                 }
             }

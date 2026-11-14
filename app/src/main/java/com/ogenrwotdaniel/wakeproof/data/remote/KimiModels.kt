@@ -3,8 +3,7 @@ package com.ogenrwotdaniel.wakeproof.data.remote
 /**
  * Google Gemini OpenAI-compatible endpoint constants (`ai.google.dev/gemini-api/docs/openai`).
  *
- * Kimi / Moonshot was retired on 2026-11-06; WakeProof talks exclusively to
- * Gemini's free AI Studio tier (`gemini-3.8-flash` GA).
+ * Euler's Lab talks exclusively to Google Gemini's free AI Studio tier (`gemini-3.8-flash` GA).
  */
 const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 const val GEMINI_MODEL = "gemini-3.8-flash"

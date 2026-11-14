@@ -58,6 +58,7 @@ class UsageViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val studyUsageSync: StudyUsageSync,
     private val wallRulesRepository: WallRulesRepository,
+    private val summaryStore: com.ogenrwotdaniel.wakeproof.study.SessionSummaryStore,
     statsRepository: StatsRepository,
     completionRepository: CompletionRepository,
     @ApplicationContext private val context: Context
@@ -89,16 +90,28 @@ class UsageViewModel @Inject constructor(
         }
     }
 
-    private suspend fun buildWeekStats(): WeekStats = WeekStats(
-        days = weekDays.first(),
-        focusBySubject = subjectMinutes.value,
-        screenByDay = _snapshot.value?.week.orEmpty(),
-        topApps = _snapshot.value?.topApps.orEmpty(),
-        dailyGoalMinutes = settingsRepository.settings.first().dailyFocusGoalMinutes,
-        wall = _wallWeek.value,
-        credits = settingsRepository.settings.first().subjectCredits,
-        nights = _nights.value
-    )
+    private suspend fun buildWeekStats(): WeekStats {
+        val days = weekDays.first()
+        val epochRange = if (days.isNotEmpty()) days.first().epochDay..days.last().epochDay else LongRange.EMPTY
+        val weekPhotos = runCatching {
+            summaryStore.list().filter { it.epochDay in epochRange }
+        }.getOrDefault(emptyList())
+        val bySubject = weekPhotos.mapNotNull { it.subject }
+            .groupingBy { it }
+            .eachCount()
+        return WeekStats(
+            days = days,
+            focusBySubject = subjectMinutes.value,
+            screenByDay = _snapshot.value?.week.orEmpty(),
+            topApps = _snapshot.value?.topApps.orEmpty(),
+            dailyGoalMinutes = settingsRepository.settings.first().dailyFocusGoalMinutes,
+            wall = _wallWeek.value,
+            credits = settingsRepository.settings.first().subjectCredits,
+            nights = _nights.value,
+            summaryPages = weekPhotos.size,
+            summaryPagesBySubject = bySubject
+        )
+    }
 
     private val _nights = MutableStateFlow<List<NightScreen>>(emptyList())
 

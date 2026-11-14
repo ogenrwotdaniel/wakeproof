@@ -29,10 +29,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
 import com.ogenrwotdaniel.wakeproof.distraction.SIDELOADED_BUILD
+import com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
 import com.ogenrwotdaniel.wakeproof.distraction.clockUntrusted
-import com.ogenrwotdaniel.wakeproof.distraction.longNightDevice
-import com.ogenrwotdaniel.wakeproof.distraction.nightWallActive
-import com.ogenrwotdaniel.wakeproof.distraction.nightWallEnd
+import com.ogenrwotdaniel.wakeproof.distraction.sleepWallActive
 import com.ogenrwotdaniel.wakeproof.ui.formatAlarmTime
 import java.time.LocalDate
 import java.time.LocalTime
@@ -99,6 +98,8 @@ class StudyBrowserActivity : ComponentActivity() {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             settings.javaScriptEnabled = true // Blackboard Ultra is a script app
             settings.domStorageEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
             // A new window would be a second, unchecked browser: everything opens here.
             settings.setSupportMultipleWindows(false)
             settings.javaScriptCanOpenWindowsAutomatically = false
@@ -144,7 +145,26 @@ class StudyBrowserActivity : ComponentActivity() {
         }
         web = view
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true) // the sign-in hops between hosts
-        setContentView(insetFrame(view))
+        val root = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+            addView(
+                quickBar(view),
+                android.widget.LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            addView(
+                view,
+                android.widget.LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                )
+            )
+        }
+        setContentView(insetFrame(root))
         // A bundle saved from the sleep screen holds no page, so restoring can come back empty.
         if (savedInstanceState == null || view.restoreState(savedInstanceState) == null) {
             view.loadUrl(BLACKBOARD_URL)
@@ -206,10 +226,10 @@ class StudyBrowserActivity : ComponentActivity() {
      */
     private fun asleep(): Boolean = clockDoubted() || nightNow()
 
-    // The night wall's own hours, the phone's longer ones included (the user,
-    // 2026-11-13: "treat it as the rest, after 6pm, shut it down too").
+    // Shut only during actual bed hours (20:00 to 03:00, [sleepWallActive]):
+    // Blackboard & Research opens unrestricted from 03:00 to 20:00 on both phone and tablet.
     private fun nightNow(): Boolean =
-        LocalTime.now().let { nightWallActive(it.hour * 60 + it.minute, longNightDevice(this)) }
+        LocalTime.now().let { com.ogenrwotdaniel.wakeproof.distraction.sleepWallActive(it.hour * 60 + it.minute) }
 
     /** On screen at all, split screen and pop-up view included. */
     private fun visible(): Boolean = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
@@ -240,8 +260,8 @@ class StudyBrowserActivity : ComponentActivity() {
                 "The phone's clock can't be trusted. Turn on automatic date, time and time zone " +
                     "and connect to the internet, then open Blackboard again."
             } else {
-                val end = nightWallEnd(longNightDevice(context))
-                "Shut for the night. Blackboard opens again at ${formatAlarmTime(context, end / 60, end % 60)}."
+                val end = com.ogenrwotdaniel.wakeproof.distraction.SLEEP_END_MINUTES
+                "Shut for the night (20:00–03:00). Blackboard opens again at ${formatAlarmTime(context, end / 60, end % 60)}."
             }
             setTextColor(Color.WHITE)
             textSize = 20f
@@ -277,6 +297,32 @@ class StudyBrowserActivity : ComponentActivity() {
         }
     }
 
+    private fun quickBar(page: WebView): android.view.View {
+        val density = resources.displayMetrics.density
+        val padH = (12 * density).toInt()
+        val padV = (8 * density).toInt()
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(padH, padV / 2, padH, padV / 2)
+        }
+        STUDY_QUICK_TABS.forEach { (label, targetUrl) ->
+            val chip = TextView(this).apply {
+                text = label
+                setTextColor(Color.LTGRAY)
+                textSize = 13f
+                setPadding(padH, padV, padH, padV)
+                setOnClickListener { page.loadUrl(targetUrl) }
+            }
+            row.addView(chip)
+        }
+        return android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(Color.parseColor("#121212"))
+            addView(row)
+        }
+    }
+
     private fun refused(): WebResourceResponse =
         WebResourceResponse("text/plain", "utf-8", 403, "Not a study site", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
 
@@ -285,13 +331,16 @@ class StudyBrowserActivity : ComponentActivity() {
         val uri = Uri.parse(url)
         if (uri.scheme != "https" && uri.scheme != "http") return // intent:, javascript: and the like
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-        Toast.makeText(this, "Only Blackboard and UNIST pages open here", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Only Blackboard and whitelisted research journals open here", Toast.LENGTH_SHORT).show()
     }
 
     private fun download(url: String, userAgent: String, disposition: String?, mimeType: String?) {
         if (!url.startsWith("https://")) return // blob: and data: need the page; Blackboard serves files over https
+        val parsed = Uri.parse(url)
+        val host = parsed.host?.lowercase() ?: return
+        if (!studyPartAllowed(host)) return
         val name = URLUtil.guessFileName(url, disposition, mimeType)
-        val request = DownloadManager.Request(Uri.parse(url))
+        val request = DownloadManager.Request(parsed)
             .setMimeType(mimeType)
             .addRequestHeader("User-Agent", userAgent)
             .apply { CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) } }

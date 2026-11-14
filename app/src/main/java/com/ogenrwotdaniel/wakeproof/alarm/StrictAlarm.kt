@@ -89,7 +89,13 @@ object StrictAlarm {
      * kept them from ringing; without this they would start ringing with snooze
      * and emergency dismiss the day the slots moved.
      */
-    val RETIRED_SLOTS = listOf(Slot(5, 30), Slot(4, 0), Slot(6, 5), Slot(5, 40))
+    val RETIRED_SLOTS = listOf(
+        Slot(5, 30),
+        Slot(4, 0),
+        Slot(6, 5),
+        Slot(5, 40),
+        Slot(19, 50, AlarmType.SHUTDOWN, hard = false)
+    )
 
     /** Minutes of the day an unlocked alarm of [type] is kept silent on: current and retired slots. */
     fun silentMinutes(type: AlarmType): Set<Int> =

@@ -1,4 +1,4 @@
-// WakeProof Clip — the clipboard's eyes and hands on GNOME Wayland.
+// Euler's Lab Clip — the clipboard's eyes and hands on GNOME Wayland.
 //
 // A background process cannot watch the clipboard on GNOME Wayland, so this
 // extension does only that: on every CLIPBOARD owner change it reads the new
@@ -6,7 +6,7 @@
 // daemon emits Incoming it sets the clipboard. No networking, no key.
 // Wire contract: docs/CLIPBOARD.md.
 //
-// It also adds a "WakeProof Clip" tile to Quick Settings (TileController below):
+// It also adds an "Euler's Lab Clip" tile to Quick Settings (TileController below):
 // on/off, paired devices, and pairing with an on-screen QR, all through the
 // daemon's local control methods (GetStatus, SetEnabled, StartPairing, ...).
 
@@ -37,11 +37,11 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const DEBOUNCE_MS = 150;
 const ECHO_WINDOW_US = 10 * GLib.USEC_PER_SEC;
 
-const TITLE = 'WakeProof Clip';
+const TITLE = "Euler's Lab Clip";
 const ICON = 'edit-paste-symbolic';
 const QR_SIZE = 280;
 const PAIR_INSTRUCTIONS =
-    'On your phone or tablet: WakeProof \u2192 Settings \u2192 Clipboard across devices \u2192 Pair a computer';
+    "On your phone or tablet: Euler's Lab \u2192 Settings \u2192 Clipboard across devices \u2192 Pair a computer";
 const CALL_TIMEOUT_MS = 10000;
 const SUBTITLE_TICK_S = 30;
 const PAIRED_CLOSE_MS = 2000;
@@ -205,7 +205,7 @@ class PairDialog {
         if (this._finished)
             return;
         this._finish();
-        this._show('The WakeProof Clip service stopped.', true);
+        this._show("The Euler's Lab Clip service stopped.", true);
         this._setButton('Close', false);
     }
 
@@ -218,7 +218,7 @@ class PairDialog {
         try {
             this.dialog?.close();
         } catch (e) {
-            console.debug(`WakeProof Clip: closing the pairing dialog: ${e}`);
+            console.debug(`Euler's Lab Clip: closing the pairing dialog: ${e}`);
         }
     }
 
@@ -461,7 +461,7 @@ class TileController {
             if (!dir) {
                 const pictures = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES) ??
                     GLib.build_filenamev([GLib.get_home_dir(), 'Pictures']);
-                dir = GLib.build_filenamev([pictures, 'WakeProof Clip']);
+                dir = GLib.build_filenamev([pictures, "Euler's Lab Clip"]);
             }
             GLib.mkdir_with_parents(dir, 0o755);
             Gio.AppInfo.launch_default_for_uri(GLib.filename_to_uri(dir, null),
@@ -469,6 +469,15 @@ class TileController {
         } catch (e) {
             Main.notify(TITLE, `Could not open the folder: ${e.message}`);
         }
+    }
+
+    _forget() {
+        this._call('ForgetPairing', null, null,
+            () => {
+                this._refresh();
+                Main.notify(TITLE, 'Pairing revoked on this computer.');
+            },
+            e => Main.notify(TITLE, `Could not revoke pairing: ${errorText(e)}`));
     }
 
     // --- rendering -----------------------------------------------------------
@@ -532,6 +541,8 @@ class TileController {
         }
         section.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         action(s?.pairing?.active ? 'Show pairing code\u2026' : 'Pair a device\u2026', () => this._pair());
+        if (s?.paired)
+            action('Revoke pairing', () => this._forget());
         action('Open received images', () => this._openImages());
     }
 }

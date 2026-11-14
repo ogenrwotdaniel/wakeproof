@@ -19,37 +19,44 @@ import kotlinx.serialization.json.put
  * (`{"type":"json_object"}`).
  */
 @Serializable
-data class KimiChatRequest(
+data class GeminiChatRequest(
     val model: String,
-    val messages: List<KimiMessage>,
+    val messages: List<GeminiMessage>,
     @SerialName("max_tokens") val maxTokens: Int? = null,
     @SerialName("reasoning_effort") val reasoningEffort: String? = null,
-    @SerialName("response_format") val responseFormat: KimiResponseFormat? = null
+    @SerialName("response_format") val responseFormat: GeminiResponseFormat? = null
 )
 
 @Serializable
-data class KimiResponseFormat(val type: String)
+data class GeminiResponseFormat(val type: String)
 
 @Serializable
-data class KimiMessage(val role: String, val content: JsonElement)
+data class GeminiMessage(val role: String, val content: JsonElement)
 
 @Serializable
-data class KimiChatResponse(
+data class GeminiChatResponse(
     val id: String? = null,
-    val choices: List<KimiChoice> = emptyList()
+    val choices: List<GeminiChoice> = emptyList()
 )
 
 @Serializable
-data class KimiChoice(
+data class GeminiChoice(
     val index: Int = 0,
-    val message: KimiResponseMessage? = null
+    val message: GeminiResponseMessage? = null
 )
 
 @Serializable
-data class KimiResponseMessage(
+data class GeminiResponseMessage(
     val role: String? = null,
     val content: String? = null
 )
+
+typealias KimiChatRequest = GeminiChatRequest
+typealias KimiResponseFormat = GeminiResponseFormat
+typealias KimiMessage = GeminiMessage
+typealias KimiChatResponse = GeminiChatResponse
+typealias KimiChoice = GeminiChoice
+typealias KimiResponseMessage = GeminiResponseMessage
 
 /** Plain-text message content. */
 fun textContent(text: String): JsonElement = JsonPrimitive(text)

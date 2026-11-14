@@ -37,7 +37,7 @@ data class ClipConfig(
 
 /**
  * The clip key K and the pairing it came from, in EncryptedSharedPreferences
- * (same pattern as `KimiKeyStore`). K never leaves this store except inside a
+ * (same pattern as `GeminiKeyStore`). K never leaves this store except inside a
  * pairing exchange; it never goes to the cloud.
  */
 @Singleton

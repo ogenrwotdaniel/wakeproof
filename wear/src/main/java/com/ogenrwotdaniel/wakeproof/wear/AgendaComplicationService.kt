@@ -55,7 +55,7 @@ class AgendaComplicationService : SuspendingComplicationDataSourceService() {
             longText = "+2 more",
             shortTitle = "Next",
             shortText = "17:30",
-            description = "WakeProof Today: 17:30 Problem Solving and 2 more",
+            description = "Euler's Lab Today: 17:30 Problem Solving and 2 more",
             tapEventKey = null
         ),
         tap = null

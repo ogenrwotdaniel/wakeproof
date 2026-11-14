@@ -9,10 +9,17 @@ import org.junit.Test
 class PhotoShelfTest {
 
     @Test
-    fun `a page photo's file name carries its day and moment and reads back`() {
+    fun `a page photo's file name carries its day, moment, and optional subject and reads back`() {
         val name = photoFileName("summary", epochDay = 20_769L, takenAtMillis = 1_794_471_660_000L)
         assertEquals("summary_20769_1794471660000.jpg", name)
         assertEquals(20_769L to 1_794_471_660_000L, parsePhotoFileName("summary", name))
+
+        val withSubject = photoFileName("summary", epochDay = 20_769L, takenAtMillis = 1_794_471_660_000L, subject = "Real Analysis")
+        assertEquals("summary_20769_1794471660000_Real-Analysis.jpg", withSubject)
+        assertEquals(
+            Triple(20_769L, 1_794_471_660_000L, "Real Analysis"),
+            parsePhotoFileMeta("summary", withSubject)
+        )
     }
 
     @Test

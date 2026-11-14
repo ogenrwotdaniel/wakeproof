@@ -69,4 +69,4 @@ const val CURRENT_BACKUP_VERSION = 2
  * Date-first rather than name-first because the only question ever asked of a
  * pile of these is "which is the newest".
  */
-fun backupFilename(isoDate: String): String = "wakeproof-backup-$isoDate.json"
+fun backupFilename(isoDate: String): String = "eulers-lab-backup-$isoDate.json"

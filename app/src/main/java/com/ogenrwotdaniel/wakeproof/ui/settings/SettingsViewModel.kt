@@ -16,8 +16,8 @@ import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityChecker
 import com.ogenrwotdaniel.wakeproof.alarm.ReliabilityStatus
 import com.ogenrwotdaniel.wakeproof.data.AlarmRepository
 import com.ogenrwotdaniel.wakeproof.data.CompletionRepository
-import com.ogenrwotdaniel.wakeproof.data.KimiRepository
-import com.ogenrwotdaniel.wakeproof.data.KimiResult
+import com.ogenrwotdaniel.wakeproof.data.GeminiRepository
+import com.ogenrwotdaniel.wakeproof.data.GeminiResult
 import com.ogenrwotdaniel.wakeproof.data.InstalledApp
 import com.ogenrwotdaniel.wakeproof.data.SettingsRepository
 import com.ogenrwotdaniel.wakeproof.data.UsageStatsRepository
@@ -25,7 +25,6 @@ import com.ogenrwotdaniel.wakeproof.data.WakeProofSettings
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.db.Alarm
 import com.ogenrwotdaniel.wakeproof.data.db.AlarmType
-import com.ogenrwotdaniel.wakeproof.pomodoro.SpotifyController
 import com.ogenrwotdaniel.wakeproof.verify.math.MathChallenge
 import com.ogenrwotdaniel.wakeproof.pomodoro.PomodoroTimerService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -53,7 +52,7 @@ import kotlinx.coroutines.launch
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val keyStore: ApiKeyStore,
-    private val kimiRepository: KimiRepository,
+    private val geminiRepository: GeminiRepository,
     private val alarmRepository: AlarmRepository,
     private val alarmScheduler: AlarmScheduler,
     private val alarmDevicePolicy: AlarmDevicePolicy,
@@ -63,8 +62,7 @@ class SettingsViewModel @Inject constructor(
     private val completionRepository: CompletionRepository,
     private val reliabilityChecker: ReliabilityChecker,
     private val backupRepository: BackupRepository,
-    private val usageStatsRepository: UsageStatsRepository,
-    spotifyController: SpotifyController
+    private val usageStatsRepository: UsageStatsRepository
 ) : ViewModel() {
 
     private val _exportMessage = MutableStateFlow<String?>(null)
@@ -259,6 +257,10 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setMathEulerMode(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setMathEulerMode(value) }
+    }
+
     fun setEmergencyHoldSeconds(value: Int) {
         viewModelScope.launch { settingsRepository.setEmergencyHoldSeconds(value.coerceIn(30, 120)) }
     }
@@ -293,13 +295,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setSessionKeepScreenOn(value: Boolean) {
         viewModelScope.launch { settingsRepository.setSessionKeepScreenOn(value) }
-    }
-
-    /** True when the Spotify app is present, so the UI can adapt its wording. */
-    val spotifyInstalled: Boolean = spotifyController.isInstalled()
-
-    fun setSpotifyPlaylistUri(value: String) {
-        viewModelScope.launch { settingsRepository.setSpotifyPlaylistUri(value) }
     }
 
     fun setFocusQuotes(value: Boolean) {
@@ -373,12 +368,12 @@ class SettingsViewModel @Inject constructor(
     fun testConnection() {
         _keyState.update { it.copy(testing = true, testResult = null) }
         viewModelScope.launch {
-            val message = when (val result = kimiRepository.testConnection()) {
-                is KimiResult.Success -> "Connected — the key works."
-                is KimiResult.ApiError ->
+            val message = when (val result = geminiRepository.testConnection()) {
+                is GeminiResult.Success -> "Connected — the key works."
+                is GeminiResult.ApiError ->
                     "API error${result.code?.let { " $it" } ?: ""}: ${result.message}"
-                KimiResult.NetworkError -> "Network error — check your connection."
-                KimiResult.NoKey -> "Save a key first."
+                GeminiResult.NetworkError -> "Network error — check your connection."
+                GeminiResult.NoKey -> "Save a key first."
             }
             _keyState.update { it.copy(testing = false, testResult = message) }
         }

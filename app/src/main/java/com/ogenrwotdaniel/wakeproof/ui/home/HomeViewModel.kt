@@ -69,6 +69,30 @@ class HomeViewModel @Inject constructor(
     /** The session summary still owed its photo; the screen decides if it is still due. */
     val summary: StateFlow<com.ogenrwotdaniel.wakeproof.study.SummaryState> = summaryStore.state
 
+    /** Handwritten derivation pages photographed over the last 7 days (Euler's daily output metric). */
+    val summariesThisWeek: StateFlow<Int> = summaryStore.revision
+        .map {
+            val today = LocalDate.now().toEpochDay()
+            val window = (today - 6)..today
+            runCatching { summaryStore.list().count { it.epochDay in window } }.getOrDefault(0)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    /** Handwritten derivation pages per course over the last 7 days. */
+    val summariesBySubjectThisWeek: StateFlow<Map<String, Int>> = summaryStore.revision
+        .map {
+            val today = LocalDate.now().toEpochDay()
+            val window = (today - 6)..today
+            runCatching {
+                summaryStore.list()
+                    .filter { it.epochDay in window }
+                    .mapNotNull { it.subject }
+                    .groupingBy { it }
+                    .eachCount()
+            }.getOrDefault(emptyMap())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     private val grants = MutableStateFlow(readGrants())
 
     private fun readGrants() =

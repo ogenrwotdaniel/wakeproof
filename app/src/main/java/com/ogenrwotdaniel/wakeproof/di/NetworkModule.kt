@@ -3,9 +3,9 @@ package com.ogenrwotdaniel.wakeproof.di
 import com.ogenrwotdaniel.wakeproof.data.remote.AndroidImageCompressor
 import com.ogenrwotdaniel.wakeproof.data.remote.ApiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.remote.GEMINI_BASE_URL
+import com.ogenrwotdaniel.wakeproof.data.remote.GeminiApi
+import com.ogenrwotdaniel.wakeproof.data.remote.GeminiKeyStore
 import com.ogenrwotdaniel.wakeproof.data.remote.ImageCompressor
-import com.ogenrwotdaniel.wakeproof.data.remote.KimiApi
-import com.ogenrwotdaniel.wakeproof.data.remote.KimiKeyStore
 import com.ogenrwotdaniel.wakeproof.verify.MotivationSource
 import com.ogenrwotdaniel.wakeproof.verify.OfflineMotivation
 import dagger.Module
@@ -20,14 +20,14 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
-/** Gemini API networking and verification singletons. */
+/** Google Gemini API networking and verification singletons. */
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideApiKeyStore(store: KimiKeyStore): ApiKeyStore = store
+    fun provideApiKeyStore(store: GeminiKeyStore): ApiKeyStore = store
 
     @Provides
     @Singleton
@@ -49,14 +49,14 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideKimiApi(client: OkHttpClient): KimiApi {
+    fun provideGeminiApi(client: OkHttpClient): GeminiApi {
         val json = Json { ignoreUnknownKeys = true; isLenient = true }
         return Retrofit.Builder()
             .baseUrl(GEMINI_BASE_URL)
             .client(client)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
-            .create(KimiApi::class.java)
+            .create(GeminiApi::class.java)
     }
 
     /**

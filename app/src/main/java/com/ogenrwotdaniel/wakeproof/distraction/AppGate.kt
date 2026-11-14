@@ -116,6 +116,9 @@ object AppGate {
     /** UNIST Smart-Check (attendance). */
     const val UNIST_SMART_CHECK = "kr.ac.unist.atdc"
 
+    /** Mirae Technology AnyOTP (UNIST 2FA / OTP). */
+    const val ANY_OTP = "com.dreammirae.otp.android.mirae.multiid.market"
+
 
     /**
      * Browsers, named outright for the same reason as [KNOWN_GATED_PACKAGES];

@@ -60,9 +60,9 @@ class StrictAlarmTest {
     }
 
     @Test
-    fun `the 03 00 pushups and the 19 50 top three are pinned, under keys never reused`() {
+    fun `the 03 00 pushups and the 19 40 top three are pinned, under keys never reused`() {
         assertEquals(
-            listOf(StrictAlarm.Slot(3, 0), StrictAlarm.Slot(19, 50, AlarmType.SHUTDOWN, hard = false)),
+            listOf(StrictAlarm.Slot(3, 0), StrictAlarm.Slot(19, 40, AlarmType.SHUTDOWN, hard = false)),
             StrictAlarm.SLOTS
         )
         // Key 3 was the 19:30 review: the top three takes a new one.
@@ -72,6 +72,7 @@ class StrictAlarmTest {
         assertEquals(listOf(1, 2, 3), StrictAlarm.DROPPED_KEYS)
         // An old copy of the 05:40 pushups synced back stays silent.
         assertTrue(5 * 60 + 40 in StrictAlarm.silentMinutes(AlarmType.PUSHUP))
+        assertTrue(isStrictLabel("Locked 19:50"))
     }
 
     @Test
@@ -82,12 +83,12 @@ class StrictAlarmTest {
             // The old 19:30 evening review, synced back: a stray.
             alarm(1, type = AlarmType.SHUTDOWN, hour = 19, minute = 30),
             // On the slot's minute: this device's locked row, or the phone's seen from the tablet.
-            alarm(2, type = AlarmType.SHUTDOWN, hour = 19, minute = 50),
+            alarm(2, type = AlarmType.SHUTDOWN, hour = 19, minute = 40),
             alarm(3, type = AlarmType.SHUTDOWN, hour = 21, minute = 0)
         )
         assertEquals(listOf(1L, 3L), retiredAlarms(rows).map { it.id })
-        // Two devices each made the 19:50 row before syncing: one is kept, the same everywhere.
-        val twice = rows + alarm(4, type = AlarmType.SHUTDOWN, hour = 19, minute = 50)
+        // Two devices each made the 19:40 row before syncing: one is kept, the same everywhere.
+        val twice = rows + alarm(4, type = AlarmType.SHUTDOWN, hour = 19, minute = 40)
         assertEquals("s2", fixedSlotRow(twice, StrictAlarm.SLOTS[1])?.syncId)
         assertEquals(listOf(1L, 3L, 4L), retiredAlarms(twice).map { it.id })
         assertEquals(2L, strictAlarmCandidate(twice.reversed(), StrictAlarm.SLOTS[1])?.id)

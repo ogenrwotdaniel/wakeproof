@@ -137,7 +137,7 @@ class ClipDelivery(private val context: Context) {
         const val NOTES_PACKAGE = "com.samsung.android.app.notes"
         private const val NOTIFICATION_TAG = "clip"
         private const val KEEP_FILES = 20
-        const val CLIP_LABEL = "WakeProof Clip"
+        const val CLIP_LABEL = "Euler's Lab Clip"
 
         fun cacheDir(context: Context): File = File(context.cacheDir, "clip").apply { mkdirs() }
 

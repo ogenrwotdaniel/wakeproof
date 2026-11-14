@@ -97,7 +97,7 @@ fun AgendaScreen(
 
             if (!hasPermission) {
                 Text(
-                    text = "WakeProof needs calendar access to list your upcoming " +
+                    text = "Euler's Lab needs calendar access to list your upcoming " +
                         "events (lectures, labs, deadlines) so you can tick them " +
                         "off. Events are read on-device only.",
                     style = MaterialTheme.typography.bodyLarge

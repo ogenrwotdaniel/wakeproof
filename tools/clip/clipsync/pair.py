@@ -106,9 +106,15 @@ def render_qr_png(text: str, path) -> str:
     matrix = qr.get_matrix()  # includes the border
     n = len(matrix)
     scale = max(4, 600 // n)
-    img = Image.new("L", (n, n), 255)
-    img.putdata([0 if cell else 255 for row in matrix for cell in row])
-    img = img.resize((n * scale, n * scale), Image.NEAREST)
+    size = n * scale
+    raw = bytes(
+        0 if cell else 255
+        for row in matrix
+        for _ in range(scale)
+        for cell in row
+        for _ in range(scale)
+    )
+    img = Image.frombytes("L", (size, size), raw)
     path = os.fspath(path)
     tmp = f"{path}.tmp"
     img.save(tmp, format="PNG")
@@ -217,7 +223,7 @@ def run_pair(store=None) -> int:
         print(f"Cannot listen on port {PAIR_PORT} ({e}). Is the daemon already pairing?", file=sys.stderr)
         return 1
     _print_qr(server.qr_text(addrs, cfg["name"]))
-    print(f"\nScan with WakeProof: Settings -> Clipboard across devices -> Pair a computer.")
+    print(f"\nScan with Euler's Lab: Settings -> Clipboard across devices -> Pair a computer.")
     print(f"Listening on {', '.join(addrs)} port {PAIR_PORT} for {PAIR_WINDOW_S // 60} minutes.")
 
     server.start()

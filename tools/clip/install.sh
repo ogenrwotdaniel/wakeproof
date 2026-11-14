@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the laptop half of WakeProof Clip for the current user:
+# Installs the laptop half of Euler's Lab Clip for the current user:
 # the GNOME Shell extension and the clipsync user service.
 set -euo pipefail
 

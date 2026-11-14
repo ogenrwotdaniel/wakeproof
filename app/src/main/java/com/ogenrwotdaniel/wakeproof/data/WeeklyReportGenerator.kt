@@ -22,7 +22,11 @@ data class WeekStats(
     /** Credits per course; empty when none are set, and then balance is not judged. */
     val credits: Map<String, Int> = emptyMap(),
     /** Screen use inside the sleep wall, night by night; empty when not measured. */
-    val nights: List<NightScreen> = emptyList()
+    val nights: List<NightScreen> = emptyList(),
+    /** Handwritten closed-book derivation pages photographed across the 7-day window. */
+    val summaryPages: Int = 0,
+    /** Handwritten derivation pages per course/subject across the 7-day window. */
+    val summaryPagesBySubject: Map<String, Int> = emptyMap()
 ) {
     /** The goal [day] was scored against: its own (raised before an exam), else the set one. */
     fun goalOf(day: DayStat): Int = day.focusGoalMinutes.takeIf { it > 0 } ?: dailyGoalMinutes
@@ -97,6 +101,15 @@ class WeeklyReportGenerator @Inject constructor() {
         val pushupDays = stats.days.count { it.pushupDone }
         if (pushupDays > 0) {
             lines += "Pushups verified on $pushupDays ${dayWord(pushupDays)}."
+        }
+        if (stats.summaryPages > 0) {
+            val pageWord = if (stats.summaryPages == 1) "page" else "pages"
+            val perCourse = stats.summaryPagesBySubject.entries
+                .filter { it.value > 0 }
+                .sortedByDescending { it.value }
+                .joinToString(", ") { "${it.key} ${it.value}" }
+            val breakdown = if (perCourse.isNotEmpty()) " ($perCourse)" else ""
+            lines += "${stats.summaryPages} handwritten derivation $pageWord$breakdown photographed from memory."
         }
         // Only claim the week was empty when it actually was — a week of pushups
         // and no focus still has a win in it.

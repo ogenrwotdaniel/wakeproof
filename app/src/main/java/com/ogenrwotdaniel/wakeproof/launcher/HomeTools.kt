@@ -15,22 +15,33 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 
 /** Samsung Notes. */
-private const val SAMSUNG_NOTES = "com.samsung.android.app.notes"
+const val SAMSUNG_NOTES = "com.samsung.android.app.notes"
+const val SAMSUNG_NOTES_ADDONS = "com.samsung.android.app.notes.addons"
 
 /** Claude. */
-private const val CLAUDE = "com.anthropic.claude"
+const val CLAUDE = "com.anthropic.claude"
 
 /** Standalone Google Gemini — replaces the gated Google app (`googlequicksearchbox`), 2026-11-06. */
-private const val GEMINI = AppGate.GEMINI_APP
+const val GEMINI = AppGate.GEMINI_APP
 
 /** Microsoft Outlook — UNIST university email, instead of the portal (user's request, 2026-11-09). */
-private const val OUTLOOK = "com.microsoft.office.outlook"
+const val OUTLOOK = "com.microsoft.office.outlook"
 
 /** KakaoBank — added by the user's request, 2026-10-27. */
-private const val KAKAOBANK = AppGate.KAKAOBANK
+const val KAKAOBANK = AppGate.KAKAOBANK
 
 /** UNIST Smart-Check (attendance) — added by the user's request, 2026-11-04. */
-private const val UNIST_SMART_CHECK = AppGate.UNIST_SMART_CHECK
+const val UNIST_SMART_CHECK = AppGate.UNIST_SMART_CHECK
+
+/** Mirae Technology AnyOTP — UNIST 2FA / OTP authenticator. */
+const val ANY_OTP = AppGate.ANY_OTP
+
+/** Known system Camera, Clock, and Calendar packages on Samsung & Google devices. */
+const val SAMSUNG_CAMERA = "com.sec.android.app.camera"
+const val SAMSUNG_CLOCK = "com.sec.android.app.clockpackage"
+const val GOOGLE_CLOCK = "com.google.android.deskclock"
+const val SAMSUNG_CALENDAR = "com.samsung.android.calendar"
+const val GOOGLE_CALENDAR = "com.google.android.calendar"
 
 /**
  * Samsung's Expert RAW camera. The package name is from memory, not read off
@@ -39,17 +50,41 @@ private const val UNIST_SMART_CHECK = AppGate.UNIST_SMART_CHECK
 const val EXPERT_RAW = "com.samsung.android.app.galaxyraw"
 private const val EXPERT_RAW_LABEL = "Expert RAW"
 
+/** System file & photo pickers invoked when uploading/attaching in Blackboard, Notes, Claude, or Gemini. */
+val SYSTEM_DOCUMENT_PICKERS = setOf(
+    "com.google.android.documentsui",
+    "com.android.documentsui",
+    "com.google.android.photopicker",
+    "com.android.providers.media.module",
+    "com.sec.android.app.myfiles"
+)
+
 /**
  * The pins named outright, unlike the ones resolved from a role. Never held by
- * the new-app quarantine: the bank and attendance apps are needed the day they
+ * the new-app quarantine: the bank, OTP, and attendance apps are needed the day they
  * are put back, and a role can be handed to any app, so role pins do not count.
  */
-val NAMED_TOOLS = setOf(EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, OUTLOOK, KAKAOBANK, UNIST_SMART_CHECK)
+val NAMED_TOOLS = setOf(
+    SAMSUNG_CAMERA,
+    EXPERT_RAW,
+    SAMSUNG_NOTES,
+    SAMSUNG_NOTES_ADDONS,
+    CLAUDE,
+    GEMINI,
+    OUTLOOK,
+    KAKAOBANK,
+    UNIST_SMART_CHECK,
+    ANY_OTP,
+    SAMSUNG_CLOCK,
+    GOOGLE_CLOCK,
+    SAMSUNG_CALENDAR,
+    GOOGLE_CALENDAR
+)
 
 /**
  * The tools that are always on the home screen and cannot be unpinned, in
- * order: the phone, the cameras, notes, Claude, Gemini, Outlook,
- * the bank, UNIST attendance, the clock and the calendar.
+ * order: the phone, the cameras, notes, Claude, Gemini, Smart-Check, AnyOTP,
+ * Outlook, the bank, the clock and the calendar.
  * Chosen by the user as things a phone is FOR rather than things it is used
  * to fill time with. Roles (phone, camera, clock, calendar) are resolved from
  * whatever app holds them, so a non-Samsung default still lands here; apps
@@ -70,8 +105,13 @@ fun permanentPackages(context: Context): List<String> {
         Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
     )
     return listOfNotNull(
-        dialer, camera, EXPERT_RAW, SAMSUNG_NOTES, CLAUDE, GEMINI, OUTLOOK, KAKAOBANK, UNIST_SMART_CHECK,
-        clock, calendar
+        dialer,
+        camera, SAMSUNG_CAMERA, EXPERT_RAW,
+        SAMSUNG_NOTES, CLAUDE, GEMINI,
+        UNIST_SMART_CHECK, ANY_OTP,
+        OUTLOOK, KAKAOBANK,
+        clock, SAMSUNG_CLOCK, GOOGLE_CLOCK,
+        calendar, SAMSUNG_CALENDAR, GOOGLE_CALENDAR
     )
         .filter { it != context.packageName }
         .distinct()

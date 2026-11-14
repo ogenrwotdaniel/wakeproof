@@ -22,7 +22,7 @@ data class AgendaComplicationContent(
 object AgendaComplicationTexts {
 
     const val NOTHING_LEFT = "Nothing left today"
-    const val NO_AGENDA = "Open WakeProof on phone"
+    const val NO_AGENDA = "Open Euler's Lab on phone"
     const val CALENDAR_OFF = "Calendar access is off on phone"
     private const val HEADER = "Today"
 
@@ -73,7 +73,7 @@ object AgendaComplicationTexts {
                 longText = below,
                 shortTitle = "Focus",
                 shortText = shortText,
-                description = "WakeProof: $sessionLong. Next: $below",
+                description = "Euler's Lab: $sessionLong. Next: $below",
                 tapEventKey = next?.key
             )
         }
@@ -84,7 +84,7 @@ object AgendaComplicationTexts {
                 longText = emptyText,
                 shortTitle = HEADER,
                 shortText = if (emptyText == NOTHING_LEFT) "Done" else "—",
-                description = "WakeProof Today: $emptyText",
+                description = "Euler's Lab Today: $emptyText",
                 tapEventKey = null
             )
         }
@@ -99,7 +99,7 @@ object AgendaComplicationTexts {
             longText = text,
             shortTitle = if (next.beginMillis <= now) "Now" else "Next",
             shortText = time(next.beginMillis),
-            description = "WakeProof Today: " + remaining.joinToString(", ", transform = ::line),
+            description = "Euler's Lab Today: " + remaining.joinToString(", ", transform = ::line),
             tapEventKey = next.key
         )
     }

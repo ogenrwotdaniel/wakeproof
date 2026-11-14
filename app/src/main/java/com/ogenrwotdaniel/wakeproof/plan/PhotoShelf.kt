@@ -7,8 +7,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 
-/** One kept photo of a handwritten page: a day's plan, or a session's summary. */
-data class PagePhoto(val file: File, val epochDay: Long, val takenAtMillis: Long)
+/** One kept photo of a handwritten page: a session's derivation/summary, optionally tagged with [subject]. */
+data class PagePhoto(
+    val file: File,
+    val epochDay: Long,
+    val takenAtMillis: Long,
+    val subject: String? = null
+)
 
 /** Pure: newest day first, and within a day the latest photo first. */
 fun sortedPages(photos: List<PagePhoto>): List<PagePhoto> =
@@ -27,21 +32,38 @@ fun pagesToPrune(photos: List<PagePhoto>, keepDays: Int = PAGE_KEEP_DAYS): List<
     return photos.filter { it.epochDay !in kept }
 }
 
-/** The file name a kept photo goes under: what it is, its day, the moment it was taken. */
-fun photoFileName(prefix: String, epochDay: Long, takenAtMillis: Long): String =
-    "${prefix}_${epochDay}_$takenAtMillis.jpg"
+/** Sanitizes an optional subject tag for safe embedding in a filename. */
+private fun encodeSubjectSegment(subject: String?): String? {
+    val cleaned = subject?.trim()?.replace(Regex("""[^A-Za-z0-9-]"""), "-")?.trim('-')?.take(32)
+    return cleaned?.takeIf { it.isNotEmpty() }
+}
+
+/** The file name a kept photo goes under: what it is, its day, the moment it was taken, and optional subject. */
+fun photoFileName(prefix: String, epochDay: Long, takenAtMillis: Long, subject: String? = null): String {
+    val subj = encodeSubjectSegment(subject)
+    return if (subj != null) {
+        "${prefix}_${epochDay}_${takenAtMillis}_$subj.jpg"
+    } else {
+        "${prefix}_${epochDay}_$takenAtMillis.jpg"
+    }
+}
 
 /** Pure: the day and moment in a [photoFileName] of [prefix], or null for any other file. */
-fun parsePhotoFileName(prefix: String, name: String): Pair<Long, Long>? {
+fun parsePhotoFileName(prefix: String, name: String): Pair<Long, Long>? =
+    parsePhotoFileMeta(prefix, name)?.let { (day, at, _) -> day to at }
+
+/** Pure: the day, moment, and optional subject in a [photoFileName] of [prefix], or null for any other file. */
+fun parsePhotoFileMeta(prefix: String, name: String): Triple<Long, Long, String?>? {
     if (!name.startsWith(prefix + "_")) return null
     val match = PHOTO_NAME.matchEntire(name.removePrefix(prefix + "_")) ?: return null
     val day = match.groupValues[1].toLongOrNull() ?: return null
     val at = match.groupValues[2].toLongOrNull() ?: return null
-    return day to at
+    val subject = match.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() }?.replace('-', ' ')
+    return Triple(day, at, subject)
 }
 
 // A day before 1970 (a clock set wrong) is negative and must still be listed.
-private val PHOTO_NAME = Regex("""(-?\d+)_(\d+)\.jpg""")
+private val PHOTO_NAME = Regex("""(-?\d+)_(\d+)(?:_([A-Za-z0-9-]+))?\.jpg""")
 
 /**
  * One folder of photographed pages in the app's private storage: the session
@@ -59,11 +81,16 @@ class PhotoShelf(
     /** Bumped on every save and delete, so a library reads again. */
     val revision: StateFlow<Int> = _revision
 
-    /** Writes [jpeg] under [epochDay]. Throws when storage cannot be written. */
-    suspend fun save(jpeg: ByteArray, epochDay: Long, now: Long): PagePhoto = withContext(Dispatchers.IO) {
+    /** Writes [jpeg] under [epochDay] (with optional [subject]). Throws when storage cannot be written. */
+    suspend fun save(
+        jpeg: ByteArray,
+        epochDay: Long,
+        now: Long,
+        subject: String? = null
+    ): PagePhoto = withContext(Dispatchers.IO) {
         val folder = dir()
         if (!folder.isDirectory && !folder.mkdirs()) error("photo folder unavailable")
-        val target = File(folder, photoFileName(prefix, epochDay, now))
+        val target = File(folder, photoFileName(prefix, epochDay, now, subject))
         // Written beside it and renamed: a kill part-way must not leave half a
         // JPEG under a name the library would list.
         val partial = File(folder, target.name + ".part")
@@ -73,7 +100,8 @@ class PhotoShelf(
         } finally {
             partial.delete()
         }
-        val saved = PagePhoto(target, epochDay, now)
+        val parsedSubject = parsePhotoFileMeta(prefix, target.name)?.third
+        val saved = PagePhoto(target, epochDay, now, parsedSubject)
         // Never the photo just taken, even under a day a wrong clock put far
         // back; and a failed clean-up must not fail the save.
         runCatching {
@@ -86,7 +114,9 @@ class PhotoShelf(
     suspend fun list(): List<PagePhoto> = withContext(Dispatchers.IO) { sortedPages(listNow()) }
 
     private fun listNow(): List<PagePhoto> = dir().listFiles().orEmpty().mapNotNull { file ->
-        parsePhotoFileName(prefix, file.name)?.let { (day, at) -> PagePhoto(file, day, at) }
+        parsePhotoFileMeta(prefix, file.name)?.let { (day, at, subject) ->
+            PagePhoto(file, day, at, subject)
+        }
     }
 
     suspend fun delete(photo: PagePhoto) = withContext(Dispatchers.IO) {
